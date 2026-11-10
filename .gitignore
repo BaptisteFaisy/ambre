@@ -1,0 +1,16 @@
+# Ambre build artifacts
+build/
+build-*/
+*.o
+*.a
+*.img
+*.mcap
+*.jsonl
+*.gcda
+*.gcno
+
+# Editors / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store

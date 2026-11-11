@@ -192,3 +192,40 @@ sizecheck:
 
 clean:
 	rm -rf $(BUILD)
+
+# --- quality targets (spec 12.10): coverage > 95%, random-data testing ------
+# Appended by the quality agent. The targets above are untouched; `coverage`
+# uses its own isolated build directory (never the shared $(BUILD)).
+.PHONY: coverage coverage-gate fuzz fuzz-asan
+
+COVBUILD ?= build-cov
+
+coverage:
+	@BUILD=$(COVBUILD) sh scripts/coverage.sh
+
+coverage-gate:
+	@BUILD=$(COVBUILD) COV_MIN=95 sh scripts/coverage.sh --list-uncovered
+
+FUZZ_SRC := $(sort $(wildcard host/fuzz/*.c))
+
+$(BUILD)/ambre-fuzz: $(FUZZ_SRC) $(LIB)
+	@mkdir -p $(BUILD)
+	$(CC) $(CFLAGS) $(FUZZ_SRC) $(LIB) -o $@ $(LDFLAGS) -lm
+
+fuzz: $(BUILD)/ambre-fuzz
+	$(BUILD)/ambre-fuzz --quick
+
+# ASan+UBSan build: every source the fuzzer links is recompiled with the
+# sanitizers, and -fno-sanitize-recover=all turns any finding into a nonzero
+# exit, which the fuzzer counts as a violation and saves as a regression.
+FUZZ_SAN := -fsanitize=address,undefined -fno-sanitize-recover=all \
+            -fno-omit-frame-pointer
+
+$(BUILD)/ambre-fuzz-asan: $(FUZZ_SRC) $(FMT_SRC) $(HOST_SRC)
+	@mkdir -p $(BUILD)
+	$(CC) -std=c11 -O1 -g $(WARN) -Werror $(FUZZ_SAN) -Ifmt -I. -Itests \
+	  -Ihost/simdisk -Ihost/explore -Itarget -Itarget/port -Itarget/ipc \
+	  $(FUZZ_SRC) $(FMT_SRC) $(HOST_SRC) -o $@ $(LDFLAGS) -lm
+
+fuzz-asan: $(BUILD)/ambre-fuzz-asan
+	@ASAN_OPTIONS=detect_leaks=0 $(BUILD)/ambre-fuzz-asan --quick

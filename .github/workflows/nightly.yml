@@ -23,7 +23,7 @@ concurrency:
 jobs:
   explore-full:
     name: exhaustive exploration (every reachable state)
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64, ambre-worker]
     # 30 min : `--states 1000000` is an upper bound; the reachable state space
     # of the reference 30 s scenario measures 64 591 states (334 s exploration,
     # 5 min 37 s wall including build, dev machine 2026-11-11). 30 min keeps a
@@ -33,16 +33,9 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 1
+          clean: false
+          submodules: false
 
-      - name: Toolchain
-        run: |
-          command -v gcc >/dev/null && command -v python3 >/dev/null || {
-            sudo apt-get update -qq
-            sudo apt-get install -y --no-install-recommends build-essential python3
-          }
-          if command -v ccache >/dev/null 2>&1; then
-            echo "CC=ccache gcc" >> "$GITHUB_ENV"
-          fi
 
       - name: ccache cache
         uses: actions/cache@v4
@@ -68,7 +61,7 @@ jobs:
 
   crosscheck:
     name: C vs Python crosscheck (10 000 scenarios)
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Linux, X64, ambre-worker]
     # 15 min : mesuré 2 min 32 s sur la machine de dev (2026-11-11) —
     # 10 000 scénarios, 2 744 840 lignes de décisions comparées, fichiers
     # .dec identiques octet pour octet. Marge >= 5x pour runners plus lents,
@@ -78,16 +71,9 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 1
+          clean: false
+          submodules: false
 
-      - name: Toolchain
-        run: |
-          command -v gcc >/dev/null && command -v python3 >/dev/null || {
-            sudo apt-get update -qq
-            sudo apt-get install -y --no-install-recommends build-essential python3
-          }
-          if command -v ccache >/dev/null 2>&1; then
-            echo "CC=ccache gcc" >> "$GITHUB_ENV"
-          fi
 
       - name: ccache cache
         uses: actions/cache@v4

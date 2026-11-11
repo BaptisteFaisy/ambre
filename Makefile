@@ -52,7 +52,7 @@ TOOLS        := $(BUILD)/ambre-explore $(BUILD)/ambre-dump-truth \
                 $(PROCESS_BIN) $(BUILD)/edr-archive
 
 .PHONY: all test explore explore-full crosscheck demo sizecheck clean tools \
-        scenario mcap verify help qnx-syntax processes test_archive_cpp
+        scenario mcap verify help qnx-syntax processes image-check test_archive_cpp
 
 all: $(LIB) $(TEST_BIN) tools
 
@@ -115,6 +115,12 @@ $(BUILD)/test_archive_cpp: tests/test_archive_cpp.cpp $(ARCHIVE_OBJ) $(LIB)
 
 test_archive_cpp: $(BUILD)/test_archive_cpp $(BUILD)/edr-archive
 	@$(BUILD)/test_archive_cpp
+
+# Static consistency of image/ without a QNX SDP: process names, priorities
+# (spec 4.4), security-policy types, distinct partitions, no network, no stop
+# command. Cannot build or boot a real image here (docs/QNX-PORT.md).
+image-check:
+	@bash scripts/check-image.sh
 
 qnx-syntax:
 	@mkdir -p $(BUILD)/qnx-syntax

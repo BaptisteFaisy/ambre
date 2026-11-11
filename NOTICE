@@ -88,3 +88,13 @@ scenario files under host/scenarios/ are generated synthetically by the
 repository's own generator. The licences of the two datasets above must be
 confirmed, and the corresponding attributions added here, before any of their
 content is included in a public release or in a demo video.
+
+## QNX stub headers
+
+target/qnx-stub/include/ is imported from the sibling project "passerelle"
+(https://github.com/BaptisteFaisy/passerelle, Apache-2.0, same author), which
+uses the same approach: the QNX glue of its drivers is compiled on a PC
+against stub headers so that typos and wrong prototypes are caught without a
+QNX SDP. The stubs declare types, prototypes and constants taken from the QNX
+8.0 documentation (provenance recorded in each file header); they contain no
+QNX code and simulate nothing.

@@ -26,10 +26,12 @@ Everything the regulator asks for — about a kilobyte of Class A data — must 
 **durable**, not merely buffered, inside that window.
 
 The target is **20 ms from trigger to acquired**, of which at most **500 µs**
-may be software (PERF-02, PERF-03). Those are targets, not measurements: no
-QNX SDP is available here, so no latency figure is published in this
-repository. What *is* proven is the **structure** of the path — and the
-structure is what a latency budget depends on.
+may be software (PERF-02, PERF-03). On the PC backend those have now been
+measured (`docs/CAMPAIGN-LATENCY.md`): the software share comes out at a
+**median of 10 µs**, and 99.7 % of the total freeze turns out to be *media*
+time — which is exactly why no QNX SDP means no PERF-02 verdict. What this
+chapter proves is the **structure** of the path, and the structure is what a
+latency budget depends on.
 
 ## 4.2 The real code — three steps, no more
 
@@ -196,8 +198,16 @@ What to observe:
 - `test_explore::explore_acquisition_boundary` — the same boundary, walked on
   both sides at the operation level.
 
-The measured latency is a separate matter and stays open: `campaign:latency` —
-`TODO(campaign)` (see `docs/CAMPAIGN.md` §7).
+The measured latency is a separate matter, and it now exists — **on the PC, not
+on QNX**. `docs/CAMPAIGN-LATENCY.md` reports, over four loads × 200
+trigger → acquired cycles (`backend=posix`), a **software share median of
+10 µs** against the 500 µs budget of PERF-03: the structure described above is
+what buys that margin. The same report is blunt about the rest — 99.7 % of the
+total freeze is *media* time on an NVMe file, so PERF-02 (≤ 20 ms on the
+reference hardware) is **not proven**; PERF-01 is exceeded in the tail (p99 up
+to 203 ms under disk load, the capture descheduled behind a busy device); PERF-05
+does not meet its budget. Read `docs/CAMPAIGN.md` §7 before quoting any of it:
+on this project the caveat is part of the result.
 
 ---
 

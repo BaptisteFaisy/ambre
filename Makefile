@@ -6,7 +6,9 @@
 #   make explore    exhaustive power-cut exploration, 10 000 states (level 1)
 #   make explore-full  1 000 000 states (spec 7.7, "complet" level)
 #   make crosscheck C trigger vs independent Python twin, 10 000 scenarios
-#   make demo       one-command end-to-end demonstration
+#   make demo       one-command end-to-end demonstration (level 2, real cuts)
+#   make e2e        one level-2 run: real processes, one SIGKILL, recovery
+#   make processcut the cut campaign (200 cuts, zero loss) on the PC backend
 #   make sizecheck  house rule: files < 500 lines, functions < 50 lines
 #   make clean
 
@@ -52,7 +54,8 @@ TOOLS        := $(BUILD)/ambre-explore $(BUILD)/ambre-dump-truth \
                 $(PROCESS_BIN) $(BUILD)/edr-archive
 
 .PHONY: all test explore explore-full crosscheck demo sizecheck clean tools \
-        scenario mcap verify help qnx-syntax processes image-check test_archive_cpp
+        scenario mcap verify help qnx-syntax processes image-check test_archive_cpp \
+        e2e e2e-scenario processcut
 
 all: $(LIB) $(TEST_BIN) tools
 
@@ -186,6 +189,39 @@ verify: mcap
 
 demo: all
 	./scripts/demo.sh
+
+# --- level 2 on the PC backend: real processes, real files, real SIGKILL ----
+# backend=posix: the "raw partition" is a file and the cut is a SIGKILL on
+# edr-journal, NOT a QEMU/QNX power cut. What this proves and what it does not
+# is written in host/e2e/README.md and host/processcut/README.md.
+E2E_SCENARIO ?= $(BUILD)/scenario-e2e.txt
+E2E_CUT      ?= acquired
+E2E_CYCLES   ?= 200
+E2E_JOBS     ?= 4
+
+e2e-scenario:
+	@mkdir -p $(BUILD)
+	$(PYTHON) host/scenarios/generate.py --preset urban-frontal --seed 1234 \
+	  --duration-ms 9000 --crash-at-ms 6000 --out $(E2E_SCENARIO)
+
+# One end-to-end run with one cut: replay -> capture -> journal -> SIGKILL ->
+# recovery -> list -> MCAP export -> verification.
+e2e: tools e2e-scenario
+	$(PYTHON) host/e2e/e2e_run.py --bins $(BUILD) --scenario $(E2E_SCENARIO) \
+	  --cut-at $(E2E_CUT) --out $(BUILD)/e2e-report.json
+
+# The cut campaign (spec 7.4 on this backend, spec 7.7 socle threshold:
+# 200 cuts, zero loss). Sweep of 111 instants around the impact plus the four
+# specification windows and random instants.
+processcut: tools
+	@mkdir -p $(BUILD)/processcut
+	$(PYTHON) host/scenarios/generate.py --seed 1234 --duration-ms 6000 \
+	  --crash-at-ms 3000 --out $(BUILD)/processcut/scenario.txt
+	$(PYTHON) host/processcut/campaign.py --bins $(BUILD) \
+	  --scenario $(BUILD)/processcut/scenario.txt --cycles $(E2E_CYCLES) \
+	  --sweep-from-ms -50 --sweep-to-ms 500 --step-ms 5 \
+	  --jobs $(E2E_JOBS) \
+	  --report $(BUILD)/processcut/report-$(E2E_CYCLES).json
 
 sizecheck:
 	@$(PYTHON) scripts/sizecheck.py --tracked-only

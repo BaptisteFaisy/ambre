@@ -10,6 +10,8 @@ and skips with a message when none is present.  Total runtime stays well
 under 90 s: the campaign runs in --quick mode on a two-shock scenario.
 """
 
+import contextlib
+import io
 import json
 import os
 import shutil
@@ -47,6 +49,15 @@ def find_bins():
 
 
 BINS = find_bins()
+
+
+def gen_scenario(path, *extra):
+    """Generate a scenario without letting the generator's stdout pollute the
+    test output."""
+    argv = ["--out", path, *extra]
+    with contextlib.redirect_stdout(io.StringIO()):
+        rc = multi_shock.main(argv)
+    return rc
 
 
 # ------------------------------------------------------------- statistics --

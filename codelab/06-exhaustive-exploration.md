@@ -147,10 +147,10 @@ ambre-explore: 64591 states in 495.263s (130 states/s), 0 violations
 ```
 
 Timings depend on what else the machine is doing: the same `make explore` took
-76.7 s (130 states/s) when other campaigns were running in parallel, and the
-same `make explore-full` took 334 s (193 states/s) on an idle machine in the
-week-1 run. The **state count and the violation count do not move** — those are
-properties of the enumeration, not of the load.
+76.7 s (130 states/s) when other campaigns were running in parallel, and an
+earlier unloaded `make explore-full` reported 334.3 s. The **state count and the
+violation count do not move** — those are properties of the enumeration, not of
+the load.
 
 The `explore-full` report (`build-doc/explore-full.json`) reads:
 

@@ -21,6 +21,5 @@ __pycache__/
 .DS_Store
 
 # in-flight agent work, re-added when green
-host/latency/
 host/e2e/
 host/processcut/

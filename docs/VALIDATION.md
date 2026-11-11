@@ -36,13 +36,18 @@ exhaustive exploration runs the very same code that will run on the target.
 All C tests live in `tests/`, use the harness `tests/ambre_test.h`, and return
 the number of failed checks as their exit code (0 = green).
 
-**Measured result (2026-11-11, `make BUILD=build-doc test` +
-`make BUILD=build-doc test_archive_cpp`): 19 suites (18 C + 1 C++),
-41 672 checks, 0 failures.** Per suite: block 118, capture 43,
-coverage_gaps 82, coverage_gaps_journal 118, coverage_gaps_scan 24 692,
-coverage_gaps_trigger 33, crc32c 85, edrctl 97, explore 58, ipc 102,
-journal 4 195, journal_svc 8 277, port_posix 87, recovery 124, scan 68,
-simdisk 3 345, table 44, trigger 33, archive_cpp (C++17) 71.
+**Measured result (2026-11-11 ~18:10, `make BUILD=build-doc test` +
+`make BUILD=build-doc test_archive_cpp`): 22 suites (21 C + 1 C++),
+42 249 checks, 0 failures.** Per suite: block 118, capture 43,
+coverage_gaps 82, coverage_gaps_edges 46, coverage_gaps_journal 118,
+coverage_gaps_scan 24 692, coverage_gaps_trigger 33, crc32c 85, edrctl 97,
+explore 58, ipc 102, journal 4 195, journal_svc 8 277, policy 498,
+policy_us 33, port_posix 87, recovery 124, scan 68, simdisk 3 345, table 44,
+trigger 33, archive_cpp (C++17) 71.
+Three of those suites (`test_policy`, `test_policy_us`,
+`test_coverage_gaps_edges`) landed from other agents *during* this campaign,
+which is why earlier reports of the same day quote 19 suites / 41 672 checks —
+both figures were true when measured.
 Python suites (same day): `tests/test_trigger_py.py` Ran 28 tests OK (14.1 s),
 `tests/test_mcap_py.py` Ran 24 tests OK (2 skipped, 0.8 s),
 `tests/test_powercut_py.py` Ran 18 tests OK (3.5 s).
@@ -64,6 +69,9 @@ Python suites (same day): `tests/test_trigger_py.py` Ran 28 tests OK (14.1 s),
 | `tests/test_journal_svc.c` | virgin open and self-test, recovery before capture (REP-01), trigger → status → list → export → verify, access control and no-stop (SEC-01, SEC-02), a locked event cannot be erased (SEC-03) |
 | `tests/test_edrctl.c` | scenario load, whitelist, row-to-samples, frame-builder budget, histogram and CLI, container round trip, mocked status/list NAK, mocked export and verify, replay against a fake capture, `--kill-after-ms`, access control |
 | `tests/test_coverage_gaps*.c` | branch coverage of `fmt/` beyond the functional suites (spec §12.10): block/record/table codec (`test_coverage_gaps.c`), journal engine incl. GEL-06 refusals and STO-08 memory-full (`_journal`), scanner and recovery rebuild fallbacks (`_scan`, 24 692 checks), trigger engine branches DEC-04/05/09 and GEL-05 (`_trigger`) |
+| `tests/test_policy.c` | week-4 policy proofs: multi-event capacity (STO-05), overwrite policy (STO-06), refusal when full (STO-08), locked-event protection (SEC-03), crash grouping (DEC-09), write metering against the simdisk operation log, the archive gate (GEL-06 journal side), multi-event recovery |
+| `tests/test_policy_us.c` | the US profile of §12.7 (49 CFR Part 563: 20 s at 10 Hz instead of 5 s at 2 Hz): the size of such a class A snapshot and how it travels through the frozen multi-block format |
+| `tests/test_coverage_gaps_edges.c` | the last error and edge branches of `fmt/`: recovery paths only reachable on a self-describing image (unknown or already-sealed SEAL record), I/O failures of recovery and of the table commit, a chain broken mid-scan, segment-pool bookkeeping |
 | `tests/test_archive_cpp.cpp` | the C++17 MCAP archive: SHA-256 known vectors, standalone export cross-checked by the Python reader, GEL-06 (no write while an event is open, unit + IPC level), multi-chunk export and corruption rejection, retention (16 events, locked kept) — run via `make test_archive_cpp` |
 | `tests/test_mcap_py.py` | CRC check value and known vectors, layout sizes, table copy selection, multi-chunk reassembly, EMERG/CONT/SEAL fields, open event is not sealed, corrupt block dropped, torn multi-chunk record dropped, bad table CRC falls back to the other copy, export counts, MCAP structure, T0 at 60 s, verify passes, verify detects a wrong scenario, multi-chunk export stays valid, verify rejects an absolute timestamp in metadata, verify rejects a truncated file, Foxglove layout matches the exported topics, event listing, default event is the first sealed one, message count matches |
 | `tests/test_trigger_py.py` | the Python twin of the trigger: division truncation, threshold conversion, int64 wrap, the three DEC-08 cases, long and lateral axes, restraint and VRU locking, T0 onset, event end, crash grouping, off-profile reasons, invalid sample exclusion, determinism, 200 k samples, dt clamping, non-monotonic timestamps, event close reset |
@@ -225,10 +233,13 @@ python3 host/processcut/campaign.py --bins build --scenario build/scenario.txt \
         --cycles 200 --report build/processcut-report.json
 ```
 
-At the time of writing (2026-11-11, 17:4x) a 200-cycle run was **in flight** in
-`build-e2e/processcut/` and had produced no report yet, so **no cut count and no
-violation count is published here** — the 500 forced process stops of §7.7
-remain `TODO(campaign)`. The bench itself carries two honesty notes:
+**200 of the 500 forced process stops of §7.7 have been run on POSIX**
+(`build-e2e/processcut/report-200.json`, 2026-11-11 18:41): 200 cuts, 0 errors,
+**0 invariant violations**, verdicts 199 `ok` + 1 `check_failed`
+(`class_a.fidelity(bench)`, cycle 67 — one class A point matched no injected row
+within 250 ms), plus 2 upstream findings on `timestamps.monotonic(/edr/meta/gaps)`.
+Those three items are published **unresolved**; they belong to the bench's owning
+agent. The remaining 300 stops and any target run stay `TODO(campaign)`. The bench itself carries two honesty notes:
 `class_a.fidelity` cannot pass on the real process chain (the journal stamps
 monotonic time, the replay does not emit wheel speeds — `host/e2e/e2e_fidelity.py`
 substitutes a field-level check of what the chain really carries), and a
@@ -315,8 +326,8 @@ Current status of each threshold (measured 2026-11-11 where a figure appears;
 | 1 000 000 cut states, nested | **exhaustive instead** — 64 591 states = *every reachable state* of the reference 30 s scenario, nested included, 0 violations, 334.3 s. The 1 000 000 figure is an upper bound the reachable space never reaches; exhaustiveness, not the round number, is the guarantee (`make explore-full`) | `build/explore-full.json` |
 | 200 QEMU cuts | **0/200 — not started**: no QNX SDP or QNX image on the machine | campaign report JSON (does not exist yet) |
 | 2 000 QEMU cuts, swept | **not started** (same reason) | campaign report JSON |
-| 10 000 triggers measured | **not started** — needs the QNX target | latency report |
-| 500 forced process stops | **TODO(campaign)** — the POSIX bench exists (`host/e2e/e2e_run.py`, real `SIGKILL` + recovery), the campaign is being finished by its owning agent; on the QNX target it stays not started | e2e report JSON (does not exist yet) |
+| 10 000 triggers measured | **partial** — 200 trigger → acquired cycles per load measured on POSIX across 4 loads (`docs/CAMPAIGN-LATENCY.md`); the 1 000 / 10 000-trigger volumes and the target run are `TODO(campaign)` | `build-lat/latency-<load>.json` |
+| 500 forced process stops | **200 of 500 run on POSIX** (`build-e2e/processcut/report-200.json`, 2026-11-11 18:41): 200 cuts, 0 errors, **0 invariant violations**, 199 `ok` + 1 `check_failed` (`class_a.fidelity(bench)`, cycle 67) and 2 upstream findings on `/edr/meta/gaps` monotonicity — published unresolved. The remaining 300 and any QNX-target run stay `TODO(campaign)` | `build-e2e/processcut/report-200.json` |
 | 5 000 forced process stops | **not started** — needs the QNX target | fault-injection report |
 | 500 real electrical cuts | **not started** — no Raspberry Pi 5 bench | hardware report |
 | Invariant violations | **0** over 64 591 explored states (I1..I8 each 0) | `violations_by_invariant` in the report JSON |
@@ -355,12 +366,13 @@ exploration and the MCAP round-trip (`make mcap && make verify`); without
 `--quick` it also runs the trigger cross-check and the exhaustive exploration
 (`make explore-full`). It prints a summary and exits 0 only when every step is
 green — a failing step is listed `FAIL`, never hidden. Measured 2026-11-11:
-`--quick` reports **7/7 steps green** with `AMBRE_BUILD_DIR=build-docs`.
-Caveat of the same day: `make sizecheck` currently reports **3 violations** in
-`host/e2e/` and `host/processcut/` — work-in-progress files of two other agents
-— so a full `verify-all.sh` run is red on that first step until they land;
-`fmt/`, `target/`, `tests/`, `scripts/`, `image/`, `codelab/` and `docs/` are at
-0 violations (133 files scanned).
+`--quick` reports **7/7 steps green** with `AMBRE_BUILD_DIR=build-doc`
+(re-run by this report's author at 18:00).
+Note on the first step: `make sizecheck` runs `scripts/sizecheck.py
+--tracked-only`, so it judges the 175 tracked files (**0 violations**); a bare
+`python3 scripts/sizecheck.py` also scans untracked work-in-progress files and
+reported **191 files, 0 violations** at 18:50 (an 18:00 run showed 3 violations
+in `host/e2e/` and `host/processcut/`, since fixed by their owning agents).
 
 ### 4.2 Level 0 — unit tests
 
@@ -387,7 +399,9 @@ Individually:
 ./build/test_journal_svc
 ./build/test_edrctl
 ./build/test_coverage_gaps ./build/test_coverage_gaps_journal \
-  ./build/test_coverage_gaps_scan ./build/test_coverage_gaps_trigger
+  ./build/test_coverage_gaps_scan ./build/test_coverage_gaps_trigger \
+  ./build/test_coverage_gaps_edges
+./build/test_policy ./build/test_policy_us
 make test_archive_cpp            # the C++17 archive suite
 python3 tests/test_mcap_py.py
 python3 tests/test_trigger_py.py
@@ -502,18 +516,36 @@ the latency histogram on real hardware are `TODO(campaign)`.
 
 ### 4.7 Latency campaign
 
-The latency campaign reuses the kernel trace events of OBS-03: the trigger,
-the submission of the emergency write, the acknowledgement of the flush and the
-sealing. The published result is a histogram with median, 99th percentile,
-99.9th percentile, maximum, and the three worst cases explained. The POSIX
-bench exists and is producing partial reports
-(`host/latency/measure.py`; `make BUILD=build-mine latency LATENCY_LOAD=none`,
-`latency-all`; reports in `$(BUILD)/latency-<load>.json`, schema
-`ambre.latency.campaign/1`), but the campaign is unfinished and
-`docs/CAMPAIGN-LATENCY.md` does not exist yet: **`TODO(campaign)`** for the
-software share (`backend=posix`), and not measurable at all for PERF-01..PERF-05
-on the target without the QNX SDP. No figure from those partial runs is quoted
-in this document — see `docs/CAMPAIGN.md` §7 for why.
+The latency campaign reuses the trace milestones of OBS-03: the trigger, the
+submission of the emergency write, the acknowledgement of the flush and the
+sealing. **It has been run on the POSIX backend and is published in
+`docs/CAMPAIGN-LATENCY.md`** (four loads × 200 measured trigger → acquired
+cycles, 2026-11-11, `backend=posix`; reports in
+`$(BUILD)/latency-<load>.json`, schema `ambre.latency.campaign/1`).
+
+```sh
+make BUILD=build-mine latency LATENCY_LOAD=none   # one load
+make BUILD=build-mine latency-all                 # none, cpu, disk, mem
+```
+
+Verdicts as published there, and the two limits that matter:
+
+| ID | Target | POSIX measurement | Verdict |
+|---|---|---|---|
+| PERF-01 | ≤ 2 ms | median 1.1–2.2 ms, p99 9.2–203 ms | **exceeded** at the tail (worst case: capture descheduled behind a busy device) |
+| PERF-02 | ≤ 20 ms | median 2.7–4.0 ms, p99 9.3–35.0 ms, max 108 ms | **not proven**: 99.7 % of the freeze is NVMe media time, not our code |
+| PERF-03 | ≤ 500 µs | median **10 µs**, p99 52–108 µs, p99.9 64–831 µs | **met** at median and p99 under every load (2 events of 200 over budget at p99.9 under `disk`) |
+| PERF-04 | 0 / 1 000 (S), 10 000 (C) | 200 triggers per campaign | **volume not reached** — `TODO(campaign)` |
+| PERF-05 | < 50 µs p99 | p99 ≤ 5 ms (bucket ceiling) | **not met** |
+| PERF-06 | < 1 s after kernel start | — | not measured, needs the target |
+| PERF-07 | 3 worst cases by **kernel** trace | decomposed from the `AMBRE_TRACE` log | partial: decomposition yes, kernel trace no |
+| PERF-08 | Raspberry Pi 5 | — | not measured, no bench |
+
+The two limits: **these numbers come from `backend=posix`** (a regular file as
+the raw partition, AF_UNIX sockets, `fdatasync()`), never from QNX; and the
+software share (PERF-03) is the only one of them that is a statement about our
+code — everything else is dominated by the support. The target rows stay
+`TODO(campaign)` until an SDP exists.
 
 ### 4.8 Export and verification
 
@@ -615,22 +647,24 @@ state.
 
 | ID | Requirement (S) | How it is verified |
 |---|---|---|
-| EXP-01 | `edrctl status` and `edrctl list` show the state, the events, their locking and their completeness | `test:tests/test_journal_svc.c::trigger_status_list_export_verify` + `test:tests/test_edrctl.c::mock_status_list_nak` (the portable `edrctl` logic against the journal service, PC backend); the QNX resource-manager runtime is `TODO(week 5)` |
+| EXP-01 | `edrctl status` and `edrctl list` show the state, the events, their locking and their completeness | **partial** — the *service* side answers STATUS/LIST (`test:tests/test_journal_svc.c::trigger_status_list_export_verify`) and the CLI layer is tested against a mock (`test:tests/test_edrctl.c::mock_status_list_nak`), but the **POSIX port has no client-side reply** (`target/ctl/edr_ctl.c`: `port_xfer` returns `AMBRE_PORT_ERR_UNSUPPORTED`), so the `edrctl` binary cannot complete a request/reply on PC: `make demo` shows it answering `list unavailable: the portability layer has no client-side reply`. The bench therefore speaks the same frozen protocol with its own client (`host/e2e/ambre_wire.py`). On the QNX transport the path exists (`target/port/ambre_port_ipc_qnx.c`): `TODO(week 5)` |
 | EXP-02 | Each event is exported to one valid MCAP file: summary, index, chunk CRCs | `test:tests/test_mcap_py.py::test_mcap_structure`, `test_export_counts`, `test_message_count_matches` + `campaign:make verify` |
 | EXP-03 | The file opens in Foxglove without an extension; a screen layout is provided | `test:tests/test_mcap_py.py::test_foxglove_layout_matches_the_exported_topics` + `foxglove/ambre-layout.json`; the opening in Foxglove itself is a manual demonstration, `TODO(campaign)` |
 
 ### 5.7 Real time (PERF)
 
-All the PERF requirements are verified by **measurement** (M in §5.7). No
-measured value exists yet; every figure below is a target.
+All the PERF requirements are verified by **measurement** (M in §5.7). A POSIX
+campaign has been run and is published in `docs/CAMPAIGN-LATENCY.md` (see §4.7
+for the verdict table); **no measurement exists on the QNX target**, so every
+"on target" cell below stays `TODO(campaign)`.
 
 | ID | Requirement (S) | How it is verified |
 |---|---|---|
-| PERF-01 | From the sample that crosses the threshold to the trigger pulse: ≤ 2 ms | `TODO(week 5)` — the latency campaign has not been run: `campaign:latency` — `TODO(campaign)`; needs the QNX target |
-| PERF-02 | From the trigger to "acquired": ≤ 20 ms on the reference hardware | `TODO(week 5)` — the latency campaign has not been run: `campaign:latency` — `TODO(campaign)`; needs the QNX target |
-| PERF-03 | The software part of that delay, excluding the medium, does not exceed 500 µs | `TODO(week 5)` — `campaign:latency` — `TODO(campaign)`; the PC bench (`host/latency/`) is being finished |
-| PERF-04 | No overrun over 1 000 triggers (S), 10 000 under processor and disk load (C) | `TODO(week 5)` — the latency campaign has not been run: `campaign:latency` — `TODO(campaign)`; needs the QNX target |
-| PERF-05 | Sending a frame costs the producer less than 50 µs at the 99th percentile | `TODO(week 5)` — the frame path exists and is tested for correctness (`test:tests/test_ipc.c`, `test:tests/test_capture.c`) but its cost has not been measured: `campaign:latency` — `TODO(campaign)` |
+| PERF-01 | From the sample that crosses the threshold to the trigger pulse: ≤ 2 ms | **measured on POSIX** — median 1.1–2.2 ms, p99 9.2–203 ms (`docs/CAMPAIGN-LATENCY.md` §4.1): at the limit in the median, **exceeded** in the tail. On target: `TODO(campaign)` |
+| PERF-02 | From the trigger to "acquired": ≤ 20 ms on the reference hardware | **not proven** — POSIX median 2.7–4.0 ms / p99 9.3–35.0 ms / max 108 ms, but 99.7 % of it is NVMe media time, so it says nothing about the reference hardware. On target: `TODO(campaign)` |
+| PERF-03 | The software part of that delay, excluding the medium, does not exceed 500 µs | **met on POSIX** — median **10 µs**, p99 52–108 µs, p99.9 64–831 µs (journal on tmpfs, 4 loads × 200 cycles; 2 events of 200 over budget at p99.9 under `disk`). On target: `TODO(campaign)` |
+| PERF-04 | No overrun over 1 000 triggers (S), 10 000 under processor and disk load (C) | **volume not reached** — 200 triggers per campaign on POSIX; the 1 000 / 10 000-trigger runs are `TODO(campaign)` |
+| PERF-05 | Sending a frame costs the producer less than 50 µs at the 99th percentile | **measured on POSIX and NOT met** — p99 falls in the ≤ 5 ms bucket ceiling of the replay histogram (`docs/CAMPAIGN-LATENCY.md` §4.5). The correctness of the frame path is covered by `test:tests/test_ipc.c` and `test:tests/test_capture.c` |
 
 ### 5.8 Robustness (ROB)
 
@@ -653,7 +687,7 @@ measured value exists yet; every figure below is a target.
 | ID | Requirement (S) | How it is verified |
 |---|---|---|
 | OBS-01 | The processes write to the QNX system log (slog2) | **partial** — `target/port/ambre_port_qnx.c` implements the slog2 sink and `make qnx-syntax` proves it compiles (5/5); the PC backend logs through the same `ambre_port_log()` API; runtime on the target is `TODO(week 5)` |
-| OBS-02 | `/dev/edr/status` gives the state as text: mode, current segment, events, counters, health | `test:tests/test_journal_svc.c::trigger_status_list_export_verify` + `test:tests/test_edrctl.c::mock_status_list_nak` (PC backend, journal service); the QNX resource-manager exposure under `/dev/edr/status` is `TODO(week 5)` |
+| OBS-02 | `/dev/edr/status` gives the state as text: mode, current segment, events, counters, health | `test:tests/test_journal_svc.c::trigger_status_list_export_verify` (the service composes the text status, counters included) + `test:tests/test_edrctl.c::mock_status_list_nak`; the `edrctl` client path on POSIX carries the EXP-01 gap, and the QNX resource-manager exposure under `/dev/edr/status` is `TODO(week 5)` |
 | OBS-03 | User events are inserted into the kernel trace at the trigger, at the submission of the write, at the flush acknowledgement and at the sealing | **partial** — the milestones exist in the portable core as the journal marks `AMBRE_MARK_EMERG_WRITTEN`, `AMBRE_MARK_ACQUIRED`, `AMBRE_MARK_SEALED` (`fmt/ambre_journal.h`), and `ambre_port_trace()` in `target/port/ambre_port_qnx.c` maps them to `trace_logi()` user events (syntax-checked only); the trace itself needs the target: `TODO(week 5)` |
 
 ### 5.11 Use of QNX-specific technologies (QNX)
@@ -678,16 +712,16 @@ Three columns, counted line by line from the tables above:
 |---|---|---|---|---|
 | ACQ | 6 | 3 | 3 | 0 |
 | DEC | 8 | 8 | 0 | 0 |
-| GEL | 6 | 4 | 2 | 0 |
+| GEL | 6 | 5 | 1 | 0 |
 | STO | 6 | 5 | 1 | 0 |
 | REP | 5 | 5 | 0 | 0 |
-| EXP | 3 | 3 | 0 | 0 |
-| PERF | 5 | 0 | 0 | 5 |
+| EXP | 3 | 1 | 2 | 0 |
+| PERF | 5 | 0 | 4 | 1 |
 | ROB | 3 | 2 | 1 | 0 |
 | VIE / SEC | 3 | 3 | 0 | 0 |
 | OBS | 3 | 1 | 2 | 0 |
 | QNX | 4 | 0 | 4 | 0 |
-| **Total** | **52** | **34** | **13** | **5** |
+| **Total** | **52** | **33** | **18** | **1** |
 
 Note on the counts: the "Covered" column counts a requirement only when a
 **named test case or a named campaign** proves it. A requirement that is only
@@ -696,8 +730,12 @@ state, the process roles — is counted as "Partial", because inspection is
 weaker than a test. When a line carries both `**partial**` and a
 `TODO(...)` marker, it is counted in the "Partial" column, and the marker
 says which part is still missing. GEL-07 and GEL-08 are level C and are not
-counted here. The PERF family is entirely TODO because the latency campaign
-has not been run: a target is not a verification. The remaining gap is
+counted here. The PERF family counts 4 "Partial" and 1 "TODO" because the
+latency campaign **has** been run on the POSIX backend
+(`docs/CAMPAIGN-LATENCY.md`, §4.7 above) but proves nothing about the target:
+PERF-01 is exceeded at the tail, PERF-02 is dominated by media time, PERF-03 is
+met, PERF-05 is not met, and PERF-04 never reached the required volume. A
+measurement that fails its own target is not "Covered". The remaining gap is
 concentrated in what the QNX target alone can show — kernel enforcement of the
 security policy, the resource manager under `procnto`, the kernel trace, the
 memory lock and the latencies: those lines are "Partial" because the glue is

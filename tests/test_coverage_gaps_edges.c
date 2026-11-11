@@ -270,8 +270,21 @@ static void empty_slot_inside_event_count_is_skipped(void)
     AMBRE_CHECK_OK(ambre_recover(&g.disk, &res));
     AMBRE_CHECK_MSG(ambre_table_find_event(&res.table, 4u) != NULL,
                     "the locked event must survive recovery");
-    /* pick_victim walks every segment: with all of them unavailable and no
-     * reclaimable sealed event, there is no victim (STO-08). */
+    /* The three journal queries walk the same slot list: an empty slot that
+     * is inside event_count must be skipped, never dereferenced. */
+    j.table = table;
+    j.table.seg_states[0] = (uint8_t)AMBRE_SEG_FROZEN;
+    j.table.seg_states[1] = (uint8_t)AMBRE_SEG_LOCKED;   /* pool exhausted */
+    AMBRE_CHECK_EQ_I64(ambre_journal_pick_segment(&j, &victim),
+                       (int64_t)AMBRE_ERR_FULL);
+    j.stats.refused_no_space = 0u;
+    j.table.seg_states[0] = (uint8_t)AMBRE_SEG_LOCKED;
+    j.table.seg_states[1] = (uint8_t)AMBRE_SEG_LOCKED;
+    AMBRE_CHECK_OK(ambre_journal_overwrite_segment(&j, 0u));
+    AMBRE_CHECK_EQ_U64(j.table.events[0].state, (uint64_t)AMBRE_EV_SEALED);
+    AMBRE_CHECK_EQ_U64(j.table.events[0].file_complete, 0u);
+    /* pick_victim walks every segment too: with all of them unavailable and
+     * no reclaimable sealed event, there is no victim (STO-08). */
     for (uint32_t i = 0u; i < AMBRE_SEGMENT_COUNT; i++) {
         table.seg_states[i] = (uint8_t)AMBRE_SEG_LOCKED;
     }

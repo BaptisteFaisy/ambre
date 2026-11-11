@@ -21,11 +21,6 @@ __pycache__/
 .DS_Store
 
 # in-flight agent work, re-added when green
-host/fuzz/
 host/latency/
 host/e2e/
-
-# in-flight agent work (e2e/quality), re-added when their own tests pass
-host/processcut/campaign.py
-host/processcut/campaign_report.py
-host/report/
+host/processcut/

@@ -238,7 +238,7 @@ fuzz-asan: $(BUILD)/ambre-fuzz-asan
 #   make latency LOAD=mem        one campaign under another load
 #   make latency-all             the three loads of spec 7.5, plus the baseline
 .PHONY: latency latency-all
-LATENCY_LOAD    ?= cpu
+LATENCY_LOAD    ?= $(or $(LOAD),cpu)
 LATENCY_TRIGGERS ?= 200
 LATENCY_SCENARIO = $(BUILD)/scenario-latency.txt
 

@@ -54,7 +54,7 @@ TOOLS        := $(BUILD)/ambre-explore $(BUILD)/ambre-dump-truth \
                 $(PROCESS_BIN) $(BUILD)/edr-archive
 
 .PHONY: all test explore explore-full crosscheck demo sizecheck clean tools \
-        scenario mcap verify help qnx-syntax processes image-check test_archive_cpp \
+        scenario mcap verify help qnx-syntax processes image-check campaign test_archive_cpp \
         e2e e2e-scenario processcut
 
 all: $(LIB) $(TEST_BIN) tools
@@ -161,6 +161,12 @@ scenario:
 explore: all scenario
 	$(BUILD)/ambre-explore --scenario $(BUILD)/scenario.txt \
 	  --states 10000 --jobs $(JOBS) --variants all --report $(BUILD)/explore.json
+
+# Campaign of record: one scenario exhausts its own reachable state space
+# (64 591 states for the 30 s reference), so the spec's one-million-state
+# "complet" level is reached by summing several scenarios. Long: never on a PR.
+campaign: all
+	./scripts/explore-campaign.sh --scenarios 12 --jobs $(JOBS) --out $(BUILD)/campaign
 
 explore-full: all scenario
 	$(BUILD)/ambre-explore --scenario $(BUILD)/scenario.txt \

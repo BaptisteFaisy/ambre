@@ -98,3 +98,24 @@ against stub headers so that typos and wrong prototypes are caught without a
 QNX SDP. The stubs declare types, prototypes and constants taken from the QNX
 8.0 documentation (provenance recorded in each file header); they contain no
 QNX code and simulate nothing.
+
+## QNX image files (image/)
+
+image/ambre.build and image/ambre.sec reuse the *structure* (not the business
+content) of two QNX 8.0 examples:
+
+  * The sibling project "passerelle" (https://github.com/BaptisteFaisy/passerelle,
+    Apache-2.0, same author): IFS build-file layout (boot section, start-up
+    script, PCI server fragment, library and binary lists) and the security
+    policy statement forms (`type`, `allow <t> self:ability {...}`,
+    `allow_attach`).
+
+  * The QNX 8.0 virtio reference project (qnx-virtio, MIT licence,
+    Copyright (c) 2026 Abe Kohandel): the x86_64 boot section
+    (`procnto-smp-instr`), the PCI configuration fragments and the base
+    library list of `images/ifs_x86_64.build`.
+
+All Ambre-specific content (the five EDR processes, the raw/Power-Safe
+storage split, the §4.4 priorities, the SEC-01 access matrix, the supervision
+wrapper) is original to this project. The QNX 8.0 documentation URLs cited in
+the files are references, not copied text.

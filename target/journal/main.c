@@ -10,8 +10,10 @@
  * Priority 62 and memory locked at start-up (QNX-04, spec 4.4).
  * Start-up self-test (OBS-04), logs through ambre_port_log (OBS-01), text
  * state on SIGUSR1 (OBS-02). The recorder has no "stop" order (SEC-02): only
- * a signal from the supervisor ends it, and the supervisor restarts it.
+ * a signal ends it, and the supervisor restarts it (QNX-06).
  */
+
+#define _POSIX_C_SOURCE 200809L
 
 #include "edr_journal_svc.h"
 #include <signal.h>
@@ -60,13 +62,31 @@ static void usage(const char *prog)
             "[--flush-us N] [--event-flush-us N]\n", prog);
 }
 
-static int parse_opt_value(int *i, int argc, char **argv, const char **out)
+/* Apply one configuration option. Returns 0, or 2 for a usage error. */
+static int apply_option(cli_args_t *args, const char *opt, const char *val)
 {
-    if (*i + 1 >= argc) {
+    if (strcmp(opt, "--mode") == 0) {
+        if (strcmp(val, "continuous") == 0) {
+            args->jcfg.continuous_mode = true;
+            return 0;
+        }
+        if (strcmp(val, "event") == 0) {
+            args->jcfg.continuous_mode = false;
+            return 0;
+        }
         return 2;
     }
-    (*i)++;
-    *out = argv[*i];
+    if (strcmp(opt, "--segment-limit") == 0) {
+        args->jcfg.segment_limit = (uint32_t)strtoul(val, NULL, 10);
+    } else if (strcmp(opt, "--session-id") == 0) {
+        args->jcfg.session_id = (uint64_t)strtoull(val, NULL, 10);
+    } else if (strcmp(opt, "--flush-us") == 0) {
+        args->jcfg.flush_period_us = (uint32_t)strtoul(val, NULL, 10);
+    } else if (strcmp(opt, "--event-flush-us") == 0) {
+        args->jcfg.event_flush_period_us = (uint32_t)strtoul(val, NULL, 10);
+    } else {
+        return 2;
+    }
     return 0;
 }
 
@@ -76,48 +96,19 @@ static int parse_args(int argc, char **argv, cli_args_t *args)
     ambre_journal_cfg_default(&args->jcfg);
 
     for (int i = 1; i < argc; i++) {
-        const char *val = NULL;
         const char *opt = argv[i];
-        int rc;
+        const char *val;
 
-        if (strcmp(opt, "--disk") == 0) {
-            rc = parse_opt_value(&i, argc, argv, &args->disk);
-        } else if (strcmp(opt, "--listen") == 0) {
-            rc = parse_opt_value(&i, argc, argv, &args->listen_sock);
-        } else if (strcmp(opt, "--mode") == 0) {
-            rc = parse_opt_value(&i, argc, argv, &val);
-            if (rc == 0 && strcmp(val, "continuous") == 0) {
-                args->jcfg.continuous_mode = true;
-            } else if (rc == 0 && strcmp(val, "event") == 0) {
-                args->jcfg.continuous_mode = false;
-            } else {
-                rc = 2;
-            }
-        } else if (strcmp(opt, "--segment-limit") == 0) {
-            rc = parse_opt_value(&i, argc, argv, &val);
-            if (rc == 0) {
-                args->jcfg.segment_limit = (uint32_t)strtoul(val, NULL, 10);
-            }
-        } else if (strcmp(opt, "--session-id") == 0) {
-            rc = parse_opt_value(&i, argc, argv, &val);
-            if (rc == 0) {
-                args->jcfg.session_id = (uint64_t)strtoull(val, NULL, 10);
-            }
-        } else if (strcmp(opt, "--flush-us") == 0) {
-            rc = parse_opt_value(&i, argc, argv, &val);
-            if (rc == 0) {
-                args->jcfg.flush_period_us = (uint32_t)strtoul(val, NULL, 10);
-            }
-        } else if (strcmp(opt, "--event-flush-us") == 0) {
-            rc = parse_opt_value(&i, argc, argv, &val);
-            if (rc == 0) {
-                args->jcfg.event_flush_period_us = (uint32_t)strtoul(val, NULL, 10);
-            }
-        } else {
-            rc = 2;
+        if (i + 1 >= argc) {
+            return 2;                  /* every option takes a value */
         }
-        if (rc != 0) {
-            return rc;
+        val = argv[++i];
+        if (strcmp(opt, "--disk") == 0) {
+            args->disk = val;
+        } else if (strcmp(opt, "--listen") == 0) {
+            args->listen_sock = val;
+        } else if (apply_option(args, opt, val) != 0) {
+            return 2;
         }
     }
     return (args->disk != NULL && args->listen_sock != NULL) ? 0 : 2;
@@ -181,7 +172,7 @@ static int notify_archive(void *ctx, const void *msg, size_t len)
         }
     }
     if (sent == 0) {
-        ambre_port_log(AMBRE_LOG_DEBUG, SVC_TAG, "EVENT_READY: no archive connected");
+        ambre_port_log(AMBRE_LOG_DEBUG, SVC_TAG, "EVENT_READY: no archive peer");
         return AMBRE_PORT_ERR_NOENT;
     }
     return AMBRE_PORT_OK;
@@ -229,34 +220,18 @@ static int run_loop(ambre_edr_service_t *svc, peer_table_t *pt)
             g_dump_status = 0;
             dump_status(svc);
         }
+        /* GEL-07 / STO-03: flush cadence and segment rotation. */
         (void)ambre_edr_service_tick(svc, ambre_port_now_us());
     }
     return 0;
 }
 
-int main(int argc, char **argv)
+/* QNX-04 then REP-01 then OBS-04: lock the memory, raise the priority, open
+ * the journal (the recovery runs inside) and prove the medium works. */
+static int startup(const cli_args_t *args, ambre_edr_service_t *svc)
 {
-    cli_args_t args;
     ambre_edr_service_cfg_t scfg;
-    ambre_edr_service_t svc;
-    peer_table_t peers;
-    struct sigaction sa;
-    int rc;
 
-    rc = parse_args(argc, argv, &args);
-    if (rc != 0) {
-        usage(argv[0]);
-        return 2;
-    }
-
-    memset(&sa, 0, sizeof(sa));
-    sa.sa_handler = on_term;
-    (void)sigaction(SIGINT, &sa, NULL);
-    (void)sigaction(SIGTERM, &sa, NULL);
-    sa.sa_handler = on_usr1;
-    (void)sigaction(SIGUSR1, &sa, NULL);
-
-    /* QNX-04: memory locked and priority raised before anything is served. */
     if (ambre_port_lock_memory() != AMBRE_PORT_OK) {
         ambre_port_log(AMBRE_LOG_WARN, SVC_TAG, "memory not locked (reported)");
     }
@@ -264,20 +239,47 @@ int main(int argc, char **argv)
         ambre_port_log(AMBRE_LOG_WARN, SVC_TAG, "priority %d not granted",
                        PRIORITY_JOURNAL);
     }
-
     memset(&scfg, 0, sizeof(scfg));
-    scfg.disk_spec = args.disk;
-    scfg.cfg = args.jcfg;
-
-    rc = ambre_edr_service_open(&svc, &scfg);
-    if (rc != AMBRE_PORT_OK) {
-        ambre_port_log(AMBRE_LOG_ERROR, SVC_TAG, "cannot open %s (code %d)",
-                       args.disk, rc);
+    scfg.disk_spec = args->disk;
+    scfg.cfg = args->jcfg;
+    if (ambre_edr_service_open(svc, &scfg) != AMBRE_PORT_OK) {
+        ambre_port_log(AMBRE_LOG_ERROR, SVC_TAG, "cannot open %s", args->disk);
         return 1;
     }
-    if (ambre_edr_service_selftest(&svc) != AMBRE_PORT_OK) {
+    if (ambre_edr_service_selftest(svc) != AMBRE_PORT_OK) {
         ambre_port_log(AMBRE_LOG_ERROR, SVC_TAG, "start-up self-test failed");
-        ambre_edr_service_close(&svc);
+        ambre_edr_service_close(svc);
+        return 1;
+    }
+    return 0;
+}
+
+static void install_signals(void)
+{
+    struct sigaction sa;
+
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_handler = on_term;
+    (void)sigaction(SIGINT, &sa, NULL);
+    (void)sigaction(SIGTERM, &sa, NULL);
+    sa.sa_handler = on_usr1;
+    (void)sigaction(SIGUSR1, &sa, NULL);
+}
+
+int main(int argc, char **argv)
+{
+    cli_args_t args;
+    ambre_edr_service_t svc;
+    peer_table_t peers;
+    int rc;
+
+    rc = parse_args(argc, argv, &args);
+    if (rc != 0) {
+        usage(argv[0]);
+        return 2;
+    }
+    install_signals();
+    if (startup(&args, &svc) != 0) {
         return 1;
     }
 
@@ -291,8 +293,8 @@ int main(int argc, char **argv)
     }
     ambre_edr_service_set_notify(&svc, notify_archive, &peers);
 
-    ambre_port_log(AMBRE_LOG_INFO, SVC_TAG, "serving %s (backend %s)",
-                   args.listen_sock, ambre_port_backend_name());
+    ambre_port_log(AMBRE_LOG_INFO, SVC_TAG, "serving %s (backend %s, prio %d)",
+                   args.listen_sock, ambre_port_backend_name(), PRIORITY_JOURNAL);
     dump_status(&svc);
 
     rc = run_loop(&svc, &peers);

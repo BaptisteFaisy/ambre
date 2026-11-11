@@ -13,29 +13,19 @@
  *   - the access-control decision table (SEC-01);
  *   - the backend reports itself honestly.
  *
- * Temporary files and sockets live in /tmp and are removed; the forked
- * servers are always reaped, so the test leaves nothing behind.
+ * The fork/pipe plumbing is shared with the other port tests through
+ * tests/ambre_test_port.h. Temporary files and sockets live in /tmp and are
+ * removed; the forked servers are always reaped, so nothing is left behind.
  */
 
 #include "ambre_test.h"
 
-#include "ambre_port.h"
+#include "ambre_test_port.h"
 
-#include <poll.h>
-#include <stdio.h>
 #include <string.h>
-#include <sys/wait.h>
-#include <unistd.h>
 
-#define SERVER_TIMEOUT_US 3000000u   /* the forked server waits 3 s        */
-#define CLIENT_TIMEOUT_US 2000000u   /* the client waits 2 s for its ack   */
-#define SHORT_TIMEOUT_US  200000u    /* 200 ms: used to measure a timeout  */
+#define SHORT_TIMEOUT_US 200000u    /* 200 ms: used to measure a timeout  */
 #define FRAME_BYTES       64u        /* payload of the test frames        */
-
-static void tmp_path(char *out, size_t cap, const char *tag)
-{
-    (void)snprintf(out, cap, "/tmp/ambre-test-%ld-%s", (long)getpid(), tag);
-}
 
 /* --------------------------------------------------------------- identity -- */
 
@@ -53,12 +43,10 @@ static void test_clock_is_monotonic(void)
 {
     uint64_t t0 = ambre_port_now_us();
     uint64_t t1 = ambre_port_now_us();
-    uint64_t t2;
 
     AMBRE_CHECK(t0 > 0u);
     AMBRE_CHECK(t1 >= t0);
-    t2 = ambre_port_sleep_us(1000u);
-    AMBRE_CHECK(t2 > 0u);
+    AMBRE_CHECK(ambre_port_sleep_us(1000u) > 0u);
     AMBRE_CHECK(ambre_port_now_us() > t1);
 }
 
@@ -78,13 +66,13 @@ static void test_sleep_waits_at_least_the_requested_time(void)
 
 static void test_disk_write_read_roundtrip(void)
 {
-    char path[128];
+    char path[AMBRE_TEST_PATH_MAX];
     ambre_port_disk_t *d = NULL;
     const ambre_disk_t *vt;
     uint8_t payload[AMBRE_BLOCK_SIZE];
     uint8_t back[AMBRE_BLOCK_SIZE];
 
-    tmp_path(path, sizeof(path), "disk.img");
+    ambre_test_tmp_path(path, sizeof(path), "disk.img");
     (void)unlink(path);
     AMBRE_CHECK_EQ_I64(ambre_port_disk_open(path, 4u * AMBRE_BLOCK_SIZE, &d),
                        AMBRE_PORT_OK);
@@ -114,8 +102,8 @@ static void test_disk_write_read_roundtrip(void)
     AMBRE_CHECK_EQ_I64(vt->write(vt->ctx, AMBRE_BLOCK_SIZE, payload,
                                  sizeof(payload)), 0);
     AMBRE_CHECK_EQ_I64(vt->flush(vt->ctx), 0);
-    AMBRE_CHECK_EQ_I64(vt->read(vt->ctx, AMBRE_BLOCK_SIZE, back,
-                                sizeof(back)), 0);
+    AMBRE_CHECK_EQ_I64(vt->read(vt->ctx, AMBRE_BLOCK_SIZE, back, sizeof(back)),
+                       0);
     AMBRE_CHECK_MEM_EQ(back, payload, sizeof(payload));
 
     ambre_port_disk_close(d);
@@ -124,13 +112,13 @@ static void test_disk_write_read_roundtrip(void)
 
 static void test_disk_data_survives_the_flush(void)
 {
-    char path[128];
+    char path[AMBRE_TEST_PATH_MAX];
     ambre_port_disk_t *d = NULL;
     const ambre_disk_t *vt;
     uint8_t payload[256];
     uint8_t back[256];
 
-    tmp_path(path, sizeof(path), "flush.img");
+    ambre_test_tmp_path(path, sizeof(path), "flush.img");
     (void)unlink(path);
     AMBRE_CHECK_EQ_I64(ambre_port_disk_open(path, 4096u, &d), AMBRE_PORT_OK);
     if (d == NULL) {
@@ -158,14 +146,14 @@ static void test_disk_data_survives_the_flush(void)
 
 static void test_disk_reads_zeroes_past_the_written_area(void)
 {
-    char path[128];
+    char path[AMBRE_TEST_PATH_MAX];
     ambre_port_disk_t *d = NULL;
     const ambre_disk_t *vt;
     uint8_t zeros[AMBRE_BLOCK_SIZE];
     bool clean = true;
     size_t i;
 
-    tmp_path(path, sizeof(path), "zero.img");
+    ambre_test_tmp_path(path, sizeof(path), "zero.img");
     (void)unlink(path);
     AMBRE_CHECK_EQ_I64(ambre_port_disk_open(path, 4u * AMBRE_BLOCK_SIZE, &d),
                        AMBRE_PORT_OK);
@@ -189,13 +177,13 @@ static void test_disk_reads_zeroes_past_the_written_area(void)
 
 static void test_disk_refuses_out_of_bounds_access(void)
 {
-    char path[128];
+    char path[AMBRE_TEST_PATH_MAX];
     ambre_port_disk_t *d = NULL;
     const ambre_disk_t *vt;
     uint8_t payload[512];
     uint8_t back[512];
 
-    tmp_path(path, sizeof(path), "bounds.img");
+    ambre_test_tmp_path(path, sizeof(path), "bounds.img");
     (void)unlink(path);
     AMBRE_CHECK_EQ_I64(ambre_port_disk_open(path, 4096u, &d), AMBRE_PORT_OK);
     if (d == NULL) {
@@ -231,12 +219,12 @@ static void test_disk_open_rejects_bad_parameters(void)
 
 static void test_flush_probe_is_honest(void)
 {
-    char path[128];
+    char path[AMBRE_TEST_PATH_MAX];
     ambre_port_disk_t *d = NULL;
     bool flush_seen = true;
     uint64_t flush_ns = 0u;
 
-    tmp_path(path, sizeof(path), "probe.img");
+    ambre_test_tmp_path(path, sizeof(path), "probe.img");
     (void)unlink(path);
     AMBRE_CHECK_EQ_I64(ambre_port_disk_open(path, 4096u, &d), AMBRE_PORT_OK);
     if (d == NULL) {
@@ -247,8 +235,7 @@ static void test_flush_probe_is_honest(void)
     AMBRE_CHECK_EQ_I64(ambre_port_disk_flush_probe(d, &flush_seen, &flush_ns),
                        AMBRE_PORT_ERR_UNSUPPORTED);
     AMBRE_CHECK(!flush_seen);
-    AMBRE_CHECK_EQ_I64(ambre_port_disk_flush_probe(NULL, &flush_seen,
-                                                    &flush_ns),
+    AMBRE_CHECK_EQ_I64(ambre_port_disk_flush_probe(NULL, &flush_seen, &flush_ns),
                        AMBRE_PORT_ERR_PARAM);
     ambre_port_disk_close(d);
     (void)unlink(path);
@@ -256,112 +243,27 @@ static void test_flush_probe_is_honest(void)
 
 /* -------------------------------------------------------------- transport -- */
 
-/* Child side of the round-trip test: serve `nframes` frames, echo each one
- * back as the ack. The exit code tells the parent whether all went well. */
-static void child_serve_frames(const char *path, int nframes, int ready_fd)
-{
-    ambre_port_chan_t *chan = NULL;
-    uint8_t buf[512];
-    char ready = 'R';
-
-    if (ambre_port_chan_open(path, &chan) != AMBRE_PORT_OK) {
-        _exit(20);
-    }
-    if (write(ready_fd, &ready, 1u) != 1) {
-        _exit(21);
-    }
-    for (int i = 0; i < nframes; i++) {
-        uint32_t peer = 0u;
-        int got = ambre_port_chan_recv(chan, buf, sizeof(buf),
-                                       SERVER_TIMEOUT_US, &peer);
-
-        if (got != (int)FRAME_BYTES) {
-            _exit(22);
-        }
-        if (buf[0] != (uint8_t)(i + 1)) {
-            _exit(23);
-        }
-        if (ambre_port_chan_reply(chan, peer, buf, (size_t)got)
-            != AMBRE_PORT_OK) {
-            _exit(24);
-        }
-    }
-    ambre_port_chan_close(chan);
-    _exit(0);
-}
-
-static pid_t spawn_server(const char *path, int nframes, int *ready_fd)
-{
-    int fds[2];
-    pid_t pid;
-
-    *ready_fd = -1;
-    if (pipe(fds) != 0) {
-        return -1;
-    }
-    pid = fork();
-    if (pid < 0) {
-        close(fds[0]);
-        close(fds[1]);
-        return -1;
-    }
-    if (pid == 0) {
-        close(fds[0]);
-        child_serve_frames(path, nframes, fds[1]);
-        _exit(0);
-    }
-    close(fds[1]);
-    *ready_fd = fds[0];
-    return pid;
-}
-
-static bool wait_ready(int fd, int timeout_ms)
-{
-    struct pollfd pfd;
-    char c = 0;
-
-    pfd.fd = fd;
-    pfd.events = POLLIN;
-    if (poll(&pfd, 1, timeout_ms) != 1) {
-        return false;
-    }
-    return read(fd, &c, 1u) == 1 && c == 'R';
-}
-
-static int reap(pid_t pid)
-{
-    int status = 0;
-
-    if (waitpid(pid, &status, 0) < 0) {
-        return -1;
-    }
-    if (!WIFEXITED(status)) {
-        return -2;
-    }
-    return WEXITSTATUS(status);
-}
-
 static void test_transport_roundtrip_with_ack(void)
 {
-    char path[128];
+    char path[AMBRE_TEST_PATH_MAX];
     ambre_port_conn_t *conn = NULL;
     uint8_t payload[FRAME_BYTES];
     uint64_t worst_latency = 0u;
     int ready = -1;
     pid_t pid;
 
-    tmp_path(path, sizeof(path), "rt.sock");
+    ambre_test_tmp_path(path, sizeof(path), "rt.sock");
     (void)unlink(path);
-    pid = spawn_server(path, 3, &ready);
+    pid = ambre_test_spawn_echo_server(path, 3, FRAME_BYTES, &ready);
     AMBRE_CHECK(pid > 0);
     if (pid <= 0) {
         return;
     }
-    AMBRE_CHECK(wait_ready(ready, 3000));
+    AMBRE_CHECK(ambre_test_wait_ready(ready, 3000));
     close(ready);
     AMBRE_CHECK_EQ_I64(ambre_port_conn_open(path, &conn), AMBRE_PORT_OK);
     if (conn == NULL) {
-        (void)reap(pid);
+        (void)ambre_test_reap(pid);
         (void)unlink(path);
         return;
     }
@@ -370,7 +272,7 @@ static void test_transport_roundtrip_with_ack(void)
 
         memset(payload, i + 1, sizeof(payload));
         AMBRE_CHECK_EQ_I64(ambre_port_conn_send(conn, payload, sizeof(payload),
-                                                CLIENT_TIMEOUT_US, &latency),
+                                                AMBRE_TEST_CLIENT_US, &latency),
                            AMBRE_PORT_OK);
         if (latency > worst_latency) {
             worst_latency = latency;
@@ -379,32 +281,13 @@ static void test_transport_roundtrip_with_ack(void)
     /* PERF-05 and trial E4: the round trip is measured on the producer side. */
     AMBRE_CHECK_MSG(worst_latency > 0u, "round trip measured as 0 ns");
     ambre_port_conn_close(conn);
-    AMBRE_CHECK_EQ_I64(reap(pid), 0);
+    AMBRE_CHECK_EQ_I64(ambre_test_reap(pid), 0);
     (void)unlink(path);
-}
-
-/* Child side of the disconnect test: connect, exchange one frame, then die
- * like a producer that crashed (QNX-05). */
-static void child_connect_and_die(const char *path)
-{
-    ambre_port_conn_t *conn = NULL;
-    uint8_t payload[FRAME_BYTES];
-
-    if (ambre_port_conn_open(path, &conn) != AMBRE_PORT_OK) {
-        _exit(30);
-    }
-    memset(payload, 0xA5u, sizeof(payload));
-    if (ambre_port_conn_send(conn, payload, sizeof(payload),
-                              CLIENT_TIMEOUT_US, NULL) != AMBRE_PORT_OK) {
-        _exit(31);
-    }
-    ambre_port_conn_close(conn);
-    _exit(0);
 }
 
 static void test_transport_detects_a_closed_connection(void)
 {
-    char path[128];
+    char path[AMBRE_TEST_PATH_MAX];
     ambre_port_chan_t *chan = NULL;
     uint8_t buf[512];
     uint32_t sender = 0u;
@@ -412,33 +295,29 @@ static void test_transport_detects_a_closed_connection(void)
     int got;
     pid_t pid;
 
-    tmp_path(path, sizeof(path), "dc.sock");
+    ambre_test_tmp_path(path, sizeof(path), "dc.sock");
     (void)unlink(path);
     AMBRE_CHECK_EQ_I64(ambre_port_chan_open(path, &chan), AMBRE_PORT_OK);
     if (chan == NULL) {
         return;
     }
     AMBRE_CHECK_EQ_U64(ambre_port_chan_poll_disconnect(chan), 0u);
-    pid = fork();
-    AMBRE_CHECK(pid >= 0);
-    if (pid < 0) {
+    pid = ambre_test_spawn_dying_client(path, FRAME_BYTES);
+    AMBRE_CHECK(pid > 0);
+    if (pid <= 0) {
         ambre_port_chan_close(chan);
         (void)unlink(path);
         return;
     }
-    if (pid == 0) {
-        child_connect_and_die(path);
-        _exit(0);
-    }
-    got = ambre_port_chan_recv(chan, buf, sizeof(buf), SERVER_TIMEOUT_US,
+    got = ambre_port_chan_recv(chan, buf, sizeof(buf), AMBRE_TEST_SERVER_US,
                                 &sender);
     AMBRE_CHECK_EQ_I64(got, (int)FRAME_BYTES);
     AMBRE_CHECK(sender != 0u);
     AMBRE_CHECK_EQ_I64(ambre_port_chan_reply(chan, sender, buf, 4u),
                        AMBRE_PORT_OK);
 
-    /* The producer is gone: the transport notices without any polling, so
-     * the next receive simply times out but records the departure. */
+    /* The producer is gone: the transport notices without any polling, so the
+     * next receive simply times out but records the departure. */
     AMBRE_CHECK_EQ_I64(ambre_port_chan_recv(chan, buf, sizeof(buf),
                                              SHORT_TIMEOUT_US, NULL),
                        AMBRE_PORT_ERR_TIMEOUT);
@@ -446,7 +325,7 @@ static void test_transport_detects_a_closed_connection(void)
     AMBRE_CHECK_EQ_U64(dead, sender);
     AMBRE_CHECK_EQ_U64(ambre_port_chan_poll_disconnect(chan), 0u);
 
-    AMBRE_CHECK_EQ_I64(reap(pid), 0);
+    AMBRE_CHECK_EQ_I64(ambre_test_reap(pid), 0);
     ambre_port_chan_close(chan);
     (void)unlink(path);
 }
@@ -464,13 +343,13 @@ static void check_waited_at_least(uint64_t t0, uint64_t timeout_us)
 /* A client whose server never answers must give up after the timeout. */
 static void test_transport_client_timeout_is_respected(void)
 {
-    char path[128];
+    char path[AMBRE_TEST_PATH_MAX];
     ambre_port_chan_t *chan = NULL;
     ambre_port_conn_t *conn = NULL;
     uint8_t payload[FRAME_BYTES];
     uint64_t t0;
 
-    tmp_path(path, sizeof(path), "to.sock");
+    ambre_test_tmp_path(path, sizeof(path), "to.sock");
     (void)unlink(path);
     AMBRE_CHECK_EQ_I64(ambre_port_chan_open(path, &chan), AMBRE_PORT_OK);
     if (chan == NULL) {
@@ -492,12 +371,12 @@ static void test_transport_client_timeout_is_respected(void)
 /* A channel nobody ever connects to times out as well. */
 static void test_transport_idle_channel_timeout_is_respected(void)
 {
-    char path[128];
+    char path[AMBRE_TEST_PATH_MAX];
     ambre_port_chan_t *chan = NULL;
     uint8_t payload[FRAME_BYTES];
     uint64_t t0;
 
-    tmp_path(path, sizeof(path), "idle.sock");
+    ambre_test_tmp_path(path, sizeof(path), "idle.sock");
     (void)unlink(path);
     AMBRE_CHECK_EQ_I64(ambre_port_chan_open(path, &chan), AMBRE_PORT_OK);
     if (chan == NULL) {
@@ -514,58 +393,42 @@ static void test_transport_idle_channel_timeout_is_respected(void)
 
 /* --------------------------------------------------------- access control -- */
 
+typedef struct {
+    uint32_t          peer;
+    ambre_access_op_t op;
+    int               expected;
+} acl_row_t;
+
+/* SEC-01: the decision table of image/ambre.sec, portable half. */
+static const acl_row_t acl_rows[] = {
+    { AMBRE_PEER_PRODUCER, AMBRE_OP_WRITE_INPUT,  AMBRE_PORT_OK       },
+    { AMBRE_PEER_PRODUCER, AMBRE_OP_READ_STATUS,  AMBRE_PORT_ERR_PERM },
+    { AMBRE_PEER_PRODUCER, AMBRE_OP_READ_EVENTS,  AMBRE_PORT_ERR_PERM },
+    { AMBRE_PEER_PRODUCER, AMBRE_OP_RAW_DISK,     AMBRE_PORT_ERR_PERM },
+    { AMBRE_PEER_SERVICE,  AMBRE_OP_READ_STATUS,  AMBRE_PORT_OK       },
+    { AMBRE_PEER_SERVICE,  AMBRE_OP_READ_EVENTS,  AMBRE_PORT_OK       },
+    { AMBRE_PEER_SERVICE,  AMBRE_OP_WRITE_INPUT,  AMBRE_PORT_ERR_PERM },
+    { AMBRE_PEER_SERVICE,  AMBRE_OP_RAW_DISK,     AMBRE_PORT_ERR_PERM },
+    { AMBRE_PEER_JOURNAL,  AMBRE_OP_RAW_DISK,     AMBRE_PORT_OK       },
+    { AMBRE_PEER_JOURNAL,  AMBRE_OP_WRITE_INPUT,  AMBRE_PORT_ERR_PERM },
+    { AMBRE_PEER_JOURNAL,  AMBRE_OP_READ_STATUS,  AMBRE_PORT_ERR_PERM },
+    { AMBRE_PEER_CAPTURE,  AMBRE_OP_RAW_DISK,     AMBRE_PORT_ERR_PERM },
+    { AMBRE_PEER_CAPTURE,  AMBRE_OP_WRITE_INPUT,  AMBRE_PORT_ERR_PERM },
+    { AMBRE_PEER_ARCHIVE,  AMBRE_OP_READ_EVENTS,  AMBRE_PORT_OK       },
+    { AMBRE_PEER_ARCHIVE,  AMBRE_OP_RAW_DISK,     AMBRE_PORT_ERR_PERM },
+    { AMBRE_PEER_UNKNOWN,  AMBRE_OP_READ_STATUS,  AMBRE_PORT_ERR_PERM }
+};
+
 static void test_access_control_sec01(void)
 {
-    /* The producer writes the input, and reads nothing. */
-    AMBRE_CHECK_EQ_I64(ambre_port_access_allowed(AMBRE_PEER_PRODUCER,
-                                                  AMBRE_OP_WRITE_INPUT),
-                       AMBRE_PORT_OK);
-    AMBRE_CHECK_EQ_I64(ambre_port_access_allowed(AMBRE_PEER_PRODUCER,
-                                                  AMBRE_OP_READ_STATUS),
-                       AMBRE_PORT_ERR_PERM);
-    AMBRE_CHECK_EQ_I64(ambre_port_access_allowed(AMBRE_PEER_PRODUCER,
-                                                  AMBRE_OP_READ_EVENTS),
-                       AMBRE_PORT_ERR_PERM);
-    AMBRE_CHECK_EQ_I64(ambre_port_access_allowed(AMBRE_PEER_PRODUCER,
-                                                  AMBRE_OP_RAW_DISK),
-                       AMBRE_PORT_ERR_PERM);
+    for (size_t i = 0u; i < sizeof(acl_rows) / sizeof(acl_rows[0]); i++) {
+        int rc = ambre_port_access_allowed(acl_rows[i].peer, acl_rows[i].op);
 
-    /* The service reads the state, and writes no input. */
-    AMBRE_CHECK_EQ_I64(ambre_port_access_allowed(AMBRE_PEER_SERVICE,
-                                                  AMBRE_OP_READ_STATUS),
-                       AMBRE_PORT_OK);
-    AMBRE_CHECK_EQ_I64(ambre_port_access_allowed(AMBRE_PEER_SERVICE,
-                                                  AMBRE_OP_READ_EVENTS),
-                       AMBRE_PORT_OK);
-    AMBRE_CHECK_EQ_I64(ambre_port_access_allowed(AMBRE_PEER_SERVICE,
-                                                  AMBRE_OP_WRITE_INPUT),
-                       AMBRE_PORT_ERR_PERM);
-    AMBRE_CHECK_EQ_I64(ambre_port_access_allowed(AMBRE_PEER_SERVICE,
-                                                  AMBRE_OP_RAW_DISK),
-                       AMBRE_PORT_ERR_PERM);
-
-    /* Only edr-journal touches the raw partition. */
-    AMBRE_CHECK_EQ_I64(ambre_port_access_allowed(AMBRE_PEER_JOURNAL,
-                                                  AMBRE_OP_RAW_DISK),
-                       AMBRE_PORT_OK);
-    AMBRE_CHECK_EQ_I64(ambre_port_access_allowed(AMBRE_PEER_JOURNAL,
-                                                  AMBRE_OP_WRITE_INPUT),
-                       AMBRE_PORT_ERR_PERM);
-    AMBRE_CHECK_EQ_I64(ambre_port_access_allowed(AMBRE_PEER_JOURNAL,
-                                                  AMBRE_OP_READ_STATUS),
-                       AMBRE_PORT_ERR_PERM);
-    AMBRE_CHECK_EQ_I64(ambre_port_access_allowed(AMBRE_PEER_CAPTURE,
-                                                  AMBRE_OP_RAW_DISK),
-                       AMBRE_PORT_ERR_PERM);
-    AMBRE_CHECK_EQ_I64(ambre_port_access_allowed(AMBRE_PEER_ARCHIVE,
-                                                  AMBRE_OP_READ_EVENTS),
-                       AMBRE_PORT_OK);
-    AMBRE_CHECK_EQ_I64(ambre_port_access_allowed(AMBRE_PEER_ARCHIVE,
-                                                  AMBRE_OP_RAW_DISK),
-                       AMBRE_PORT_ERR_PERM);
-    AMBRE_CHECK_EQ_I64(ambre_port_access_allowed(AMBRE_PEER_UNKNOWN,
-                                                  AMBRE_OP_READ_STATUS),
-                       AMBRE_PORT_ERR_PERM);
+        AMBRE_CHECK_MSG(rc == acl_rows[i].expected,
+                        "peer %u op %d -> %d, expected %d",
+                        (unsigned)acl_rows[i].peer, (int)acl_rows[i].op, rc,
+                        acl_rows[i].expected);
+    }
 }
 
 static const ambre_test_case_t cases[] = {

@@ -102,7 +102,6 @@ typedef struct {
     uint8_t  file_complete;
     uint8_t  reserved[2];
 } ambre_edr_event_ready_body_t;
-
 #pragma pack(pop)
 
 /* ------------------------------------------------------------- service --- */
@@ -123,8 +122,10 @@ typedef struct {
     uint32_t            refused_count;      /* SEC-01 refusals                */
     uint32_t            malformed_count;    /* SEC-05 malformed frames        */
     uint8_t             health;             /* 0 ok, 1 storage, 2 memory full */
-    ambre_edr_notify_fn notify;             /* archive notification           */
-    void               *notify_ctx;
+    ambre_edr_notify_fn          notify;         /* archive notification   */
+    void                        *notify_ctx;
+    ambre_edr_event_ready_body_t ready;          /* queued on SEAL         */
+    bool                         ready_pending;
 } ambre_edr_service_t;
 
 typedef struct {
@@ -172,6 +173,11 @@ uint32_t ambre_edr_announced_peer(const void *msg, size_t len);
  * not fit in the buffer. */
 int  ambre_edr_build_reply(void *buf, size_t cap, uint8_t msg_type,
                            const void *body, size_t body_len);
+
+/* Reserve a reply whose body is filled afterwards (the export appends raw
+ * blocks). Writes the header and returns the body offset, 0 when too small. */
+size_t ambre_edr_reply_reserve(void *buf, size_t cap, uint8_t msg_type,
+                               uint32_t body_len);
 
 /* SEC-01 decisions: the input path belongs to capture and to the producers,
  * the read path to the service tools and to the archive. */

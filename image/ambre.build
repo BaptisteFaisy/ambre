@@ -1,0 +1,264 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# image/ambre.build - QNX 8.0 boot image (IFS) buildfile for Ambre EDR.
+# Target: QEMU x86_64 (PC / QNX Everywhere reference architecture).
+#
+# Provenance: the IFS layout (boot section, startup script, PCI server
+# fragment, library and binary list) is adapted from two working QNX 8.0
+# examples:
+#   - the sibling project `passerelle` (https://github.com/BaptisteFaisy/passerelle,
+#     Apache-2.0, same author) - image/passerelle.build;
+#   - the QNX 8.0 x86_64 reference image `ifs_x86_64.build` of the QNX virtio
+#     project (MIT licence, Abe Kohandel) - boot section, PCI configuration and
+#     library list.
+# Every Ambre-specific part below (processes, storage layout, priorities,
+# security rules) is specific to this project.
+#
+# UNVERIFIED (needs QNX SDP 8.0): the binary paths inside $QNX_TARGET, the
+# exact `devb-virtio` / `io-blk.so` options and validation levels, the
+# `secpolpush` invocation, and the whole `mkqnximage` assembly, which cannot
+# run without QNX SDP 8.0 installed. Everything marked UNVERIFIED below
+# names the SDP 8.0 manual page to check.
+
+[image=32m]
+# x86_64 multiboot IFS built by mkqnximage / mkifs (QNX 8.0 QEMU target).
+[virtual=x86_64,multiboot] boot = {
+    startup-apic -D8250..115200 -zz
+
+    PATH=/proc/boot:/usr/bin:/sbin
+    CONFIG_PATH=/etc
+    LD_LIBRARY_PATH=/proc/boot:/usr/lib:/usr/lib/pci
+    # Memory-protected microkernel with security policy enforcement (SEC-01)
+    # and user trace support (OBS-03).
+    [+keeplinked uid=0 gid=0 perms=0700] procnto-smp-instr -mr -d 0777 -u 0777
+}
+
+[+script] startup-script = {
+    display_msg "Ambre EDR: boot sequence starting"
+
+    # OBS-01: the system logger starts before anything else, so the start-up
+    # self-test (OBS-04) and every supervision message are recorded.
+    slogger2
+
+    # Console serial port for the operator and for QEMU diagnostics.
+    devc-ser8250 -e
+    waitfor /dev/ser1
+    reopen /dev/ser1
+
+    # PCI services: on x86_64 the virtio-blk device is a PCI device, and the
+    # block driver reaches it through the PCI server.
+    PCI_HW_MODULE=pci_hw-Intel_x86.so
+    PCI_BKWD_COMPAT_MODULE=pci_bkwd_compat.so
+    PCI_SLOG_MODULE=pci_slog2.so
+    PCI_CAP_MODULE_DIR=/usr/lib/pci
+    PCI_BASE_VERBOSITY=3
+    pci-server --config=/etc/pci_server.cfg
+
+    # SEC-01: the security policy must be in place BEFORE the EDR processes
+    # are created, so each one is born with its type.
+    # UNVERIFIED (needs QNX SDP 8.0): whether the compiled policy is applied
+    # with `secpolpush` at boot or handed to procnto at boot (procnto option
+    # and its exact spelling) - see the SDP 8.0 "Security policy" manual pages
+    # and image/README.md.
+    secpolpush /etc/system/secpol.bin
+
+    # STO-01 / GEL-02: the block layer. `devb-virtio` is the QNX 8.0 virtio
+    # disk driver (SDP package com.qnx.qnx800.target.driver.virtio.devb); it
+    # loads the block layer io-blk.so and exposes the partitions as
+    # /dev/hdXt<type> device nodes.
+    # UNVERIFIED (needs QNX SDP 8.0): the driver arguments, and the io-blk.so
+    # "validation levels" that the specification lists as verified in the QNX
+    # 8.0 documentation (cahier §14) - the io-blk.so manual page
+    # (com.qnx.doc.neutrino.utilities/topic/i/io-blk.so.html) names the
+    # accepted level values. The levels that matter here are the ones that
+    # keep the raw partitions visible under /dev and bound the block cache,
+    # so an explicit flush reaches the medium (GEL-02, essay E1).
+    devb-virtio &
+
+    # The raw journal partition of the first disk (STO-01): no filesystem on
+    # the critical path. The second disk carries the Power-Safe archive
+    # partition (STO-07). Two disks, two partitions, never the same device.
+    waitfor /dev/hd0t177 10
+    waitfor /dev/hd1t177 10
+
+    # edr-journal - priority=62 (spec §4.4)
+    # QNX-07: started from the boot image, before any filesystem is mounted.
+    # STO-01: sole owner of the raw partition /dev/hd0t177.
+    # GEL-08: the recording mode (continuous here) is fixed at build time, in
+    # this read-only image - no runtime command changes it (SEC-02, SEC-06).
+    # The priority is raised by the process itself at start-up
+    # (ambre_port_set_priority(), QNX-04); the start-up script has no
+    # priority directive.
+    # QNX-06 / ROB-04 / SEC-02: launched under the supervision wrapper, which
+    # respawns it after any kill and logs the interruption.
+    /usr/bin/ambre-supervise.sh edr-journal /proc/boot/edr-journal --disk /dev/hd0t177 --listen /dev/edr/journal --mode continuous &
+    waitfor /dev/edr/journal 10
+
+    # edr-capture - priority=60-61 (spec §4.4)
+    # QNX-07: also started from the boot image, before any filesystem mount,
+    # so the recorder is capturing less than a second after the kernel
+    # (PERF-06). It owns the input channel /dev/edr/in (ACQ-01).
+    /usr/bin/ambre-supervise.sh edr-capture /proc/boot/edr-capture --journal /dev/edr/journal --listen /dev/edr/in --profile eu &
+    waitfor /dev/edr/in 10
+
+    # STO-07: the Power-Safe archive partition is a SEPARATE device, mounted
+    # only now, after the recorder is already running (QNX-07). fs-qnx6.so
+    # mounts the QNX6 (Power-Safe) filesystem; the mount point is the device
+    # path itself, the QNX way.
+    # UNVERIFIED (needs QNX SDP 8.0): the exact fs-qnx6.so option spelling and
+    # whether it accepts a separate mount point (SDP 8.0 manual page
+    # com.qnx.doc.neutrino.utilities/topic/f/fs-qnx6.so.html).
+    fs-qnx6.so /dev/hd1t177
+    waitfor /dev/hd1t177 10
+
+    # edr-archive - priority=8 (spec §4.4)
+    # Lowest priority of the five: MCAP encoding and Power-Safe writes must
+    # never delay the capture (61) or the journal (62) - ROB-02.
+    /usr/bin/ambre-supervise.sh edr-archive /proc/boot/edr-archive --journal /dev/edr/journal --out /dev/hd1t177 &
+
+    # edrctl - priority=10 (spec §4.4)
+    # Service tool, started on demand by the operator, never supervised:
+    # /usr/bin/edrctl --journal /dev/edr/journal status
+    #
+    # edr-replay - priority=50 (spec §4.4)
+    # Demonstration producer, started on demand by the operator, one shot,
+    # never supervised. The scenario file is NOT part of the image; the
+    # demonstration adds one (host/scenarios/generate.py) before launching:
+    # /usr/bin/edr-replay --capture /dev/edr/in --scenario /tmp/scenario.txt
+    #
+    # VIE-03: no network stack is started here (no io-sock, no dhclient, no
+    # sshd): the recorder is a closed loop.
+    # SEC-02: no service that could stop or disable the recorder is started.
+
+    display_msg "Ambre EDR: boot sequence complete (closed loop, no network)"
+}
+
+#############################################
+### Read-only configuration (SEC-06)
+#############################################
+
+# SEC-06: the configuration of the recorder is the boot image itself: the
+# command lines above are part of the IFS, which the kernel maps read-only,
+# so no runtime command can change them. This file is the machine-readable
+# copy of that configuration (paths, mode, profile), in key=value form (the
+# mkifs inline-content form is not JSON-aware); its SHA-256 digest is what a
+# consumer can stamp into an export.
+# UNVERIFIED (needs QNX SDP 8.0): that the IFS is mapped read-only and that the
+# digest ends up in every event is a target-side property (journal service).
+[perms=0444] /etc/ambre/config.conf = {
+profile=eu
+mode=continuous
+raw_journal_device=/dev/hd0t177
+archive_device=/dev/hd1t177
+network=disabled
+readonly=true
+}
+
+# SEC-01: unprivileged accounts, one per process type; no shell rights for
+# the recorder processes, no network daemons.
+[perms=0444] /etc/passwd = {
+root::0:0:root:/root:/bin/sh
+edr_journal::201:201:edr-journal:/tmp:/bin/false
+edr_capture::202:202:edr-capture:/tmp:/bin/false
+edr_archive::203:203:edr-archive:/tmp:/bin/false
+edr_producer::204:204:edr-producer:/tmp:/bin/false
+edr_service::205:205:edr-service:/tmp:/bin/sh
+}
+
+#############################################
+### PCI configuration (QEMU x86_64)
+#############################################
+
+[perms=0444] /etc/pci_server.cfg = {
+[buscfg]
+DO_BUS_CONFIG=no
+
+[envars]
+PCI_DEBUG_MODULE=pci_debug2.so
+PCI_HW_MODULE=pci_hw-Intel_x86.so
+PCI_HW_CONFIG_FILE=/etc/pci_hw.cfg
+}
+
+[perms=0444] /etc/pci_hw.cfg = {
+[interrupts]
+B0:D17:F0    A    18
+B0:D17:F0    B    19
+B0:D17:F0    C    16
+B0:D17:F0    D    17
+B3:D0:F0     A    18
+B3:D0:F0     B    19
+B3:D0:F0     C    16
+B3:D0:F0     D    17
+}
+
+#############################################
+### Libraries and drivers
+#############################################
+
+/usr/lib/ldqnx-64.so.2=ldqnx-64.so.2
+/usr/lib/libc.so.6=libc.so.6
+/usr/lib/libm.so.3=libm.so.3
+/usr/lib/libgcc_s.so.1=libgcc_s.so.1
+/usr/lib/libsecpol.so.1=libsecpol.so.1
+/usr/lib/libslog2.so.1=libslog2.so.1
+/usr/lib/libslog2parse.so.1=libslog2parse.so.1
+/usr/lib/libpci.so.3.0=libpci.so.3.0
+# C++ runtime for edr-archive (C++17, MCAP writer).
+# UNVERIFIED (needs QNX SDP 8.0): the exact name of the C++ runtime library in
+# the SDP 8.0 x86_64 target (libstdc++.so.6 or the SDP's libc++).
+/usr/lib/libstdc++.so.6=libstdc++.so.6
+# STO-01: block layer used by the disk driver (QNX 8.0 storage stack).
+/usr/lib/io-blk.so=io-blk.so
+# STO-07: Power-Safe filesystem, for the archive partition only.
+/usr/lib/fs-qnx6.so=fs-qnx6.so
+/usr/lib/pci/pci_bkwd_compat.so=pci/pci_bkwd_compat.so
+/usr/lib/pci/pci_cap-0x01.so=pci/pci_cap-0x01.so
+/usr/lib/pci/pci_cap-0x05.so=pci/pci_cap-0x05.so
+/usr/lib/pci/pci_cap-0x09-1af4ffff.so=pci/pci_cap-0x09-1af4ffff.so
+/usr/lib/pci/pci_cap-0x10.so=pci/pci_cap-0x10.so
+/usr/lib/pci/pci_cap-0x11.so=pci/pci_cap-0x11.so
+/usr/lib/pci/pci_debug2.so=pci/pci_debug2.so
+/usr/lib/pci/pci_hw-Intel_x86.so=pci/pci_hw-Intel_x86.so
+/usr/lib/pci/pci_slog2.so=pci/pci_slog2.so
+/usr/lib/pci/pci_strings.so=pci/pci_strings.so
+
+#############################################
+### System utilities (no network tools)
+#############################################
+
+/usr/bin/devc-ser8250=devc-ser8250
+/usr/bin/devb-virtio=devb-virtio
+/usr/bin/pci-server=pci-server
+/usr/bin/pidin=pidin
+/usr/bin/secpolpush=secpolpush
+/usr/bin/sh=sh
+/usr/bin/slog2info=slog2info
+/usr/bin/slogger2=slogger2
+/usr/bin/toybox=toybox
+
+[type=link] /usr/bin/cat=toybox
+[type=link] /usr/bin/ls=toybox
+[type=link] /usr/bin/mkdir=toybox
+[type=link] /usr/bin/sleep=toybox
+
+#############################################
+### Security policy and supervision (SEC-01, QNX-06)
+#############################################
+
+# Compiled on the build host with:
+#   secpolcompile -o ambre.sec.bin image/ambre.sec
+[perms=0444] /etc/system/secpol.bin=ambre.sec.bin
+[perms=0755] /usr/bin/ambre-supervise.sh=ambre-supervise.sh
+
+#############################################
+### The five Ambre processes (spec §4.4)
+#############################################
+
+# QNX-07: edr-journal and edr-capture live in /proc/boot, inside the IFS, so
+# they can start before any filesystem is mounted. The three others are on the
+# IFS too: the whole recorder is closed inside the boot image (SEC-06).
+[perms=0755] /proc/boot/edr-journal=edr-journal
+[perms=0755] /proc/boot/edr-capture=edr-capture
+[perms=0755] /proc/boot/edr-archive=edr-archive
+[perms=0755] /usr/bin/edrctl=edrctl
+[perms=0755] /usr/bin/edr-replay=edr-replay

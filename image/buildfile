@@ -1,0 +1,105 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# image/buildfile - QNX 8.0 build specification for the five Ambre processes.
+#
+# This file documents the QNX SDP module/buildfile structure (objects,
+# libraries, target priorities from spec §4.4) used when compiling with qcc
+# for x86_64 and staging binaries for mkqnximage.
+#
+# UNVERIFIED (needs QNX SDP 8.0): `../../mkfiles/pre.o` / `post.o` and the
+# `[name=... priority=...]` entry syntax require an installed QNX 8.0 SDP
+# ($QNX_TARGET); neither the include machinery nor the entry attributes could
+# be compiled here. On PC without SDP, the portable halves build via the
+# top-level Makefile and QNX glue syntax is checked via `make qnx-syntax`.
+#
+# Object lists mirror the source tree of 2026-11-11 (files marked "planned"
+# are owned by other agents per docs/W2-PLAN.md and land during week 2); keep
+# them in sync when the QNX build is wired on the SDP.
+
+include ../../mkfiles/pre.o
+
+# Common portable core + IPC + QNX portability backend
+AMBRE_COMMON_OBJS = \
+    fmt/ambre_crc32c.o \
+    fmt/ambre_fmt_block.o \
+    fmt/ambre_fmt_record.o \
+    fmt/ambre_fmt_table.o \
+    fmt/ambre_fmt_scan.o \
+    fmt/ambre_fmt_recovery.o \
+    fmt/ambre_journal_core.o \
+    fmt/ambre_journal_event.o \
+    fmt/ambre_trigger.o \
+    fmt/ambre_trigger_window.o \
+    target/ipc/edr_ipc.o \
+    target/port/ambre_port_qnx.o
+
+# QNX 8.0 system libraries: libc (implicit), slog2 (OBS-01), secpol (SEC-01),
+# m (math), stdc++ (C++17 MCAP writer for edr-archive only).
+# VIE-03: libsocket is deliberately NOT linked by any Ambre process.
+LIBS_C   = slog2 secpol m
+LIBS_CXX = stdc++ slog2 secpol m
+
+# ---------------------------------------------------------------------------
+# Process 1: edr-journal (spec §4.4 priority 62, sole raw partition owner)
+# ---------------------------------------------------------------------------
+# Priority: 62 (highest among Ambre processes; io-blk inherits on write)
+# Memory lock: QNX-04 mlockall(MCL_CURRENT | MCL_FUTURE) at startup
+# Disk: raw partition /dev/hd0t177 (STO-01)
+[name=edr-journal priority=62]
+edr-journal: $(AMBRE_COMMON_OBJS) \
+    target/journal/edr_journal_svc.o \
+    target/journal/edr_journal_svc_handlers.o \
+    target/journal/edr_journal_qnx.o \
+    target/journal/main.o
+    # edr_journal_qnx.o: planned (agent qnx-glue, docs/W2-PLAN.md)
+    LIBS += $(LIBS_C)
+
+# ---------------------------------------------------------------------------
+# Process 2: edr-capture (spec §4.4 priority 60-61, trigger + class A buffers)
+# ---------------------------------------------------------------------------
+# Priority: 61 (range 60-61 per spec §4.4; triggers freeze message to journal)
+# Memory lock: QNX-04 mlockall(MCL_CURRENT | MCL_FUTURE) at startup
+[name=edr-capture priority=61]
+edr-capture: $(AMBRE_COMMON_OBJS) \
+    target/capture/edr_capture.o \
+    target/capture/edr_capture_qnx.o \
+    target/capture/main.o
+    # all three: planned (agents capture / qnx-glue, docs/W2-PLAN.md)
+    LIBS += $(LIBS_C)
+
+# ---------------------------------------------------------------------------
+# Process 3: edr-replay (spec §4.4 priority 50, demonstration input producer)
+# ---------------------------------------------------------------------------
+# Priority: 50 (below capture 60-61 and journal 62; input channel only)
+[name=edr-replay priority=50]
+edr-replay: $(AMBRE_COMMON_OBJS) \
+    target/replay/edr_replay.o \
+    target/replay/scenario_file.o \
+    target/replay/main.o
+    LIBS += $(LIBS_C)
+
+# ---------------------------------------------------------------------------
+# Process 4: edrctl (spec §4.4 priority 10, service & inspection CLI)
+# ---------------------------------------------------------------------------
+# Priority: 10 (service priority; never preempts replay/capture/journal)
+[name=edrctl priority=10]
+edrctl: $(AMBRE_COMMON_OBJS) \
+    target/ctl/edr_ctl.o \
+    target/ctl/edr_ctl_cmds.o \
+    target/ctl/main.o
+    LIBS += $(LIBS_C)
+
+# ---------------------------------------------------------------------------
+# Process 5: edr-archive (spec §4.4 priority 8, MCAP writer on Power-Safe)
+# ---------------------------------------------------------------------------
+# Priority: 8 (lowest among Ambre processes; Power-Safe I/O off critical path)
+[name=edr-archive priority=8]
+edr-archive: $(AMBRE_COMMON_OBJS) \
+    target/archive/mcap_writer.o \
+    target/archive/ambre_sha256.o \
+    target/archive/edr_archive.o \
+    target/archive/main.o
+    # edr_archive.o / main.o: planned (agent archive-cpp, docs/W2-PLAN.md)
+    LIBS += $(LIBS_CXX)
+
+include ../../mkfiles/post.o

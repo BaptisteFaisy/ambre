@@ -24,23 +24,35 @@
 int ambre_edr_build_reply(void *buf, size_t cap, uint8_t msg_type,
                            const void *body, size_t body_len)
 {
-    ambre_ipc_hdr_t h;
-    size_t total = (size_t)AMBRE_IPC_HDR_SIZE + body_len;
+    size_t off = ambre_edr_reply_reserve(buf, cap, msg_type, (uint32_t)body_len);
 
-    if (buf == NULL || total > cap || total > (size_t)AMBRE_IPC_FRAME_MAX) {
+    if (off == 0u) {
         return 0;
     }
-    h.magic    = AMBRE_IPC_MAGIC;
-    h.version  = (uint8_t)AMBRE_IPC_VERSION;
-    h.msg_type = msg_type;
-    h.flags    = 0u;
-    h.reserved = 0u;
-    h.body_len = (uint32_t)body_len;
-    memcpy(buf, &h, sizeof(h));
     if (body_len > 0u && body != NULL) {
-        memcpy((uint8_t *)buf + AMBRE_IPC_HDR_SIZE, body, body_len);
+        memcpy((uint8_t *)buf + off, body, body_len);
     }
-    return (int)total;
+    return (int)(off + body_len);
+}
+
+size_t ambre_edr_reply_reserve(void *buf, size_t cap, uint8_t msg_type,
+                               uint32_t body_len)
+{
+    ambre_ipc_hdr_t h;
+    size_t total = (size_t)AMBRE_IPC_HDR_SIZE + (size_t)body_len;
+
+    if (buf == NULL || total > cap || total > (size_t)AMBRE_IPC_FRAME_MAX) {
+        return 0u;
+    }
+    h.magic     = AMBRE_IPC_MAGIC;
+    h.version   = (uint8_t)AMBRE_IPC_VERSION;
+    h.msg_type  = msg_type;
+    h.flags     = 0u;
+    h.reserved  = 0u;
+    h.body_len  = body_len;
+    h.reserved2 = 0u;
+    memcpy(buf, &h, sizeof(h));
+    return (size_t)AMBRE_IPC_HDR_SIZE;
 }
 
 uint32_t ambre_edr_announced_peer(const void *msg, size_t len)
@@ -132,23 +144,23 @@ static bool partition_is_virgin(const ambre_disk_t *d)
 static int open_journal(ambre_edr_service_t *svc)
 {
     ambre_journal_t *j = &svc->journal;
-    bool virgin = partition_is_virgin(svc->vt);
+    bool virgin = partition_is_virgin(&svc->vt);
     int rc;
 
     if (virgin) {
         ambre_port_log(AMBRE_LOG_INFO, SVC_TAG,
                        "virgin partition: formatting (session %" PRIu64 ")",
                        svc->cfg.session_id);
-        rc = ambre_journal_format(svc->vt, &svc->cfg);
+        rc = ambre_journal_format(&svc->vt, &svc->cfg);
         if (rc != AMBRE_OK) {
             return AMBRE_PORT_ERR_IO;
         }
-        rc = ambre_journal_open(svc->vt, &svc->cfg, false, j);
+        rc = ambre_journal_open(&svc->vt, &svc->cfg, false, j);
         return (rc == AMBRE_OK) ? AMBRE_PORT_OK : AMBRE_PORT_ERR_IO;
     }
 
     ambre_port_trace(0u, AMBRE_TRACE_RECOVER);
-    rc = ambre_journal_open(svc->vt, &svc->cfg, true, j);
+    rc = ambre_journal_open(&svc->vt, &svc->cfg, true, j);
     if (rc != AMBRE_OK) {
         return AMBRE_PORT_ERR_IO;
     }
@@ -166,6 +178,7 @@ static int open_journal(ambre_edr_service_t *svc)
 int ambre_edr_service_open(ambre_edr_service_t *svc,
                             const ambre_edr_service_cfg_t *cfg)
 {
+    const ambre_disk_t *vt;
     uint64_t size;
     int rc;
 
@@ -185,12 +198,15 @@ int ambre_edr_service_open(ambre_edr_service_t *svc,
                        cfg->disk_spec, rc);
         return rc;
     }
-    svc->vt = ambre_port_disk_vtable(svc->disk);
-    if (svc->vt == NULL) {
+    vt = ambre_port_disk_vtable(svc->disk);
+    if (vt == NULL) {
         ambre_port_disk_close(svc->disk);
         svc->disk = NULL;
         return AMBRE_PORT_ERR_IO;
     }
+    /* The engine needs a writable vtable; the port hands out a const one, so
+     * the service keeps its own copy (the ctx and the callbacks are shared). */
+    svc->vt = *vt;
 
     rc = open_journal(svc);
     if (rc != AMBRE_PORT_OK) {
@@ -214,7 +230,6 @@ void ambre_edr_service_close(ambre_edr_service_t *svc)
         (void)ambre_journal_flush(&svc->journal, ambre_port_now_us());
         ambre_port_disk_close(svc->disk);
         svc->disk = NULL;
-        svc->vt = NULL;
     }
 }
 
@@ -368,7 +383,7 @@ int ambre_edr_service_selftest(ambre_edr_service_t *svc)
 {
     int rc;
 
-    if (svc == NULL || svc->vt == NULL) {
+    if (svc == NULL || svc->disk == NULL) {
         return AMBRE_PORT_ERR_PARAM;
     }
     rc = check_config(svc);
@@ -389,13 +404,73 @@ int ambre_edr_service_selftest(ambre_edr_service_t *svc)
 
 /* ----------------------------------------------------------- dispatch --- */
 
+/* SEC-05: the frame must carry the magic, the version and a body that fits
+ * the datagram. Anything else is counted and refused without any effect. */
+static int check_frame(const ambre_ipc_hdr_t *hdr, size_t len, size_t *body_len)
+{
+    if (hdr->magic != AMBRE_IPC_MAGIC || hdr->version != AMBRE_IPC_VERSION) {
+        return AMBRE_PORT_ERR_PARAM;
+    }
+    if ((size_t)hdr->body_len > len - (size_t)AMBRE_IPC_HDR_SIZE) {
+        return AMBRE_PORT_ERR_PARAM;
+    }
+    *body_len = hdr->body_len;
+    return AMBRE_PORT_OK;
+}
+
+static int dispatch(ambre_edr_service_t *svc, uint32_t peer_type,
+                    const ambre_ipc_hdr_t *hdr, const uint8_t *body,
+                    size_t body_len, void *reply, size_t reply_cap,
+                    size_t *reply_len)
+{
+    switch ((ambre_ipc_msg_t)hdr->msg_type) {
+    case AMBRE_MSG_TRIGGER:
+    case AMBRE_MSG_CONTINUE:
+    case AMBRE_MSG_SEAL:
+    case AMBRE_MSG_GAP:
+        return ambre_edr_handle_input(svc, peer_type, hdr->msg_type, body,
+                                      body_len, reply, reply_cap, reply_len);
+    case AMBRE_MSG_STATUS:
+    case AMBRE_MSG_LIST:
+    case AMBRE_MSG_EXPORT:
+    case AMBRE_MSG_VERIFY:
+        return ambre_edr_handle_service(svc, peer_type, hdr->msg_type, body,
+                                        body_len, reply, reply_cap, reply_len);
+    default:
+        /* SEC-02: there is no "stop", no "disable" and no "erase" order. Any
+         * other message type is refused and logged; the recorder keeps
+         * running and the supervisor restarts it if it is killed. */
+        svc->malformed_count++;
+        return ambre_edr_refuse(svc, peer_type, hdr->msg_type,
+                                AMBRE_PORT_ERR_PERM, reply, reply_cap,
+                                reply_len);
+    }
+}
+
+/* §4.4: notify the archive after sealing; the reply is already encoded. */
+static void drain_ready(ambre_edr_service_t *svc)
+{
+    uint8_t frame[AMBRE_IPC_HDR_SIZE + sizeof(ambre_edr_event_ready_body_t)];
+
+    if (!svc->ready_pending || svc->notify == NULL) {
+        return;
+    }
+    svc->ready_pending = false;
+    if (ambre_edr_build_reply(frame, sizeof(frame),
+                              (uint8_t)AMBRE_MSG_EVENT_READY,
+                              &svc->ready, sizeof(svc->ready)) > 0) {
+        (void)svc->notify(svc->notify_ctx, frame, sizeof(frame));
+    }
+}
+
 int ambre_edr_service_handle(ambre_edr_service_t *svc, uint32_t peer_type,
                               const void *msg, size_t len,
                               void *reply, size_t reply_cap, size_t *reply_len)
 {
     ambre_ipc_hdr_t hdr;
     const uint8_t *body;
-    size_t body_len;
+    size_t body_len = 0u;
+    int rc;
 
     if (reply_len != NULL) {
         *reply_len = 0u;
@@ -411,36 +486,14 @@ int ambre_edr_service_handle(ambre_edr_service_t *svc, uint32_t peer_type,
     }
     memcpy(&hdr, msg, sizeof(hdr));
     body = (const uint8_t *)msg + AMBRE_IPC_HDR_SIZE;
-    body_len = len - (size_t)AMBRE_IPC_HDR_SIZE;
-    if (hdr.magic != AMBRE_IPC_MAGIC || hdr.version != AMBRE_IPC_VERSION ||
-        (size_t)hdr.body_len > body_len) {
-        svc->malformed_count++;        /* SEC-05: counted, refused, no effect */
-        return ambre_edr_refuse(svc, peer_type, hdr.msg_type,
-                                AMBRE_PORT_ERR_PARAM, reply, reply_cap,
-                                reply_len);
-    }
-
-    switch ((ambre_ipc_msg_t)hdr.msg_type) {
-    case AMBRE_MSG_TRIGGER:
-    case AMBRE_MSG_CONTINUE:
-    case AMBRE_MSG_SEAL:
-    case AMBRE_MSG_GAP:
-        return ambre_edr_handle_input(svc, peer_type, hdr.msg_type, body,
-                                      hdr.body_len, reply, reply_cap, reply_len);
-    case AMBRE_MSG_STATUS:
-    case AMBRE_MSG_LIST:
-    case AMBRE_MSG_EXPORT:
-    case AMBRE_MSG_VERIFY:
-        return ambre_edr_handle_service(svc, peer_type, hdr.msg_type, body,
-                                        hdr.body_len, reply, reply_cap,
-                                        reply_len);
-    default:
-        /* SEC-02: there is no "stop", no "disable" and no "erase" order. Any
-         * other message type is refused and logged; the recorder keeps
-         * running and the supervisor restarts it if it is killed. */
+    rc = check_frame(&hdr, len, &body_len);
+    if (rc != AMBRE_PORT_OK) {
         svc->malformed_count++;
-        return ambre_edr_refuse(svc, peer_type, hdr.msg_type,
-                                AMBRE_PORT_ERR_PERM, reply, reply_cap,
-                                reply_len);
+        return ambre_edr_refuse(svc, peer_type, hdr.msg_type, rc, reply,
+                                reply_cap, reply_len);
     }
+    rc = dispatch(svc, peer_type, &hdr, body, body_len, reply, reply_cap,
+                  reply_len);
+    drain_ready(svc);
+    return rc;
 }

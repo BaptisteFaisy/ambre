@@ -135,6 +135,63 @@ static void drop_conn(ambre_port_chan_t *c, uint32_t idx)
     c->slots[idx].fd = -1;
 }
 
+/* Result of drain_ready(): nothing readable yet, keep waiting. */
+#define AMBRE_PORT_RECV_AGAIN (-1000)
+
+/* Serve the sockets that poll() reported readable. Returns the byte count of
+ * the first datagram received, AMBRE_PORT_RECV_AGAIN when only a connection or
+ * a disconnection happened, or a negative port error. */
+static int drain_ready(ambre_port_chan_t *c, const struct pollfd *fds,
+                       const uint32_t *map, nfds_t n, void *buf, size_t cap,
+                       uint32_t *peer)
+{
+    for (nfds_t k = 0u; k < n; k++) {
+        int got;
+
+        if ((fds[k].revents & POLLIN) == 0) {
+            continue;
+        }
+        if (map[k] == UINT32_MAX) {
+            (void)accept_new(c);
+            continue;
+        }
+        got = (int)recv(c->slots[map[k]].fd, buf, cap, 0);
+        if (got <= 0) {
+            if (got < 0 && errno == EINTR) {
+                continue;
+            }
+            drop_conn(c, map[k]);          /* peer closed or failed: QNX-05 */
+            continue;
+        }
+        if (peer != NULL) {
+            *peer = c->slots[map[k]].peer;
+        }
+        return got;
+    }
+    return AMBRE_PORT_RECV_AGAIN;
+}
+
+/* Build the poll set: the listening socket plus every live connection.
+ * map[k] is the slot index, or UINT32_MAX for the listener. */
+static nfds_t build_pollset(const ambre_port_chan_t *c, struct pollfd *fds,
+                            uint32_t *map)
+{
+    nfds_t n = 0;
+
+    fds[n].fd = c->listen_fd;
+    fds[n].events = POLLIN;
+    map[n++] = UINT32_MAX;
+    for (uint32_t i = 0u; i < AMBRE_PORT_MAX_CONNS; i++) {
+        if (!c->slots[i].used) {
+            continue;
+        }
+        fds[n].fd = c->slots[i].fd;
+        fds[n].events = POLLIN;
+        map[n++] = i;
+    }
+    return n;
+}
+
 int ambre_port_chan_recv(ambre_port_chan_t *c, void *buf, size_t cap,
                          uint64_t timeout_us, uint32_t *peer)
 {
@@ -145,9 +202,9 @@ int ambre_port_chan_recv(ambre_port_chan_t *c, void *buf, size_t cap,
     }
     for (;;) {
         struct pollfd fds[1u + AMBRE_PORT_MAX_CONNS];
-        nfds_t n = 0;
         uint32_t map[1u + AMBRE_PORT_MAX_CONNS];
         uint64_t now = ambre_port_now_us();
+        nfds_t n;
         int remain_ms;
         int ready;
 
@@ -155,18 +212,8 @@ int ambre_port_chan_recv(ambre_port_chan_t *c, void *buf, size_t cap,
             return AMBRE_PORT_ERR_TIMEOUT;
         }
         remain_ms = (int)((deadline - now + 999u) / 1000u);
+        n = build_pollset(c, fds, map);
 
-        fds[n].fd = c->listen_fd;
-        fds[n].events = POLLIN;
-        map[n++] = UINT32_MAX;                 /* listener marker */
-        for (uint32_t i = 0u; i < AMBRE_PORT_MAX_CONNS; i++) {
-            if (!c->slots[i].used) {
-                continue;
-            }
-            fds[n].fd = c->slots[i].fd;
-            fds[n].events = POLLIN;
-            map[n++] = i;
-        }
         ready = poll(fds, n, remain_ms);
         if (ready < 0) {
             return (errno == EINTR) ? AMBRE_PORT_ERR_TIMEOUT : AMBRE_PORT_ERR_IO;
@@ -174,32 +221,10 @@ int ambre_port_chan_recv(ambre_port_chan_t *c, void *buf, size_t cap,
         if (ready == 0) {
             return AMBRE_PORT_ERR_TIMEOUT;
         }
-        for (nfds_t k = 0u; k < n; k++) {
-            if ((fds[k].revents & POLLIN) == 0) {
-                continue;
-            }
-            if (map[k] == UINT32_MAX) {
-                (void)accept_new(c);
-                continue;
-            }
-            uint32_t idx = map[k];
-            ssize_t got = recv(c->slots[idx].fd, buf, cap, 0);
+        int got = drain_ready(c, fds, map, n, buf, cap, peer);
 
-            if (got == 0) {                  /* peer closed: QNX-05 */
-                drop_conn(c, idx);
-                continue;
-            }
-            if (got < 0) {
-                if (errno == EINTR) {
-                    continue;
-                }
-                drop_conn(c, idx);
-                continue;
-            }
-            if (peer != NULL) {
-                *peer = c->slots[idx].peer;
-            }
-            return (int)got;
+        if (got != AMBRE_PORT_RECV_AGAIN) {
+            return got;
         }
     }
 }

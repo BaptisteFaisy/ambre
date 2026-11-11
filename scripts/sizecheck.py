@@ -11,7 +11,7 @@ from pathlib import Path
 
 MAX_FILE_LINES = 500
 MAX_FUNC_LINES = 50
-EXTS = {".c", ".h", ".py"}
+EXTS = {".c", ".h", ".py", ".cpp", ".hpp"}
 SKIP_DIRS = {".git", "build", "__pycache__", ".venv"}
 
 
@@ -89,7 +89,7 @@ def c_functions(text):
 
 
 def main(argv):
-    roots = argv[1:] or ["fmt", "host", "tests", "scripts"]
+    roots = argv[1:] or ["fmt", "host", "tests", "scripts", "target"]
     violations = []
     files = 0
     for path in iter_sources(roots):

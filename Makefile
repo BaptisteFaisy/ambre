@@ -11,6 +11,7 @@
 #   make clean
 
 CC       ?= gcc
+CXX      ?= g++
 AR       ?= ar
 PYTHON   ?= python3
 BUILD    := build
@@ -20,12 +21,14 @@ WARN     := -Wall -Wextra -Wshadow -Wpedantic
 CFLAGS   ?= -std=c11 -O2 -g $(WARN) -Werror -Ifmt -I. -Itests -Ihost/simdisk \
             -Ihost/explore -Itarget -Itarget/port -Itarget/ipc
 LDFLAGS  ?=
+# C++17 is the language of the archive process (cahier des charges section 9).
+CXXFLAGS ?= -std=c++17 -O2 -g -Wall -Wextra -Werror
 
 FMT_SRC  := $(sort $(wildcard fmt/*.c))
 # Portable half of the five target processes + the portability layer.
 # *_qnx.c files are NOT part of the PC library: they are syntax-checked only
 # (target `qnx-syntax`), because they include real QNX headers.
-PORT_SRC := $(sort $(wildcard target/port/*.c))
+PORT_SRC := $(sort $(filter-out %_qnx.c,$(wildcard target/port/*.c)))
 PROC_SRC := $(sort $(filter-out %_qnx.c %/main.c %/main.cpp,$(wildcard target/*/*.c)))
 IPC_SRC  := $(sort $(wildcard target/ipc/*.c))
 # host tools linked into the PC library: the crash explorer and its support.
@@ -41,11 +44,15 @@ TEST_BIN := $(patsubst tests/%.c,$(BUILD)/%,$(TEST_SRC))
 
 EXPLORE_MAIN := host/explore/main.c
 # One binary per process, linked from its main plus the portable library.
-PROCESS_BIN  := $(patsubst target/%/main.c,$(BUILD)/%,$(wildcard target/*/main.c))
-TOOLS        := $(BUILD)/ambre-explore $(BUILD)/ambre-dump-truth $(PROCESS_BIN)
+PROCESS_SRC  := $(filter-out target/ctl/main.c target/archive/main.cpp,\
+                  $(wildcard target/*/main.c))
+PROCESS_BIN  := $(patsubst target/%/main.c,$(BUILD)/edr-%,$(PROCESS_SRC)) \
+                $(if $(wildcard target/ctl/main.c),$(BUILD)/edrctl)
+TOOLS        := $(BUILD)/ambre-explore $(BUILD)/ambre-dump-truth \
+                $(PROCESS_BIN) $(BUILD)/edr-archive
 
 .PHONY: all test explore explore-full crosscheck demo sizecheck clean tools \
-        scenario mcap verify help qnx-syntax processes
+        scenario mcap verify help qnx-syntax processes test_archive_cpp
 
 all: $(LIB) $(TEST_BIN) tools
 
@@ -75,6 +82,40 @@ $(BUILD)/edr-%: target/%/main.c $(LIB)
 # Syntax check of the QNX glue against the stub headers: objects only, never
 # linked, so a missing QNX symbol can never break the PC build (docs/QNX-PORT.md).
 QNX_GLUE := $(sort $(wildcard target/*/*_qnx.c))
+
+$(BUILD)/edrctl: target/ctl/main.c $(LIB)
+	@mkdir -p $(BUILD)
+	$(CC) $(CFLAGS) $< $(LIB) -o $@ $(LDFLAGS) -lpthread
+
+# --- edr-archive: the C++17 MCAP archive process (cahier section 9) ---------
+ARCHIVE_SRC := $(sort $(filter-out target/archive/main.cpp,\
+                 $(wildcard target/archive/*.cpp)))
+ARCHIVE_OBJ := $(patsubst %.cpp,$(BUILD)/%.o,$(ARCHIVE_SRC))
+ARCHIVE_INC := -I. -Ifmt -Itarget -Itarget/archive -Itarget/port -Itarget/ipc
+
+# -MMD -MP: the C++ headers of the archive are tracked, so touching one header
+# rebuilds every translation unit that includes it.
+$(BUILD)/target/archive/%.o: target/archive/%.cpp
+	@mkdir -p $(dir $@)
+	$(CXX) $(CXXFLAGS) -MMD -MP $(ARCHIVE_INC) -c $< -o $@
+
+-include $(ARCHIVE_OBJ:.o=.d)
+
+$(BUILD)/edr-archive: target/archive/main.cpp $(ARCHIVE_OBJ) $(LIB)
+	@mkdir -p $(BUILD)
+	$(CXX) $(CXXFLAGS) $(ARCHIVE_INC) target/archive/main.cpp \
+	  $(ARCHIVE_OBJ) $(LIB) -o $@ $(LDFLAGS) -lpthread
+
+# The C++ test suite: it links the archive objects, the C library and calls the
+# Python reader/verifier of host/ to cross-check the produced MCAP files.
+$(BUILD)/test_archive_cpp: tests/test_archive_cpp.cpp $(ARCHIVE_OBJ) $(LIB)
+	@mkdir -p $(BUILD)
+	$(CXX) $(CXXFLAGS) $(ARCHIVE_INC) -Itests tests/test_archive_cpp.cpp \
+	  $(ARCHIVE_OBJ) $(LIB) -o $@ $(LDFLAGS) -lpthread
+
+test_archive_cpp: $(BUILD)/test_archive_cpp $(BUILD)/edr-archive
+	@$(BUILD)/test_archive_cpp
+
 qnx-syntax:
 	@mkdir -p $(BUILD)/qnx-syntax
 	@for f in $(QNX_GLUE); do \

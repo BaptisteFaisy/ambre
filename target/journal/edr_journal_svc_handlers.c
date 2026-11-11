@@ -1,17 +1,11 @@
 /*
- * edr_journal_svc_handlers.c — Handlers for input and service messages.
- *
- * Requirements served: GEL-01..GEL-05 (critical path, continuation, seal),
- * GEL-06 (no archive while an event is open), OBS-03 (kernel trace at the 4
- * key milestones: trigger, submit, ack, seal), EXP-01 (status and list),
- * EXP-02 (export and fingerprint), SEC-01 (access control per message),
- * PERF-02/PERF-03 (freeze latency measurement: last_freeze_us/worst_freeze_us).
+ * edr_journal_svc_handlers.c — Message handlers: input path (GEL-01..GEL-05,
+ * OBS-03 trace, PERF-02/03 freeze latency) and service path (EXP-01 status
+ * and list, EXP-02 export and fingerprint, GEL-06 archive gate, SEC-01).
  */
 
 #include "edr_journal_svc.h"
 #include <string.h>
-
-#define SVC_TAG "edr-journal"
 
 static int ack_reply(uint32_t event_id, uint64_t freeze_us,
                      void *reply, size_t reply_cap, size_t *reply_len)
@@ -103,24 +97,15 @@ static int handle_continue(ambre_edr_service_t *svc, const uint8_t *body,
 
 /* --------------------------------------------------------------- sealing -- */
 
-static void notify_archive(ambre_edr_service_t *svc, const ambre_seal_t *seal)
+/* Queue the archive notification (§4.4): ambre_edr_service_handle() drains it
+ * through the notify sink once the SEAL reply is encoded, so a client never
+ * sees a notification before its own answer. */
+static void queue_ready(ambre_edr_service_t *svc, const ambre_seal_t *seal)
 {
-    ambre_edr_event_ready_body_t ready;
-    uint8_t msg[AMBRE_IPC_HDR_SIZE + sizeof(ready)];
-    int n;
-
-    if (svc->notify == NULL) {
-        return;
-    }
-    memset(&ready, 0, sizeof(ready));
-    ready.event_id      = seal->event_id;
-    ready.locked        = seal->locked;
-    ready.file_complete = seal->file_complete;
-    n = ambre_edr_build_reply(msg, sizeof(msg), (uint8_t)AMBRE_MSG_EVENT_READY,
-                              &ready, sizeof(ready));
-    if (n > 0) {
-        (void)svc->notify(svc->notify_ctx, msg, (size_t)n);
-    }
+    svc->ready.event_id      = seal->event_id;
+    svc->ready.locked        = seal->locked;
+    svc->ready.file_complete = seal->file_complete;
+    svc->ready_pending       = true;
 }
 
 static int handle_seal(ambre_edr_service_t *svc, const uint8_t *body,
@@ -145,7 +130,7 @@ static int handle_seal(ambre_edr_service_t *svc, const uint8_t *body,
 
     /* OBS-03 point 4: event sealed. */
     ambre_port_trace(seal.event_id, AMBRE_TRACE_SEAL);
-    notify_archive(svc, &seal);
+    queue_ready(svc, &seal);
     return ack_reply(seal.event_id, 0u, reply, reply_cap, reply_len);
 }
 
@@ -296,6 +281,84 @@ static const ambre_ev_desc_t *find_event_or_refuse(ambre_edr_service_t *svc,
     return e;
 }
 
+/* Number of raw blocks an event occupies: EMERG, the CONT records and SEAL.
+ * An event normally lives in one segment; it spans two when the journal had
+ * to rotate while the event was open. */
+static uint32_t event_block_count(const ambre_ev_desc_t *e)
+{
+    if (e->end_seg == e->start_seg) {
+        return (e->end_block >= e->start_block)
+                   ? (e->end_block - e->start_block + 1u) : 0u;
+    }
+    return (e->end_seg - e->start_seg) * AMBRE_BLOCKS_PER_SEGMENT +
+           e->end_block + 1u - e->start_block;
+}
+
+/* Linear index inside the event -> (segment, block) on the medium. */
+static void event_block_at(const ambre_ev_desc_t *e, uint32_t index,
+                           uint32_t *seg, uint32_t *blk)
+{
+    uint32_t s = e->start_seg;
+    uint32_t b = e->start_block + index;
+
+    while (b >= AMBRE_BLOCKS_PER_SEGMENT && s < e->end_seg) {
+        b -= AMBRE_BLOCKS_PER_SEGMENT;
+        s++;
+    }
+    *seg = s;
+    *blk = b;
+}
+
+/* Read one block of the event exactly as it lies on the medium: the archive
+ * and edrctl rebuild the MCAP from those bytes (EXP-02). */
+static int read_event_block(const ambre_edr_service_t *svc,
+                            const ambre_ev_desc_t *e, uint32_t index,
+                            uint8_t raw[AMBRE_BLOCK_SIZE])
+{
+    uint32_t seg;
+    uint32_t blk;
+
+    event_block_at(e, index, &seg, &blk);
+    return (svc->vt.read(svc->vt.ctx, ambre_block_offset(seg, blk), raw,
+                         AMBRE_BLOCK_SIZE) == 0) ? AMBRE_PORT_OK
+                                                 : AMBRE_PORT_ERR_IO;
+}
+
+static int read_export_blocks(ambre_edr_service_t *svc, const ambre_ev_desc_t *e,
+                              uint32_t first_blk, uint32_t take,
+                              uint8_t *dst, size_t hdr_off)
+{
+    uint8_t *payload = dst + hdr_off + sizeof(ambre_edr_export_body_t);
+
+    for (uint32_t k = 0u; k < take; k++) {
+        if (read_event_block(svc, e, first_blk + k,
+                             payload + (size_t)k * AMBRE_BLOCK_SIZE)
+                != AMBRE_PORT_OK) {
+            return AMBRE_PORT_ERR_IO;
+        }
+    }
+    return AMBRE_PORT_OK;
+}
+
+/* How many raw blocks of an event fit in one reply, given the reply ceiling
+ * and the pagination offset. */
+static uint32_t export_take(const ambre_ev_desc_t *e, uint32_t first_blk,
+                            size_t reply_cap)
+{
+    uint32_t total = event_block_count(e);
+    size_t max_body = (reply_cap < (size_t)AMBRE_IPC_FRAME_MAX) ?
+                      reply_cap : (size_t)AMBRE_IPC_FRAME_MAX;
+    size_t room;
+    uint32_t take;
+
+    if (max_body < (size_t)AMBRE_IPC_HDR_SIZE + sizeof(ambre_edr_export_body_t)) {
+        return 0u;
+    }
+    room = max_body - (size_t)AMBRE_IPC_HDR_SIZE - sizeof(ambre_edr_export_body_t);
+    take = (uint32_t)(room / AMBRE_BLOCK_SIZE);
+    return (take > total - first_blk) ? (total - first_blk) : take;
+}
+
 static int handle_export(ambre_edr_service_t *svc, uint32_t peer_type,
                          const uint8_t *body, size_t len,
                          void *reply, size_t reply_cap, size_t *reply_len)
@@ -303,12 +366,8 @@ static int handle_export(ambre_edr_service_t *svc, uint32_t peer_type,
     const ambre_ev_desc_t *e;
     ambre_edr_export_req_t req;
     ambre_edr_export_body_t out;
-    uint32_t total;
-    uint32_t blk_idx;
-    uint32_t take;
-    uint8_t *payload;
-    size_t space;
-    int n;
+    uint32_t total, blk_idx, take;
+    size_t hdr_off;
 
     if (len < sizeof(req)) {
         return ambre_edr_refuse(svc, peer_type, (uint8_t)AMBRE_MSG_EXPORT,
@@ -320,38 +379,26 @@ static int handle_export(ambre_edr_service_t *svc, uint32_t peer_type,
     if (e == NULL) {
         return AMBRE_PORT_ERR_NOENT;
     }
-    total = (e->end_block >= e->start_block) ?
-            (e->end_block - e->start_block + 1u) : 0u;
+    total = event_block_count(e);
     blk_idx = (req.first_block < total) ? req.first_block : total;
-    if (reply_cap < AMBRE_IPC_HDR_SIZE + sizeof(out)) {
-        return AMBRE_PORT_ERR_FULL;
-    }
-    space = reply_cap - AMBRE_IPC_HDR_SIZE - sizeof(out);
-    take = (uint32_t)(space / AMBRE_BLOCK_SIZE);
-    if (take > total - blk_idx) {
-        take = total - blk_idx;
-    }
+    take = export_take(e, blk_idx, reply_cap);
     memset(&out, 0, sizeof(out));
-    out.event_id     = req.event_id;
-    out.first_block  = blk_idx;
-    out.block_count  = take;
+    out.event_id = req.event_id;
+    out.first_block = blk_idx;
+    out.block_count = take;
     out.total_blocks = total;
-
-    n = ambre_edr_build_reply(reply, reply_cap, AMBRE_EDR_REPLY_EXPORT,
-                              &out, sizeof(out) + (size_t)take * AMBRE_BLOCK_SIZE);
-    if (n <= 0) {
+    hdr_off = ambre_edr_reply_reserve(reply, reply_cap, AMBRE_EDR_REPLY_EXPORT,
+        (uint32_t)(sizeof(out) + (size_t)take * AMBRE_BLOCK_SIZE));
+    if (hdr_off == 0u) {
         return AMBRE_PORT_ERR_FULL;
     }
-    payload = (uint8_t *)reply + AMBRE_IPC_HDR_SIZE + sizeof(out);
-    for (uint32_t k = 0u; k < take; k++) {
-        uint64_t off = ambre_block_offset(e->start_seg, e->start_block + blk_idx + k);
-        if (svc->vt->read(svc->vt->ctx, off, payload + (size_t)k * AMBRE_BLOCK_SIZE,
-                          AMBRE_BLOCK_SIZE) != 0) {
-            return ambre_edr_refuse(svc, peer_type, (uint8_t)AMBRE_MSG_EXPORT,
-                                    AMBRE_PORT_ERR_IO, reply, reply_cap, reply_len);
-        }
+    memcpy((uint8_t *)reply + hdr_off, &out, sizeof(out));
+    if (read_export_blocks(svc, e, blk_idx, take, (uint8_t *)reply, hdr_off)
+        != AMBRE_PORT_OK) {
+        return ambre_edr_refuse(svc, peer_type, (uint8_t)AMBRE_MSG_EXPORT,
+                                AMBRE_PORT_ERR_IO, reply, reply_cap, reply_len);
     }
-    *reply_len = (size_t)n;
+    *reply_len = hdr_off + sizeof(out) + (size_t)take * AMBRE_BLOCK_SIZE;
     return AMBRE_PORT_OK;
 }
 
@@ -362,9 +409,9 @@ static int handle_verify(ambre_edr_service_t *svc, uint32_t peer_type,
     const ambre_ev_desc_t *e;
     ambre_edr_verify_req_t req;
     ambre_edr_verify_body_t out;
-    uint32_t total;
-    uint32_t fp = 0xFFFFFFFFu;
     uint8_t blk[AMBRE_BLOCK_SIZE];
+    uint32_t total;
+    uint32_t fp = 0u;
     int n;
 
     if (len < sizeof(req)) {
@@ -377,11 +424,9 @@ static int handle_verify(ambre_edr_service_t *svc, uint32_t peer_type,
     if (e == NULL) {
         return AMBRE_PORT_ERR_NOENT;
     }
-    total = (e->end_block >= e->start_block) ?
-            (e->end_block - e->start_block + 1u) : 0u;
+    total = event_block_count(e);
     for (uint32_t k = 0u; k < total; k++) {
-        uint64_t off = ambre_block_offset(e->start_seg, e->start_block + k);
-        if (svc->vt->read(svc->vt->ctx, off, blk, sizeof(blk)) != 0) {
+        if (read_event_block(svc, e, k, blk) != AMBRE_PORT_OK) {
             return ambre_edr_refuse(svc, peer_type, (uint8_t)AMBRE_MSG_VERIFY,
                                     AMBRE_PORT_ERR_IO, reply, reply_cap, reply_len);
         }
@@ -403,32 +448,32 @@ static int handle_verify(ambre_edr_service_t *svc, uint32_t peer_type,
     return AMBRE_PORT_OK;
 }
 
+/* SEC-01: the read operation a service message performs, -1 when unknown. */
+static int service_op(uint8_t msg_type)
+{
+    switch ((ambre_ipc_msg_t)msg_type) {
+    case AMBRE_MSG_STATUS: return (int)AMBRE_OP_READ_STATUS;
+    case AMBRE_MSG_LIST:
+    case AMBRE_MSG_EXPORT:
+    case AMBRE_MSG_VERIFY: return (int)AMBRE_OP_READ_EVENTS;
+    default:               return -1;
+    }
+}
+
 int ambre_edr_handle_service(ambre_edr_service_t *svc, uint32_t peer_type,
                              uint8_t msg_type, const uint8_t *body,
                              size_t body_len, void *reply, size_t reply_cap,
                              size_t *reply_len)
 {
-    ambre_access_op_t op;
+    int op = service_op(msg_type);
 
-    switch ((ambre_ipc_msg_t)msg_type) {
-    case AMBRE_MSG_STATUS:
-        op = AMBRE_OP_READ_STATUS;
-        break;
-    case AMBRE_MSG_LIST:
-    case AMBRE_MSG_EXPORT:
-    case AMBRE_MSG_VERIFY:
-        op = AMBRE_OP_READ_EVENTS;
-        break;
-    default:
-        return ambre_edr_refuse(svc, peer_type, msg_type, AMBRE_PORT_ERR_PARAM,
+    if (op < 0 ||
+        ambre_edr_read_allowed(peer_type, (ambre_access_op_t)op) != AMBRE_PORT_OK) {
+        return ambre_edr_refuse(svc, peer_type, msg_type,
+                                (op < 0) ? AMBRE_PORT_ERR_PARAM
+                                         : AMBRE_PORT_ERR_PERM,
                                 reply, reply_cap, reply_len);
     }
-
-    if (ambre_edr_read_allowed(peer_type, op) != AMBRE_PORT_OK) {
-        return ambre_edr_refuse(svc, peer_type, msg_type, AMBRE_PORT_ERR_PERM,
-                                reply, reply_cap, reply_len);
-    }
-
     switch ((ambre_ipc_msg_t)msg_type) {
     case AMBRE_MSG_STATUS:
         return handle_status(svc, reply, reply_cap, reply_len);
@@ -437,11 +482,8 @@ int ambre_edr_handle_service(ambre_edr_service_t *svc, uint32_t peer_type,
     case AMBRE_MSG_EXPORT:
         return handle_export(svc, peer_type, body, body_len, reply, reply_cap,
                              reply_len);
-    case AMBRE_MSG_VERIFY:
+    default:
         return handle_verify(svc, peer_type, body, body_len, reply, reply_cap,
                              reply_len);
-    default:
-        return ambre_edr_refuse(svc, peer_type, msg_type, AMBRE_PORT_ERR_PARAM,
-                                reply, reply_cap, reply_len);
     }
 }

@@ -191,7 +191,9 @@ The PC explorer proves the **logic**. It does not prove that QNX emits the
 flush orders, nor that the hardware behaves.
 
 - **Level 2** (real processes, real `SIGKILL`, real recovery) exists in
-  `host/e2e/`; its campaign is `TODO(campaign)` — see `docs/CAMPAIGN.md` §4.
+  `host/e2e/`; its campaign has been run on PC — 200 cuts (18:41) then the
+  full 500-stop level at the week-5 close-out (`build-close/processcut/report-500.json`) —
+  see `docs/CAMPAIGN.md` §4 and `docs/VALIDATION.md` §3.
 - **Level 2 under QEMU** (`host/powercut/`) is written and green in dry-run,
   but **0 cuts have been run**: there is no QNX SDP, therefore no image, on
   this machine.

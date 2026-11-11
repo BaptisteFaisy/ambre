@@ -128,8 +128,12 @@ Properties of the path:
   times and `file_complete = yes` (GEL-05).
 - No archive write happens while an event is open (GEL-06).
 
-The timing target of 20 ms is a **target**, not a measured result. The measured
-value is `TODO(campaign)` — see `docs/VALIDATION.md`, campaign "latency".
+The timing target of 20 ms is a **target** on the reference hardware; the
+on-target measurement is `BLOCKED(no QNX SDP)` (`make latency-all` on the
+booted image). On the POSIX backend the campaign **has** run and is published
+(`docs/CAMPAIGN-LATENCY.md`): trigger → acquired median 2.7–4.0 ms, p99
+9.3–35.0 ms, max 108 ms — 99.7 % of it NVMe media time — and the software
+share alone is a median of 10 µs against the 500 µs budget.
 
 ---
 
@@ -157,7 +161,14 @@ On the raw partition the flush order reaches the medium as a flush order
 cost of step 3 is a property of the medium, not of the file system. This is
 still an assumption: essay E1 (`host/powercut/e1_flush_probe.py`) exists to
 confirm that a write plus a flush on a raw partition reaches the virtual disk
-as a flush order. Its result is `TODO(campaign)`.
+as a flush order. Its result is `BLOCKED(no QNX SDP)`: the essay needs a real
+`io-blk` behind the device — on target, build and boot
+`mkqnximage -f image/ambre.build`, then run
+`python3 host/powercut/e1_flush_probe.py --mode guest --image qnx80.img`
+(the host-mode NBD/`qemu-io` fallback needs the same image). The PC side of
+the probe is pinned honest by
+`test:tests/test_port_posix.c::flush probe is honest`: it reports whether the
+flush order was accepted and what it cost, never that it reached the medium.
 
 The archive pays the Power-Safe price instead, and pays it off the critical
 path: write to a temporary name, sync, rename, sync the directory. The journal
@@ -294,7 +305,10 @@ Timing is relative to the trigger and to the acquisition of the event.
 | after sealing | Everything, with "file complete = yes" |
 
 The risk window is not a bug: it is the physical meaning of a 20 ms freeze
-budget. It is quantified by the latency campaign, `TODO(campaign)`.
+budget. It is quantified by the latency campaign on the POSIX backend
+(`docs/CAMPAIGN-LATENCY.md`: trigger → acquired median 2.7–4.0 ms, 99.7 %
+media time); the quantification on the reference hardware is
+`BLOCKED(no QNX SDP)`.
 
 ---
 

@@ -50,6 +50,28 @@ static void test_clock_is_monotonic(void)
     AMBRE_CHECK(ambre_port_now_us() > t1);
 }
 
+/* ACQ-02 on this backend: the monotonic clock must resolve 100 us or
+ * better. Take the smallest positive step observed between adjacent reads;
+ * preemption can only inflate a step, so the minimum bounds the real
+ * granularity. The same property on the QNX target clock stays
+ * BLOCKED(no QNX SDP) — see docs/VALIDATION.md ACQ-02. */
+static void test_clock_resolution_at_most_100us(void)
+{
+    uint64_t min_step = UINT64_MAX;
+    uint64_t prev = ambre_port_now_us();
+
+    for (int i = 0; i < 200000 && min_step > 1u; i++) {
+        uint64_t now = ambre_port_now_us();
+        if (now > prev && (now - prev) < min_step) {
+            min_step = now - prev;
+        }
+        prev = now;
+    }
+    AMBRE_CHECK(min_step < UINT64_MAX);          /* the clock did advance */
+    AMBRE_CHECK_MSG(min_step <= 100u,
+                    "clock granularity %" PRIu64 " us > 100 us", min_step);
+}
+
 static void test_sleep_waits_at_least_the_requested_time(void)
 {
     uint64_t asked = 5000u;                 /* 5 ms */
@@ -434,6 +456,7 @@ static void test_access_control_sec01(void)
 static const ambre_test_case_t cases[] = {
     { "backend identifies itself", test_backend_identifies_itself },
     { "clock is monotonic", test_clock_is_monotonic },
+    { "clock resolution is at most 100 us", test_clock_resolution_at_most_100us },
     { "sleep waits at least the requested time", test_sleep_waits_at_least_the_requested_time },
     { "disk write/read round trip", test_disk_write_read_roundtrip },
     { "disk data survives the flush", test_disk_data_survives_the_flush },

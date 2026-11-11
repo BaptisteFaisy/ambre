@@ -13,8 +13,11 @@ Binary contract: `docs/FORMAT.md`.
 **Every measured figure in this document comes out of a command that was
 actually run**, quoted next to it, on 2026-11-11 on the development machine
 (x86-64, 12 cores, gcc 13.3.0, Python 3.12.3). Slots that have not been
-measured remain marked `TODO(campaign)` — nothing here may be read as a claim
-that a measurement exists where none was taken.
+measured carry an explicit blocker — `BLOCKED(no QNX SDP)` for everything
+that needs the QNX target, `BLOCKED(no Raspberry Pi 5 bench)` for the
+hardware level, or a named wall-clock/harness budget — each with the command
+that will produce the number on the missing dependency. Nothing here may be
+read as a claim that a measurement exists where none was taken.
 
 ---
 
@@ -217,8 +220,8 @@ and fixed thanks to it, and their non-regression cases live in
 
 ### Level 2 — real cuts under QEMU, and the POSIX process-cut bench
 
-**Process cuts on the POSIX bench (`host/e2e/`, `host/processcut/`) — harness
-present, campaign `TODO(campaign)`.** The bench drives the real chain
+**Process cuts on the POSIX bench (`host/e2e/`, `host/processcut/`) — campaign
+run on PC (200 published, 500-level run in the week-5 close-out).** The bench drives the real chain
 (replay → capture → journal over AF_UNIX with the frozen `target/edr_ipc.h`
 protocol), `SIGKILL`s the journal at a chosen instant (`pre`, `acquired`,
 `sealed`, `recovery`, `random`, or a millisecond), restarts it on the same disk
@@ -233,13 +236,21 @@ python3 host/processcut/campaign.py --bins build --scenario build/scenario.txt \
         --cycles 200 --report build/processcut-report.json
 ```
 
-**200 of the 500 forced process stops of §7.7 have been run on POSIX**
-(`build-e2e/processcut/report-200.json`, 2026-11-11 18:41): 200 cuts, 0 errors,
-**0 invariant violations**, verdicts 199 `ok` + 1 `check_failed`
-(`class_a.fidelity(bench)`, cycle 67 — one class A point matched no injected row
-within 250 ms), plus 2 upstream findings on `timestamps.monotonic(/edr/meta/gaps)`.
-Those three items are published **unresolved**; they belong to the bench's owning
-agent. The remaining 300 stops and any target run stay `TODO(campaign)`. The bench itself carries two honesty notes:
+**The forced process stops of §7.7 have been run on POSIX up to the full
+500-stop level.** The first 200 (`build-e2e/processcut/report-200.json`,
+2026-11-11 18:41): 200 cuts, 0 errors, **0 invariant violations**, verdicts
+199 `ok` + 1 `check_failed` (`class_a.fidelity(bench)`, cycle 67 — one class A
+point matched no injected row within 250 ms), plus 2 upstream findings on
+`timestamps.monotonic(/edr/meta/gaps)`; those three items are published
+**unresolved**. The 500-stop level was run in the week-5 close-out on the same
+backend (`build-close/processcut/report-500.json`, 22:58): 500 cuts, 0 errors,
+498 `ok` + **2 `inconsistent_state` (I7)** — qualified and published
+unresolved in §3 below, artefacts kept. All five open items belong to the
+bench's owning agent. Any run **on the QNX target** stays
+`BLOCKED(no QNX SDP)` — on target: `python3 host/powercut/powercut_campaign.py
+--image qnx80.img --scenario build/scenario.txt --random-cuts 500 --jobs 4
+--report build/campaign-target.json` after `mkqnximage -f image/ambre.build`.
+The bench itself carries two honesty notes:
 `class_a.fidelity` cannot pass on the real process chain (the journal stamps
 monotonic time, the replay does not emit wheel speeds — `host/e2e/e2e_fidelity.py`
 substitutes a field-level check of what the chain really carries), and a
@@ -253,7 +264,11 @@ orchestrator and its harnesses exist in `host/powercut/` and their logic is
 tested (18 tests, dry-run backend, `python3 tests/test_powercut_py.py`,
 re-measured OK on 2026-11-11), but there is
 no QNX SDP and no QNX image on the machine, so no virtual machine has been cut
-yet. The socle threshold (200 cuts) is `TODO(campaign)`.
+yet. The socle threshold (200 cuts) is `BLOCKED(no QNX SDP)` — on target:
+`python3 host/powercut/powercut_campaign.py --image qnx80.img --scenario
+build/scenario.txt --random-cuts 200 --seed 4242 --jobs 4 --report
+build/campaign.json` (needs the image built with `mkqnximage -f
+image/ambre.build`).
 
 The orchestrator (`host/powercut/`) starts QEMU, runs the scenario, kills the
 QEMU process at a chosen instant, restarts it, exports the events and compares
@@ -272,7 +287,10 @@ them with the injected data.
 
 Real electrical cuts driven by a relay, on an SD card and on NVMe, with the
 same comparison as level 2, plus the real latency measurements. Not started:
-`TODO(campaign)`.
+`BLOCKED(no Raspberry Pi 5 bench — no relay-driven hardware on this machine)`;
+on the bench: build the image (`mkqnximage -f image/ambre.build`), flash it,
+and drive the relay cuts with `host/powercut/` in level-3 mode plus
+`make latency-all` on the same hardware (PERF-08).
 
 ---
 
@@ -318,18 +336,18 @@ From the specification §7.7. "Socle" = level S, "Complet" = level C,
 | **Invariant violations tolerated** | **0** | **0** | **0** |
 
 Current status of each threshold (measured 2026-11-11 where a figure appears;
-`TODO(campaign)` elsewhere — nothing is invented):
+an explicit `BLOCKED(...)` marker elsewhere — nothing is invented):
 
 | Threshold | Result | Where |
 |---|---|---|
 | 10 000 cut states | **reached** — 10 000 states, 0 violations, 29 s (`make BUILD=build-ci explore`) | `build/explore.json` |
 | 1 000 000 cut states, nested | **exhaustive instead** — 64 591 states = *every reachable state* of the reference 30 s scenario, nested included, 0 violations, 334.3 s. The 1 000 000 figure is an upper bound the reachable space never reaches; exhaustiveness, not the round number, is the guarantee (`make explore-full`) | `build/explore-full.json` |
-| 200 QEMU cuts | **0/200 — not started**: no QNX SDP or QNX image on the machine | campaign report JSON (does not exist yet) |
-| 2 000 QEMU cuts, swept | **not started** (same reason) | campaign report JSON |
-| 10 000 triggers measured | **partial** — 200 trigger → acquired cycles per load measured on POSIX across 4 loads (`docs/CAMPAIGN-LATENCY.md`); the 1 000 / 10 000-trigger volumes and the target run are `TODO(campaign)` | `build-lat/latency-<load>.json` |
-| 500 forced process stops | **200 of 500 run on POSIX** (`build-e2e/processcut/report-200.json`, 2026-11-11 18:41): 200 cuts, 0 errors, **0 invariant violations**, 199 `ok` + 1 `check_failed` (`class_a.fidelity(bench)`, cycle 67) and 2 upstream findings on `/edr/meta/gaps` monotonicity — published unresolved. The remaining 300 and any QNX-target run stay `TODO(campaign)` | `build-e2e/processcut/report-200.json` |
-| 5 000 forced process stops | **not started** — needs the QNX target | fault-injection report |
-| 500 real electrical cuts | **not started** — no Raspberry Pi 5 bench | hardware report |
+| 200 QEMU cuts | **0/200 — `BLOCKED(no QNX SDP)`**: no SDP and no QNX image on the machine; on target: `python3 host/powercut/powercut_campaign.py --image qnx80.img --scenario build/scenario.txt --random-cuts 200 --seed 4242 --jobs 4 --report build/campaign.json` | campaign report JSON (does not exist yet) |
+| 2 000 QEMU cuts, swept | **`BLOCKED(no QNX SDP)`** (same reason); same command with the §1 sweep and `--random-cuts 2000` | campaign report JSON |
+| 10 000 triggers measured | **partial** — 200 trigger → acquired cycles per load measured on POSIX across 4 loads (`docs/CAMPAIGN-LATENCY.md`); the 1 000-trigger level-S volume was run on POSIX in the week-5 close-out (§4.7); the 10 000-trigger level-C volume is `BLOCKED(campaign wall-clock: ≈ 4–5 h of exclusive machine time per load — 200 triggers took 296 s)` (`make latency LATENCY_TRIGGERS=10000`); the target run is `BLOCKED(no QNX SDP)` | `build-lat/latency-<load>.json`, `build-close/latency-none.json` |
+| 500 forced process stops | **500 of 500 run on POSIX** (`build-close/processcut/report-500.json`, 2026-11-11 22:58, `make BUILD=build-close processcut E2E_CYCLES=500`): 500 cuts, 0 errors, 498 `ok` + **2 `inconsistent_state` (I7), cycles 377 and 457** — published **unresolved**, artefacts kept (`report-500.json-violations/`). Close-out evidence: both events came back `seal_cause=NORMAL` (written by the live journal — the recovery only writes `POWERCUT`), i.e. the seal had reached the disk before the `SIGKILL` landed (POSIX semantics: writes handed to the kernel survive); both cycles ran on a slow medium at that instant (freeze 129.6 ms / 35.6 ms vs 3.9 ms median), which pushes the bench's `acquired` observation next to the real end of event — a window-classification race rather than data loss: the official verifier passes every check but `class_a.fidelity`, which the bench documents as unable to pass on the real chain (field-level fidelity 6/7 points). Triage belongs to the bench's owning agent (`host/e2e/`). The earlier 200-cut run (`build-e2e/processcut/report-200.json`, 18:41) stands as published: 0 violations, 1 `check_failed`, 2 upstream findings. Any run **on the QNX target** stays `BLOCKED(no QNX SDP)` | `build-close/processcut/report-500.json` |
+| 5 000 forced process stops | **`BLOCKED(no QNX SDP)`** — the level-“extrême” volume runs on the QNX target | fault-injection report |
+| 500 real electrical cuts | **`BLOCKED(no Raspberry Pi 5 bench)`** — relay-driven cuts need the hardware bench | hardware report |
 | Invariant violations | **0** over 64 591 explored states (I1..I8 each 0) | `violations_by_invariant` in the report JSON |
 
 Cross-check DEC-12, measured the same day (`make BUILD=build-ci crosscheck`,
@@ -341,7 +359,9 @@ files, 0 divergences.
 The latency figures of PERF-01..PERF-05 follow the same rule: the target
 (20 ms from trigger to acquired, 2 ms from the threshold-crossing sample,
 500 µs of software time, 50 µs at the 99th percentile for a frame send) is a
-**target**, and the measured value is `TODO(campaign)`.
+**target**; the POSIX measurements are published in `docs/CAMPAIGN-LATENCY.md`
+and the on-target values are `BLOCKED(no QNX SDP)` (`make latency-all` on the
+booted target).
 
 ---
 
@@ -457,7 +477,7 @@ The two implementations must produce byte-identical `.dec` files (`diff`).
 ### 4.5 Level 2 — process cuts (POSIX bench) and real cuts under QEMU
 
 The POSIX process-cut bench (real processes, real `SIGKILL`, real recovery —
-campaign `TODO(campaign)`, see §1 Level 2):
+campaign run on PC, see §1 Level 2 and the report quoted in §3):
 
 ```sh
 python3 host/e2e/e2e_run.py --bins build --scenario build/scenario.txt \
@@ -512,7 +532,7 @@ python3 host/powercut/powercut_campaign.py --image qnx80.img \
 ### 4.6 Level 3 — hardware (Raspberry Pi 5)
 
 Not started. The relay-driven cut driver, the SD card and the NVMe runs, and
-the latency histogram on real hardware are `TODO(campaign)`.
+the latency histogram on real hardware are `BLOCKED(no Raspberry Pi 5 bench)`.
 
 ### 4.7 Latency campaign
 
@@ -522,6 +542,21 @@ sealing. **It has been run on the POSIX backend and is published in
 `docs/CAMPAIGN-LATENCY.md`** (four loads × 200 measured trigger → acquired
 cycles, 2026-11-11, `backend=posix`; reports in
 `$(BUILD)/latency-<load>.json`, schema `ambre.latency.campaign/1`).
+
+Week-5 close-out: the level-S volume was reached on the same backend —
+**1 000 requested triggers, 1 007 measured trigger → acquired cycles**
+(127 crash triggers + 880 re-fires, 134 journal boots, load `none`, 1 096 s,
+`make BUILD=build-close latency LATENCY_LOAD=none LATENCY_TRIGGERS=1000`,
+report `build-close/latency-none.json`). Verdicts straight out of that report:
+PERF-02 freeze median 5 427 µs / p99 29 949 µs / max 59 451 µs with
+**18 overshoots of the 20 ms deadline**; PERF-01 crash-trigger pulse median
+1 129 µs / p99 27 534 µs with **36 overshoots of the 2 ms deadline over 127**
+(re-fires are slower by design: they queue behind the freeze, median 25.7 ms);
+PERF-03 software share median 9 µs / p99 89 µs with **3 overshoots of the
+500 µs budget over 1 000**; PERF-05 quiet-run p99 250 µs, still above the
+50 µs target. These are `backend=posix` numbers on NVMe — they say nothing
+about the reference hardware, where every row above stays
+`BLOCKED(no QNX SDP)`.
 
 ```sh
 make BUILD=build-mine latency LATENCY_LOAD=none   # one load
@@ -535,17 +570,18 @@ Verdicts as published there, and the two limits that matter:
 | PERF-01 | ≤ 2 ms | median 1.1–2.2 ms, p99 9.2–203 ms | **exceeded** at the tail (worst case: capture descheduled behind a busy device) |
 | PERF-02 | ≤ 20 ms | median 2.7–4.0 ms, p99 9.3–35.0 ms, max 108 ms | **not proven**: 99.7 % of the freeze is NVMe media time, not our code |
 | PERF-03 | ≤ 500 µs | median **10 µs**, p99 52–108 µs, p99.9 64–831 µs | **met** at median and p99 under every load (2 events of 200 over budget at p99.9 under `disk`) |
-| PERF-04 | 0 / 1 000 (S), 10 000 (C) | 200 triggers per campaign | **volume not reached** — `TODO(campaign)` |
+| PERF-04 | 0 / 1 000 (S), 10 000 (C) | **1 007 cycles measured at the S volume on POSIX** (close-out): 18 overshoots of the 20 ms freeze deadline, 36/127 of the 2 ms pulse deadline, 3/1 000 of the 500 µs software budget | **NOT met on POSIX** at the S volume (`build-close/latency-none.json`); the C volume is `BLOCKED(campaign wall-clock ≈ 4–5 h per load)`; on target `BLOCKED(no QNX SDP)` |
 | PERF-05 | < 50 µs p99 | p99 ≤ 5 ms (bucket ceiling) | **not met** |
-| PERF-06 | < 1 s after kernel start | — | not measured, needs the target |
-| PERF-07 | 3 worst cases by **kernel** trace | decomposed from the `AMBRE_TRACE` log | partial: decomposition yes, kernel trace no |
-| PERF-08 | Raspberry Pi 5 | — | not measured, no bench |
+| PERF-06 | < 1 s after kernel start | — | `BLOCKED(no QNX SDP)` — on target: measure kernel start → first captured frame (recovery included) from the `slog2info` timestamps |
+| PERF-07 | 3 worst cases by **kernel** trace | decomposed from the `AMBRE_TRACE` log | partial: decomposition yes, kernel trace `BLOCKED(no QNX SDP — needs tracelogger)` |
+| PERF-08 | Raspberry Pi 5 | — | `BLOCKED(no Raspberry Pi 5 bench)` |
 
 The two limits: **these numbers come from `backend=posix`** (a regular file as
 the raw partition, AF_UNIX sockets, `fdatasync()`), never from QNX; and the
 software share (PERF-03) is the only one of them that is a statement about our
 code — everything else is dominated by the support. The target rows stay
-`TODO(campaign)` until an SDP exists.
+`BLOCKED(no QNX SDP)`: `make latency-all` on the booted target is the command
+that will produce them.
 
 ### 4.8 Export and verification
 
@@ -577,8 +613,11 @@ scenario, the mandatory metadata and the coherence of `file_complete`.
 ## 5. Traceability matrix — level S requirements
 
 One line per level-S requirement of the specification §5. The column "how it
-is verified" names the test or the campaign. Requirements that no test covers
-yet are marked explicitly with `TODO(week 5)`; no result is invented.
+is verified" names the test or the campaign. Requirements whose remaining
+verification needs the QNX target are marked `BLOCKED(no QNX SDP)` with the
+target-side command; no result is invented. (Week-5 close-out: the former
+`TODO(week 5)` / `TODO(campaign)` markers were all either closed by a real
+test/measurement on PC or requalified into the explicit blockers below.)
 
 Legend of the verification column: `test:<file>::<case>` = a named case of a
 test file; `campaign:<name>` = a campaign that produces the evidence.
@@ -587,9 +626,9 @@ test file; `campaign:<name>` = a campaign that produces the evidence.
 
 | ID | Requirement (S) | How it is verified |
 |---|---|---|
-| ACQ-01 | Frames from several producers accepted on `/dev/edr/in`, ≤ 10 ms and ≤ 4 KiB per frame | `test:tests/test_ipc.c::4096-byte message passes exactly`, `test:tests/test_capture.c::capture_frame_valid`, `capture_frame_too_big` (PC backend); the QNX resource manager runtime is `TODO(week 5)` — glue syntax-checked only (`make qnx-syntax`, needs the SDP) |
-| ACQ-02 | Timestamp on reception, monotonic clock, ≤ 100 µs resolution, no absolute timestamp | **partial** — `test:tests/test_port_posix.c::clock is monotonic` + `test:tests/test_capture.c::capture_quality_and_time` + `test:tests/test_mcap_py.py::test_verify_rejects_an_absolute_timestamp_in_metadata`; the ≤ 100 µs resolution on the target clock is `TODO(week 5)` |
-| ACQ-03 | Supported rates 1 kHz / 100 Hz / 10 Hz, list fixed at build time | **partial** — the fixed table is `ambre_capture_signal_period_us()` (`target/capture/edr_capture.c`), pinned by `test:tests/test_capture.c::capture_gap_detection` (signal 1 at exactly 1 kHz); a dedicated per-rate test is `TODO(week 5)` |
+| ACQ-01 | Frames from several producers accepted on `/dev/edr/in`, ≤ 10 ms and ≤ 4 KiB per frame | `test:tests/test_ipc.c::4096-byte message passes exactly`, `test:tests/test_capture.c::capture_frame_valid`, `capture_frame_too_big` (PC backend); the QNX resource-manager runtime is `BLOCKED(no QNX SDP)` — glue syntax-checked only (`make qnx-syntax`); on target: build `mkqnximage -f image/ambre.build`, boot, then push frames from two producers into `/dev/edr/in` and check the acceptance counters (`edrctl --journal /dev/edr status`) |
+| ACQ-02 | Timestamp on reception, monotonic clock, ≤ 100 µs resolution, no absolute timestamp | **partial** — `test:tests/test_port_posix.c::clock is monotonic` + `test:tests/test_port_posix.c::clock resolution is at most 100 us` (the POSIX backend clock resolves ≤ 100 µs, measured) + `test:tests/test_capture.c::capture_quality_and_time` + `test:tests/test_mcap_py.py::test_verify_rejects_an_absolute_timestamp_in_metadata`; the ≤ 100 µs resolution of the **target** clock (`ClockTime(CLOCK_MONOTONIC)`) is `BLOCKED(no QNX SDP)` — on target: run the same granularity probe against `ambre_port_now_us()` under `procnto` |
+| ACQ-03 | Supported rates 1 kHz / 100 Hz / 10 Hz, list fixed at build time | `test:tests/test_rates.c` (week-5 close-out): `rates_table_fixed_at_build_time` pins the whole build-time table against `docs/FORMAT.md` §5 (exactly 17 signals, 3 @ 1 kHz = ids 1..3, 10 @ 100 Hz = ids 10..13 + 20..25, 4 @ 10 Hz = ids 40..43, forbidden band 90..99); `rate_1khz_cadence_and_gap`, `rate_100hz_cadence_and_gap`, `rate_10hz_cadence_and_gap` drive one simulated second per rate (1000/100/10 samples counted) and pin the GAP boundary at exactly three periods per rate; `rates_mixed_independent_gaps` proves the three rates are tracked independently; `rates_off_list_ids_rejected` re-checks ACQ-04 inside the rate bands. No target dependency: the table is build-time logic |
 | ACQ-04 | A signal outside the whitelist is rejected and counted | `test:tests/test_capture.c::capture_whitelist_forbidden` (`samples_rejected` = 1 unlisted, `samples_forbidden` = 2 of ids 90..99) |
 | ACQ-06 | A capture interruption longer than three periods is marked with a `GAP` record | `test:tests/test_capture.c::capture_gap_detection` (GAP emitted after > 3 periods; the record type is in `docs/FORMAT.md` §3) |
 | ACQ-05 | A replay producer reads a scenario file and injects it | Level S but marked "D" (demonstration) in §5.1 — `scripts/demo.sh` (the scenario generator feeds the explorer) |
@@ -613,8 +652,8 @@ test file; `campaign:<name>` = a campaign that produces the evidence.
 |---|---|---|
 | GEL-01 | On trigger, the emergency record (pre-crash class A) is written in one contiguous write | `test:tests/test_journal.c::trigger_path_is_write_commit_flush` (the EMERG record is one write, then commit, then flush) + `campaign:level 1` (the explorer asserts the EMERG write is a single operation) |
 | GEL-02 | The emergency write is followed by the allocation-table update, then a flush of the medium cache; the event is *acquired* at the flush acknowledgement | `test:tests/test_journal.c::trigger_path_is_write_commit_flush` + `campaign:level 1` (acquisition boundary: `test:tests/test_explore.c::explore_acquisition_boundary`) |
-| GEL-03 | The path from trigger to "acquired" allocates nothing, page-faults nothing and waits on no lower-priority process | **partial** — inspection of `fmt/ambre_journal.h` (fixed-size state, pre-allocated staging buffers, no allocation call in `fmt/ambre_journal_event.c`) + `campaign:latency` for the software part — `TODO(campaign)` |
-| GEL-04 | During the event, a continuation record is written and flushed every 10 ms | `test:tests/test_journal.c::continue_and_seal` (CONT records during the event) + `campaign:level 1` (the during-event flush cadence is part of the recorded trace); the 10 ms cadence *on the target clock* is `TODO(week 5)` |
+| GEL-03 | The path from trigger to "acquired" allocates nothing, page-faults nothing and waits on no lower-priority process | **partial** — inspection of `fmt/ambre_journal.h` (fixed-size state, pre-allocated staging buffers, no allocation call in `fmt/ambre_journal_event.c`) + the software share of the freeze measured on POSIX by `campaign:latency` (median **10 µs**, p99 52–108 µs — `docs/CAMPAIGN-LATENCY.md`; the week-5 marker that deferred this campaign is closed by that run); the "no page fault, no priority inversion" half under `procnto` with `mlockall` + SCHED_FIFO is `BLOCKED(no QNX SDP)` — on target: boot `mkqnximage -f image/ambre.build` and read the kernel trace around a trigger (`tracelogger`) for page faults and blocking |
+| GEL-04 | During the event, a continuation record is written and flushed every 10 ms | `test:tests/test_journal.c::continue_and_seal` (CONT records during the event) + `test:tests/test_capture.c` (CONTINUE emitted every 10 ms) + `campaign:level 1` (the during-event flush cadence is part of the recorded trace); the 10 ms cadence *on the target clock* is `BLOCKED(no QNX SDP)` — on target: check the CONT timestamps in the recovered event after a boot of `image/ambre.build` |
 | GEL-05 | At the end of the event, a sealing record carries the maximum delta-v, its instant, the deployment times and "file complete = yes" | `test:tests/test_mcap_py.py::test_emerg_cont_seal_fields` + `test:tests/test_journal.c::continue_and_seal` + `test:tests/test_coverage_gaps_trigger.c` (lateral maximum tracked during the event) + `campaign:level 1` |
 | GEL-06 | No archive write happens while an event is open | `test:tests/test_archive_cpp.cpp::test_gel06_no_write_while_event_open`, `test_ipc_service_and_gel06` (the journal answers a NAK to EXPORT while an event is open, `target/archive/edr_archive_ipc.cpp`) + `test:tests/test_journal.c` one-event-at-a-time refusal (`refused_busy` in `ambre_journal_trigger`) |
 
@@ -637,7 +676,7 @@ state.
 
 | ID | Requirement (S) | How it is verified |
 |---|---|---|
-| REP-01 | At start-up, recovery runs before any new capture | `test:tests/test_journal_svc.c::recovery_before_capture` (PC backend) + inspection of `fmt/ambre_journal_core.c` (`ambre_journal_open` runs `ambre_recover` unless the partition was just formatted); the boot sequence on the QNX target is `TODO(week 5)` |
+| REP-01 | At start-up, recovery runs before any new capture | `test:tests/test_journal_svc.c::recovery_before_capture` (PC backend) + inspection of `fmt/ambre_journal_core.c` (`ambre_journal_open` runs `ambre_recover` unless the partition was just formatted); the boot sequence on the QNX target is `BLOCKED(no QNX SDP)` — on target: cut power, reboot `mkqnximage -f image/ambre.build`, and check the `slog2info` ordering (recovery lines before the first accepted frame) |
 | REP-02 | Recovery keeps the most recent valid table copy; if none is valid, it rebuilds the table by scanning | `test:tests/test_table.c::table_read_best_highest_gen` + `test:tests/test_scan.c::scan_rebuild_table_exact_events` + `test:tests/test_explore.c::explore_table_destruction` |
 | REP-03 | Every event left open is sealed with "file complete = no" and the cause | `campaign:level 1` — invariant I7 + `test:tests/test_explore.c::explore_complete_flag_both_sides` |
 | REP-04 | Recovery gives the same result if run twice, or interrupted by a new cut then relaunched | `test:tests/test_explore.c::explore_double_recovery` + invariant I8 in `campaign:level 1` (nested variant) |
@@ -647,23 +686,25 @@ state.
 
 | ID | Requirement (S) | How it is verified |
 |---|---|---|
-| EXP-01 | `edrctl status` and `edrctl list` show the state, the events, their locking and their completeness | **partial** — the *service* side answers STATUS/LIST (`test:tests/test_journal_svc.c::trigger_status_list_export_verify`) and the CLI layer is tested against a mock (`test:tests/test_edrctl.c::mock_status_list_nak`), but the **POSIX port has no client-side reply** (`target/ctl/edr_ctl.c`: `port_xfer` returns `AMBRE_PORT_ERR_UNSUPPORTED`), so the `edrctl` binary cannot complete a request/reply on PC: `make demo` shows it answering `list unavailable: the portability layer has no client-side reply`. The bench therefore speaks the same frozen protocol with its own client (`host/e2e/ambre_wire.py`). On the QNX transport the path exists (`target/port/ambre_port_ipc_qnx.c`): `TODO(week 5)` |
+| EXP-01 | `edrctl status` and `edrctl list` show the state, the events, their locking and their completeness | **measured live on the PC backend** (week-5 close-out): the frozen port header now defines `AMBRE_PORT_HAS_CONN_REQUEST` and declares `ambre_port_conn_request()`, the POSIX port implements it (`target/port/ambre_port_posix_ipc.c`) and `target/ctl/edr_ctl.c` compiles its real request/reply binding — the former "POSIX port has no client-side reply" gap is **closed**. `test:tests/test_ctl_live_py.py` pins it end to end over a real AF_UNIX socket: `status` (text + `--json`, the full 84-byte STATUS_REPLY — the historical 32-byte truncation is gone), `list`, usage error rc=2, refused export rc=1 with explicit NAK; `test:tests/test_journal_svc.c::trigger_status_list_export_verify` covers the service side and `test:tests/test_edrctl.c::mock_status_list_nak` the CLI logic. The same exchange over the QNX `MsgSend`/`MsgReceive` transport is `BLOCKED(no QNX SDP)` — on target: boot `mkqnximage -f image/ambre.build`, then `edrctl --journal /dev/edr status` and `list` |
 | EXP-02 | Each event is exported to one valid MCAP file: summary, index, chunk CRCs | `test:tests/test_mcap_py.py::test_mcap_structure`, `test_export_counts`, `test_message_count_matches` + `campaign:make verify` |
-| EXP-03 | The file opens in Foxglove without an extension; a screen layout is provided | `test:tests/test_mcap_py.py::test_foxglove_layout_matches_the_exported_topics` + `foxglove/ambre-layout.json`; the opening in Foxglove itself is a manual demonstration, `TODO(campaign)` |
+| EXP-03 | The file opens in Foxglove without an extension; a screen layout is provided | `test:tests/test_mcap_py.py::test_foxglove_layout_matches_the_exported_topics` + `foxglove/ambre-layout.json`; the opening in Foxglove itself is `BLOCKED(manual GUI demo — needs Foxglove Studio, not installed and no network on the build machine)`; on any machine with the app: open `build/event.mcap` (no extension change) and load `foxglove/ambre-layout.json` |
 
 ### 5.7 Real time (PERF)
 
 All the PERF requirements are verified by **measurement** (M in §5.7). A POSIX
 campaign has been run and is published in `docs/CAMPAIGN-LATENCY.md` (see §4.7
 for the verdict table); **no measurement exists on the QNX target**, so every
-"on target" cell below stays `TODO(campaign)`.
+"on target" cell below stays `BLOCKED(no QNX SDP)` — on target, the producing
+command is `make latency-all` after `mkqnximage -f image/ambre.build` has
+booted, with the journal on the real raw partition.
 
 | ID | Requirement (S) | How it is verified |
 |---|---|---|
-| PERF-01 | From the sample that crosses the threshold to the trigger pulse: ≤ 2 ms | **measured on POSIX** — median 1.1–2.2 ms, p99 9.2–203 ms (`docs/CAMPAIGN-LATENCY.md` §4.1): at the limit in the median, **exceeded** in the tail. On target: `TODO(campaign)` |
-| PERF-02 | From the trigger to "acquired": ≤ 20 ms on the reference hardware | **not proven** — POSIX median 2.7–4.0 ms / p99 9.3–35.0 ms / max 108 ms, but 99.7 % of it is NVMe media time, so it says nothing about the reference hardware. On target: `TODO(campaign)` |
-| PERF-03 | The software part of that delay, excluding the medium, does not exceed 500 µs | **met on POSIX** — median **10 µs**, p99 52–108 µs, p99.9 64–831 µs (journal on tmpfs, 4 loads × 200 cycles; 2 events of 200 over budget at p99.9 under `disk`). On target: `TODO(campaign)` |
-| PERF-04 | No overrun over 1 000 triggers (S), 10 000 under processor and disk load (C) | **volume not reached** — 200 triggers per campaign on POSIX; the 1 000 / 10 000-trigger runs are `TODO(campaign)` |
+| PERF-01 | From the sample that crosses the threshold to the trigger pulse: ≤ 2 ms | **measured on POSIX** — median 1.1–2.2 ms, p99 9.2–203 ms (`docs/CAMPAIGN-LATENCY.md` §4.1): at the limit in the median, **exceeded** in the tail. On target: `BLOCKED(no QNX SDP)` |
+| PERF-02 | From the trigger to "acquired": ≤ 20 ms on the reference hardware | **not proven** — POSIX median 2.7–4.0 ms / p99 9.3–35.0 ms / max 108 ms, but 99.7 % of it is NVMe media time, so it says nothing about the reference hardware. On target: `BLOCKED(no QNX SDP)` |
+| PERF-03 | The software part of that delay, excluding the medium, does not exceed 500 µs | **met on POSIX** — median **10 µs**, p99 52–108 µs, p99.9 64–831 µs (journal on tmpfs, 4 loads × 200 cycles; 2 events of 200 over budget at p99.9 under `disk`). On target: `BLOCKED(no QNX SDP)` |
+| PERF-04 | No overrun over 1 000 triggers (S), 10 000 under processor and disk load (C) | **level-S volume measured on POSIX, NOT met on POSIX** (week-5 close-out, `build-close/latency-none.json`, `make BUILD=build-close latency LATENCY_LOAD=none LATENCY_TRIGGERS=1000`, 1 096 s): **1 007** trigger → acquired cycles (≥ 1 000), **18 overshoots of the 20 ms freeze deadline** (median 5.4 ms, p99 29.9 ms, max 59.5 ms — 99.7 % NVMe media time), **36 overshoots of the 2 ms PERF-01 deadline over 127 crash-trigger pulses** (median 1.1 ms; the 880 re-fires of the same burst are slower by design, median 25.7 ms), and **3 overshoots of the 500 µs software budget over 1 000** (median 9 µs, p99 89 µs). The level-C volume (10 000 under CPU+disk load) is `BLOCKED(campaign wall-clock: ≈ 4–5 h of exclusive machine time per load; the harness measures one load at a time)` (`make latency LATENCY_TRIGGERS=10000 LOAD=cpu` then `LOAD=disk`). On target: `BLOCKED(no QNX SDP)` |
 | PERF-05 | Sending a frame costs the producer less than 50 µs at the 99th percentile | **measured on POSIX and NOT met** — p99 falls in the ≤ 5 ms bucket ceiling of the replay histogram (`docs/CAMPAIGN-LATENCY.md` §4.5). The correctness of the frame path is covered by `test:tests/test_ipc.c` and `test:tests/test_capture.c` |
 
 ### 5.8 Robustness (ROB)
@@ -671,7 +712,7 @@ for the verdict table); **no measurement exists on the QNX target**, so every
 | ID | Requirement (S) | How it is verified |
 |---|---|---|
 | ROB-01 | A power cut at any instant respects the invariants of §7.2 | `campaign:level 1` (every prefix of the trace, all variants) + `campaign:level 2` (QEMU cuts) |
-| ROB-02 | A crash of `edr-archive` or `edrctl` has no effect on capture nor on the freeze | **partial** — `test:tests/test_port_posix.c::transport detects a closed connection` (the peer is told, GAP instead of silent loss) + the process roles of `docs/ARCHITECTURE.md` §1 (neither process writes the raw partition); the runtime kill bench (`host/e2e/e2e_run.py`) is `TODO(campaign)` |
+| ROB-02 | A crash of `edr-archive` or `edrctl` has no effect on capture nor on the freeze | `test:tests/test_rob02_py.py` (week-5 close-out — the runtime kill bench, on PC): the real chain runs, `edr-archive` is `SIGKILL`ed while the event is being frozen, and the journal still seals the event, records a freeze latency, keeps taking class-B bytes from the capture, and answers `edrctl status/list/export`; `test:tests/test_ctl_live_py.py::test_journal_survives_an_edrctl_killed_mid_exchange` kills an `edrctl` client mid-exchange and checks the service keeps answering; `test:tests/test_port_posix.c::transport detects a closed connection` pins the notification (GAP instead of silent loss). The same bench under `procnto` (HAM supervision, QNX-06) is `BLOCKED(no QNX SDP)` |
 | ROB-07 | A corrupted block (bit flipped) is detected and discarded, without affecting the neighbouring blocks | `test:tests/test_explore.c::explore_bitflip_detected` + `test:tests/test_block.c::block_corruption_error_codes` + `test:tests/test_mcap_py.py::test_corrupt_block_is_dropped` |
 
 ### 5.9 Security and privacy (VIE, SEC)
@@ -686,18 +727,18 @@ for the verdict table); **no measurement exists on the QNX target**, so every
 
 | ID | Requirement (S) | How it is verified |
 |---|---|---|
-| OBS-01 | The processes write to the QNX system log (slog2) | **partial** — `target/port/ambre_port_qnx.c` implements the slog2 sink and `make qnx-syntax` proves it compiles (5/5); the PC backend logs through the same `ambre_port_log()` API; runtime on the target is `TODO(week 5)` |
-| OBS-02 | `/dev/edr/status` gives the state as text: mode, current segment, events, counters, health | `test:tests/test_journal_svc.c::trigger_status_list_export_verify` (the service composes the text status, counters included) + `test:tests/test_edrctl.c::mock_status_list_nak`; the `edrctl` client path on POSIX carries the EXP-01 gap, and the QNX resource-manager exposure under `/dev/edr/status` is `TODO(week 5)` |
-| OBS-03 | User events are inserted into the kernel trace at the trigger, at the submission of the write, at the flush acknowledgement and at the sealing | **partial** — the milestones exist in the portable core as the journal marks `AMBRE_MARK_EMERG_WRITTEN`, `AMBRE_MARK_ACQUIRED`, `AMBRE_MARK_SEALED` (`fmt/ambre_journal.h`), and `ambre_port_trace()` in `target/port/ambre_port_qnx.c` maps them to `trace_logi()` user events (syntax-checked only); the trace itself needs the target: `TODO(week 5)` |
+| OBS-01 | The processes write to the QNX system log (slog2) | **partial** — `target/port/ambre_port_qnx.c` implements the slog2 sink and `make qnx-syntax` proves it compiles (5/5); the PC backend logs through the same `ambre_port_log()` API; runtime on the target is `BLOCKED(no QNX SDP)` — on target: boot the image and read the processes' logs with `slog2info` |
+| OBS-02 | `/dev/edr/status` gives the state as text: mode, current segment, events, counters, health | `test:tests/test_journal_svc.c::trigger_status_list_export_verify` (the service composes the text status, counters included) + `test:tests/test_ctl_live_py.py` (week-5 close-out: the real `edrctl` reads that status over a real socket on PC, text and `--json`) + `test:tests/test_edrctl.c::mock_status_list_nak`; the QNX resource-manager exposure (the `read()` node of `/dev/edr`, `target/journal/edr_journal_qnx.c`) is `BLOCKED(no QNX SDP)` — on target: boot `mkqnximage -f image/ambre.build` and `cat /dev/edr` |
+| OBS-03 | User events are inserted into the kernel trace at the trigger, at the submission of the write, at the flush acknowledgement and at the sealing | **partial** — the milestones exist in the portable core as the journal marks `AMBRE_MARK_EMERG_WRITTEN`, `AMBRE_MARK_ACQUIRED`, `AMBRE_MARK_SEALED` (`fmt/ambre_journal.h`), and `ambre_port_trace()` in `target/port/ambre_port_qnx.c` maps them to `trace_logi()` user events (syntax-checked only); the trace itself is `BLOCKED(no QNX SDP)` — on target: capture a kernel trace around one trigger with `tracelogger` and check the four user events appear |
 
 ### 5.11 Use of QNX-specific technologies (QNX)
 
 | ID | Requirement (S) | How it is verified |
 |---|---|---|
-| QNX-01 | The journal is a resource manager; its interface is reduced to `open`, `write`, `read` and `devctl` | **partial** — `target/journal/edr_journal_qnx.c` implements exactly that interface and **compiles against the QNX stubs** (`make qnx-syntax`, 5/5 OK); the portable service logic behind it is tested on PC (`test:tests/test_journal_svc.c`); executing it under `procnto` is `TODO(week 5)` — needs the SDP |
-| QNX-02 | A kernel trace shows that the disk driver handles the emergency write at the journal's priority | `TODO(week 5)` — requires a booted QNX image and `tracelogger`; this is the demonstration item of the video (§8, 2:25–2:45) |
-| QNX-03 | Timeouts and inter-process notifications use pulses | **partial** — the pulse/timeout transport is written in `target/port/ambre_port_ipc_qnx.c` and syntax-checked; the runtime behaviour on the target is `TODO(week 5)` |
-| QNX-04 | The critical processes lock their memory at start-up | **partial** — `ambre_port_lock_memory()` in `target/port/ambre_port_qnx.c` (syntax-checked only); the PC equivalent property is the fixed-size state of `fmt/ambre_journal.h`; the target run is `TODO(week 5)` |
+| QNX-01 | The journal is a resource manager; its interface is reduced to `open`, `write`, `read` and `devctl` | **partial** — `target/journal/edr_journal_qnx.c` implements exactly that interface and **compiles against the QNX stubs** (`make qnx-syntax`, 5/5 OK); the portable service logic behind it is tested on PC (`test:tests/test_journal_svc.c`); executing it under `procnto` is `BLOCKED(no QNX SDP)` — on target: `mkqnximage -f image/ambre.build`, boot, then `ls -l /dev/edr` and `edrctl --journal /dev/edr status` |
+| QNX-02 | A kernel trace shows that the disk driver handles the emergency write at the journal's priority | `BLOCKED(no QNX SDP)` — requires a booted QNX image and `tracelogger`: capture a kernel trace around one trigger and check the `io-blk`/driver thread runs at the journal's priority (62); this is the demonstration item of the video (§8, 2:25–2:45) |
+| QNX-03 | Timeouts and inter-process notifications use pulses | **partial** — the pulse/timeout transport is written in `target/port/ambre_port_ipc_qnx.c` and syntax-checked; the runtime behaviour is `BLOCKED(no QNX SDP)` — on target: boot the image, kill a producer and check the `_PULSE_CODE_DISCONNECT` notification without polling (`pidin` channel state + kernel trace) |
+| QNX-04 | The critical processes lock their memory at start-up | **partial** — `ambre_port_lock_memory()` in `target/port/ambre_port_qnx.c` (syntax-checked only); the PC equivalent property is the fixed-size state of `fmt/ambre_journal.h`; the target run is `BLOCKED(no QNX SDP)` — on target: boot the image and check the locked mappings of `edr-capture`/`edr-journal` (`pidin -p edr-journal mem`) |
 
 ### 5.12 Summary of the coverage
 
@@ -706,36 +747,44 @@ Three columns, counted line by line from the tables above:
 - **Covered**: a named test case or a named campaign proves the requirement.
 - **Partial**: the requirement is only inspected, or only part of it is proved
   (the cell says which part).
-- **TODO**: the line is marked `TODO(week 5)`; nothing is claimed yet.
+- **Blocked part**: the remainder the cell cannot prove on PC carries an
+  explicit `BLOCKED(...)` marker naming the missing dependency and, when
+  known, the exact command that will produce the evidence. No line carries a
+  `TODO(...)` any more: what remains is a hardware/SDP dependency or a named
+  wall-clock budget, not project lateness.
 
-| Family | Level-S requirements | Covered | Partial | TODO(week 5) |
+| Family | Level-S requirements | Covered | Partial | Lines carrying a `BLOCKED(...)` part |
 |---|---|---|---|---|
-| ACQ | 6 | 3 | 3 | 0 |
+| ACQ | 6 | 4 | 2 | 2 |
 | DEC | 8 | 8 | 0 | 0 |
-| GEL | 6 | 5 | 1 | 0 |
+| GEL | 6 | 5 | 1 | 2 |
 | STO | 6 | 5 | 1 | 0 |
-| REP | 5 | 5 | 0 | 0 |
-| EXP | 3 | 1 | 2 | 0 |
-| PERF | 5 | 0 | 4 | 1 |
-| ROB | 3 | 2 | 1 | 0 |
+| REP | 5 | 5 | 0 | 1 |
+| EXP | 3 | 2 | 1 | 2 |
+| PERF | 5 | 0 | 5 | 5 |
+| ROB | 3 | 3 | 0 | 1 |
 | VIE / SEC | 3 | 3 | 0 | 0 |
-| OBS | 3 | 1 | 2 | 0 |
-| QNX | 4 | 0 | 4 | 0 |
-| **Total** | **52** | **33** | **18** | **1** |
+| OBS | 3 | 1 | 2 | 3 |
+| QNX | 4 | 0 | 4 | 4 |
+| **Total** | **52** | **36** | **16** | **20** |
 
 Note on the counts: the "Covered" column counts a requirement only when a
 **named test case or a named campaign** proves it. A requirement that is only
 **inspected** — the raw partition with no file system, the fixed-size journal
 state, the process roles — is counted as "Partial", because inspection is
 weaker than a test. When a line carries both `**partial**` and a
-`TODO(...)` marker, it is counted in the "Partial" column, and the marker
-says which part is still missing. GEL-07 and GEL-08 are level C and are not
-counted here. The PERF family counts 4 "Partial" and 1 "TODO" because the
-latency campaign **has** been run on the POSIX backend
+`BLOCKED(...)` marker, it is counted in the "Partial" column, and the marker
+says which part is still missing and which dependency blocks it — after the
+week-5 close-out no line carries a `TODO(...)` any more. GEL-07 and GEL-08 are
+level C and are not counted here. The PERF family counts 5 "Partial" because
+the latency campaign **has** been run on the POSIX backend
 (`docs/CAMPAIGN-LATENCY.md`, §4.7 above) but proves nothing about the target:
 PERF-01 is exceeded at the tail, PERF-02 is dominated by media time, PERF-03 is
-met, PERF-05 is not met, and PERF-04 never reached the required volume. A
-measurement that fails its own target is not "Covered". The remaining gap is
+met, PERF-05 is not met, and PERF-04 — measured at the level-S volume in the
+week-5 close-out (1 007 trigger → acquired cycles,
+`build-close/latency-none.json`) — is not met on POSIX (18 overshoots of the
+20 ms freeze deadline). A measurement that fails its own target is not
+"Covered". The remaining gap is
 concentrated in what the QNX target alone can show — kernel enforcement of the
 security policy, the resource manager under `procnto`, the kernel trace, the
 memory lock and the latencies: those lines are "Partial" because the glue is

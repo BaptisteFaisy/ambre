@@ -3,8 +3,9 @@
 Status: **2026-11-11**, development machine x86-64, 12 cores, gcc 13.3.0,
 Python 3.12.3. **Every figure in this report was produced by the command
 quoted next to it, run on that machine on that day.** Slots with no
-measurement say `TODO(campaign)` and name the command that will produce the
-number. Nothing here is extrapolated, and no QNX-target number is published:
+measurement carry an explicit `BLOCKED(...)` marker — the missing dependency
+(no QNX SDP, no hardware bench, or a named wall-clock budget) — and name the
+command that will produce the number. Nothing here is extrapolated, and no QNX-target number is published:
 no QNX SDP 8.0 is installed (see `docs/QNX-PORT.md`).
 
 ---
@@ -13,25 +14,25 @@ no QNX SDP 8.0 is installed (see `docs/QNX-PORT.md`).
 
 | # | Requirement / spec ref | Target | Measured (2026-11-11) | Reproduce with |
 |---|---|---|---|---|
-| Level 0 | unit suites green (§7.1) | all green | **22 suites, 42 249 checks, 0 failures** (21 C + 1 C++) | `make test` + `make test_archive_cpp` |
+| Level 0 | unit suites green (§7.1) | all green | **23 suites, 48 936 checks, 0 failures** (22 C + 1 C++) | `make test` + `make test_archive_cpp` |
 | Level 1 | cut states explored, 0 violations (§7.7 socle 10 000 / complet 1 000 000) | exhaustive | **64 591 states = every reachable state**, 46 390 acquisitions observed, **0 violations of I1..I8** | `make explore-full` |
 | Level 1 | socle threshold (10 000 states) | 10 000, 0 violations | **10 000 states, 0 violations, 29.3 s** (342 states/s) | `make explore` |
-| Level 2 | process cuts, POSIX bench (§7.6, 500 complet) | 500 | **200 of 500 run**: 0 errors, **0 invariant violations**, 199 `ok` + **1 `check_failed`** (class-A fidelity, cycle 67) + 2 upstream findings — open | `python3 host/processcut/campaign.py --bins build --scenario build/scenario.txt --cycles 200 --report out.json`; artefact `build-e2e/processcut/report-200.json` |
+| Level 2 | process cuts, POSIX bench (§7.6, 500 complet) | 500 | **500 of 500 run in the week-5 close-out** (`build-close/processcut/report-500.json`, 22:58): 500 cuts, 0 errors, 498 `ok` + **2 `inconsistent_state` (I7)** published **unresolved** with their artefacts and qualified in `docs/VALIDATION.md` §3 (seal written by the live journal before the kill — `seal_cause=NORMAL` — window-classification race of the bench, not data loss). The earlier 200-cut run stands as published (0 violations, 1 `check_failed`, 2 upstream findings) | `make BUILD=build-close processcut E2E_CYCLES=500`; artefacts `build-close/processcut/report-500.json`, `build-e2e/processcut/report-200.json` |
 | Level 2 | QEMU cuts (§7.4, 200 socle) | 200 | **0/200 — not started**: no QNX SDP or image on the machine; harness green in dry-run (18 tests) | `python3 host/powercut/powercut_campaign.py --image qnx80.img --scenario build/scenario.txt --random-cuts 200 --seed 4242 --jobs 4 --report build/campaign.json` |
 | DEC-12 | C trigger = Python twin, byte-identical | 10 000 scenarios | **10 000 scenarios, 2 744 840 decision lines compared, 0 divergences** | `make crosscheck` |
 | §12.10 | line coverage of `fmt/` | > 95 % | **98.40 %** (1 349 / 1 371 lines) | `BUILD=build-doc-cov2 sh scripts/coverage.sh` |
-| §12.10 | random-data testing | 24 h | smoke only: **52 hostile images, 0 violations, 5.0 s** (seed 20261111); the 24 h soak is `TODO(campaign)` | `make fuzz` (smoke); soak: `./build/ambre-fuzz --hours 24 --jobs 8 --report build/fuzz-24h.json` |
+| §12.10 | random-data testing | 24 h | smoke only: **52 hostile images, 0 violations, 5.0 s** (seed 20261111); the 24 h soak is `BLOCKED(wall-clock: 24 h of exclusive machine time — the 5 s smoke is what fits a session)` | `make fuzz` (smoke); soak: `./build/ambre-fuzz --hours 24 --jobs 8 --report build/fuzz-24h.json` |
 | EXP-02 | MCAP export verified against its scenario | 10/10 | **10/10 checks pass** (incl. `class_a.fidelity`, 11 points) | `make verify` |
 | §8 | one-command demo | green | **`DEMO OK`** — 3 real processes, `SIGKILL` on the journal in the `acquired` window (+6 033 ms), restart + recovery, 1 event `sealed locked=yes complete_file=no`, MCAP export rc=0, official checks green, class A **11/11 points identical** (alignment 29 ms, worst row slop 4 ms). The demo also prints its own one-shot "acquired in 4.428 ms" under load — a single sample, not a campaign figure; the medians are in `docs/CAMPAIGN-LATENCY.md` | `make demo` |
 | QNX-01..07 | QNX glue compiles against the stubs | 5/5 | **5/5 glue files OK** | `make qnx-syntax` |
 | SEC/VIE | image + security policy statically coherent | all checks | **11/11 static checks pass** | `make image-check` |
 | PERF-01..08 | latency (2 ms / 20 ms / 500 µs) | measured on target | **POSIX only**: PERF-03 software share median **10 µs** (target ≤ 500 µs) — met; PERF-01 **exceeded** at the tail (p99 up to 203 ms under disk load); PERF-02 not proven (99.7 % of it is NVMe media time); PERF-04 volume not reached; PERF-05 not met. Nothing measured on QNX | `docs/CAMPAIGN-LATENCY.md`; `make latency-all` |
-| Level 3 | real electrical cuts (§7.7 extrême, 500) | 500 | **TODO(campaign)** — no Raspberry Pi 5 bench | — |
+| Level 3 | real electrical cuts (§7.7 extrême, 500) | 500 | **`BLOCKED(no Raspberry Pi 5 bench)`** — relay-driven electrical cuts need the hardware bench; on the bench: flash the image built by `mkqnximage -f image/ambre.build` and drive the relay with `host/powercut/` in level-3 mode | — |
 
 House rule: `make sizecheck` (which runs `scripts/sizecheck.py --tracked-only`)
-reports **175 tracked files, 0 violations**, and a bare
+reports **191 tracked files, 0 violations**, and a bare
 `python3 scripts/sizecheck.py` — which also scans untracked work-in-progress
-files — reports **191 files, 0 violations** (measured 18:50 on 2026-11-11; an
+files — reports **195 files, 0 violations** (measured at the week-5 close-out; an
 18:00 run of the same bare command showed 3 violations in `host/e2e/` and
 `host/processcut/`, since fixed by their owning agents).
 
@@ -40,28 +41,36 @@ files — reports **191 files, 0 violations** (measured 18:50 on 2026-11-11; an
 ## 2. Level 0 — unit tests (PC)
 
 ```sh
-make test                # 21 C suites
+make test                # 22 C suites
 make test_archive_cpp    # the C++17 archive suite
 ```
 
-Measured: **`ALL TESTS PASSED`** — 42 178 checks over the 21 C suites, plus
-71 checks for the C++ archive suite: **22 suites, 42 249 checks, 0 failures**
-(measured 2026-11-11 ~18:10; three suites — `test_policy`, `test_policy_us`,
-`test_coverage_gaps_edges` — landed from other agents *during* this campaign,
-which is why earlier reports of the same day quote 19 suites / 41 672 checks).
+Measured: **`ALL TESTS PASSED`** — 48 865 checks over the 22 C suites, plus
+71 checks for the C++ archive suite: **23 suites, 48 936 checks, 0 failures**
+(measured at the week-5 close-out, 2026-11-11; the week-5 additions over the
+18:10 run are `test_rates` 6 685 and `port_posix` +2).
 Per suite: block 118, capture 43, coverage_gaps 82, coverage_gaps_edges 46,
 coverage_gaps_journal 118, coverage_gaps_scan 24 692, coverage_gaps_trigger 33,
 crc32c 85, edrctl 97, explore 58, ipc 102, journal 4 195, journal_svc 8 277,
-policy 498, policy_us 33, port_posix 87, recovery 124, scan 68, simdisk 3 345,
-table 44, trigger 33, archive_cpp (C++17) 71.
+policy 498, policy_us 33, port_posix 89, rates 6 685, recovery 124, scan 68,
+simdisk 3 345, table 44, trigger 33, archive_cpp (C++17) 71.
 
-Python suites (same day, same machine):
+Python suites (same machine, week-5 close-out, `AMBRE_BINS=build-close`):
 
 | Suite | Result |
 |---|---|
-| `python3 tests/test_powercut_py.py` | Ran 18 tests — OK (3.5 s) |
-| `python3 tests/test_trigger_py.py` | Ran 28 tests — OK (14.1 s) |
-| `python3 tests/test_mcap_py.py` | Ran 24 tests — OK, 2 skipped (0.8 s) |
+| `python3 tests/test_data_py.py` | Ran 19 tests — OK |
+| `python3 tests/test_e2e_py.py` | Ran 8 tests — OK |
+| `python3 tests/test_latency_py.py` | Ran 21 tests — OK |
+| `python3 tests/test_mcap_py.py` | Ran 25 tests — OK, 2 skipped |
+| `python3 tests/test_powercut_py.py` | Ran 18 tests — OK |
+| `python3 tests/test_profile_us_py.py` | Ran 24 tests — OK |
+| `python3 tests/test_report_py.py` | Ran 12 tests — OK |
+| `python3 tests/test_trigger_py.py` | Ran 28 tests — OK |
+| `python3 tests/test_ctl_live_py.py` | Ran 6 tests — OK (week-5, EXP-01/OBS-02 live) |
+| `python3 tests/test_rob02_py.py` | Ran 1 test — OK (week-5, ROB-02 kill bench) |
+
+10 Python suites, 162 tests, 0 failures.
 
 Each C binary returns its failure count as exit code; 0 means green. The
 per-suite mapping to requirements is the traceability matrix of
@@ -103,8 +112,9 @@ against the recovered data alone.
 
 ## 4. Level 2 — process cuts (POSIX bench) and QEMU cuts
 
-**Process cuts — harness complete, campaign `TODO(campaign)`.** Two pieces now
-exist and are documented by their owning agent:
+**Process cuts — campaign run on PC: 200 cuts published at 18:41, the full
+500-stop level at 22:58 (week-5 close-out).** Two pieces exist and are
+documented by their owning agent:
 
 - `host/e2e/` — the single-cut bench (`e2e_run.py`, `e2e_cycle.py`,
   `e2e_check.py`, `e2e_fidelity.py`, `README.md`): replay → capture → journal
@@ -152,8 +162,26 @@ process cuts**, and **one class-A fidelity failure that is not resolved** — it
 published here as a failure, with its cycle number and its message, because a
 campaign whose only blemish is hidden is worth nothing. The two upstream
 findings on `/edr/meta/gaps` monotonicity are likewise open. Both belong to the
-owning agent of the bench; neither is reinterpreted here. The 500 forced
-process stops of §7.7 (level "complet") remain `TODO(campaign)`.
+owning agent of the bench; neither is reinterpreted here.
+
+**The 500 forced process stops of §7.7 (level "complet") were run in the
+week-5 close-out** (`build-close/processcut/report-500.json`, 2026-11-11 22:58,
+`make BUILD=build-close processcut E2E_CYCLES=500`): 500 cuts, 0 errors,
+498 `ok` + **2 `inconsistent_state` (I7)**, cycles 377 and 457, published
+**unresolved** with their artefacts kept (`report-500.json-violations/`).
+Close-out qualification (evidence, not interpretation): both recovered events
+carry `seal_cause=NORMAL`, which only the live journal writes (the recovery
+writes `POWERCUT`) — the seal had reached the disk before the `SIGKILL` landed,
+which POSIX semantics allow (writes handed to the kernel survive); both cycles
+ran on a slow medium at that instant (freeze 129.6 ms / 35.6 ms vs 3.9 ms
+median), pushing the bench's `acquired` observation next to the real end of
+event. This reads as a window-classification race of the bench, not data loss —
+the official verifier passes every check but `class_a.fidelity`, documented by
+the bench as unable to pass on the real chain (field-level fidelity: 6/7
+points). Triage belongs to the bench's owning agent (`host/e2e/`). Windows
+reached: 166 before acquisition, 63 acquired-open, 271 sealed; freeze over 334
+samples: median 3.852 ms, p99 33.301 ms, max 191.184 ms; cycle time: median
+3.59 s. The QNX-target run of the same level stays `BLOCKED(no QNX SDP)`.
 
 Two honesty notes carried by the bench itself, and repeated here because they
 are the difference between a claim and a measurement:
@@ -198,7 +226,7 @@ BUILD=build-doc-cov2 sh scripts/coverage.sh     # isolated build dir
 ```
 
 Measured: **98.40 %** — 1 349 of 1 371 instrumented lines covered
-(report: `build-doc-cov2/coverage.json`), with **all 21 C suites** running
+(report: `build-doc-cov2/coverage.json`), with **all 22 C suites** running
 under instrumentation and none skipped.
 
 | File | Covered | Lines | % |
@@ -231,7 +259,9 @@ run none was. The gate form is `make coverage-gate` (`COV_MIN=95`).
 
 Random-data testing (§12.10, same item): `make fuzz` measured a 5-second
 smoke — seed 20261111, **52 hostile images, 0 violations** (10.4 img/s), with
-an ASan+UBSan twin (`make fuzz-asan`). The 24-hour run is `TODO(campaign)`.
+an ASan+UBSan twin (`make fuzz-asan`). The 24-hour run is `BLOCKED(wall-clock:
+24 h of exclusive machine time)` — command: `./build/ambre-fuzz --hours 24
+--jobs 8 --report build/fuzz-24h.json`.
 
 ## 7. Latency (PERF-01..PERF-07)
 
@@ -257,11 +287,11 @@ Headline figures as published in `docs/CAMPAIGN-LATENCY.md` §4.1 / §6
 | PERF-01 | ≤ 2 ms | median 1.1–2.2 ms; p99 9.2–203 ms (worst under `disk` load: the capture was descheduled behind a busy device, its own flush taking 108 ms) | **exceeded** at the tail |
 | PERF-02 | ≤ 20 ms on reference hardware | median 2.7–4.0 ms, p99 9.3–35.0 ms, max 108 ms — but 99.7 % of it is *media* time on an NVMe file | measured **on PC only**; says nothing about eMMC |
 | PERF-03 | ≤ 500 µs software share | median **10 µs**, p99 52–108 µs, p99.9 64–831 µs (2 events of 200 over budget, `disk` load only) | met at median and p99 under every load |
-| PERF-04 | 0 overrun over 1 000 (S) / 10 000 (C) triggers | 200 triggers per campaign | **volume not reached** — `TODO(campaign)` |
+| PERF-04 | 0 overrun over 1 000 (S) / 10 000 (C) triggers | **1 007 trigger → acquired cycles at the S volume** (week-5 close-out, `build-close/latency-none.json`, 1 096 s, load `none`): **18 overshoots** of the 20 ms freeze deadline (median 5.4 ms, p99 29.9 ms, max 59.5 ms), 36/127 crash-trigger pulses over 2 ms, 3/1 000 over the 500 µs software budget | **measured at the S volume on POSIX: NOT met** — the C volume (10 000 under CPU+disk load) is `BLOCKED(campaign wall-clock: ≈ 4–5 h per load)` (`make latency LATENCY_TRIGGERS=10000 LOAD=cpu` / `LOAD=disk`); on target `BLOCKED(no QNX SDP)` |
 | PERF-05 | < 50 µs p99 frame send | p99 ≤ 5 ms (bucket ceiling) | **not met** — see that report's §4.5 |
-| PERF-06 | capture < 1 s after kernel start | — | not measured, needs the target |
+| PERF-06 | capture < 1 s after kernel start | — | `BLOCKED(no QNX SDP)` — on target: boot `mkqnximage -f image/ambre.build` and read the kernel-start → first-frame delay (recovery included) from the `slog2info` timestamps |
 | PERF-07 | 3 worst cases explained by a **kernel** trace | worst cases decomposed from the `AMBRE_TRACE` log | partial: the decomposition exists, the kernel trace does not |
-| PERF-08 | same on a Raspberry Pi 5 | — | not measured, no bench |
+| PERF-08 | same on a Raspberry Pi 5 | — | `BLOCKED(no Raspberry Pi 5 bench)` — on the bench: `make latency-all` with the journal on the stated storage medium |
 
 Read with care, because the honest part is in the caveats:
 

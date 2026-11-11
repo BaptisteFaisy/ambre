@@ -167,7 +167,7 @@ ambre/
 │   ├── fuzz/            random hostile disk images against the recovery path
 │   ├── latency/         latency campaign pieces (in progress)
 │   └── energy/          energy-reserve model (in progress)
-├── tests/               19 C/C++ suites + 3 Python suites
+├── tests/               22 C + 1 C++ suites + 10 Python suites
 ├── scripts/             verify-all.sh (full gate), demo.sh (end-to-end demo),
 │                        coverage.sh + coverage_report.py, sizecheck.py,
 │                        check-image.sh (static image/security check)
@@ -266,9 +266,9 @@ exhaustive exploration), then prints a single green/red summary. A failing step
 is reported `FAIL` — the script never fakes a success.
 
 **House rule:** `make sizecheck` (which runs `scripts/sizecheck.py
---tracked-only`) reports **175 tracked files, 0 violations**, and a bare
+--tracked-only`) reports **191 tracked files, 0 violations**, and a bare
 `python3 scripts/sizecheck.py` — which also scans untracked work-in-progress
-files — reports **191 files, 0 violations** (measured 18:50; an 18:00 run of the
+files — reports **195 files, 0 violations** (measured 18:50; an 18:00 run of the
 same bare command showed 3 violations in `host/e2e/` and `host/processcut/`,
 fixed since by their owning agents).
 
@@ -279,28 +279,29 @@ fixed since by their owning agents).
 Every figure below comes out of the command quoted next to it, run on
 2026-11-11 on the development machine (x86-64, 12 cores, gcc 13.3.0, Python
 3.12.3). Nothing is extrapolated. Measurements that need the QNX target say
-**not measured**, because `target/` is empty: no number is published before it
-comes out of a campaign. Each row names the requirement it answers
+**not measured**, because no QNX SDP 8.0 is installed on this machine
+(`target/*/*_qnx.c` only compiles against the stubs — `docs/QNX-PORT.md`):
+no number is published before it comes out of a campaign on the real target. Each row names the requirement it answers
 (`docs/cahier-des-charges.md` §5.7, §7) so the gap stays auditable.
 
 ### Validation status
 
 | Area | Status | Evidence (reproduce with) |
 |---|---|---|
-| Format: block codec, CRC-32C, allocation table, scan, record | **green** | `make test` — 22 suites (21 C + 1 C++), **42 249 checks**, 0 failures |
-| Journal engine, five processes' portable logic, power-cut recovery | **green** | `make test` — incl. `test_journal` (4 195), `test_journal_svc` (8 277), `test_simdisk` (3 345), `test_recovery` (124), `test_capture` (43), `test_ipc` (102), `test_edrctl` (97) |
+| Format: block codec, CRC-32C, allocation table, scan, record | **green** | `make test` — 23 suites (22 C + 1 C++), **48 936 checks**, 0 failures |
+| Journal engine, five processes' portable logic, power-cut recovery | **green** | `make test` — incl. `test_journal` (4 195), `test_journal_svc` (8 277), `test_simdisk` (3 345), `test_rates` (6 685), `test_recovery` (124), `test_capture` (43), `test_ipc` (102), `test_edrctl` (97) |
 | Trigger arithmetic (UN R160) + independent Python twin | **green** | `make crosscheck` — 10 000 scenarios, 2 744 840 decision lines, byte-identical, 0 divergences |
 | Exhaustive exploration of power-cut states | **green** | `make explore-full` — 64 591 states for the 30 s reference scenario (its whole reachable space); **campaign of record: 1 379 264 states over 18 scenarios, 2 567 421 acquisitions, 0 violations of I1..I8** (`docs/CAMPAIGN.md`); `make explore` 10 000 states in 29 s |
 | MCAP export + `edr-verify` | **green** | `make verify` — 10/10 checks incl. `class_a.fidelity` (11 points); `python3 tests/test_mcap_py.py` — 24 tests OK |
 | C++17 MCAP archive | **green** | `make test_archive_cpp` — 71 checks, 0 failures |
 | One-command demo | **green** | `make demo` — `DEMO OK`: real 3-process chain, `SIGKILL` in the `acquired` window, recovery, export verified, class A 11/11 points identical |
-| Coverage of `fmt/` (spec §12.10) | **green** | `BUILD=build-doc-cov2 sh scripts/coverage.sh` — **98.40 %** (1 349 / 1 371 lines), all 21 C suites instrumented |
-| Random-data testing of the recovery path (§12.10) | **green (smoke)** | `make fuzz` — 52 hostile images, 0 violations, 5 s; the 24 h run is `TODO(campaign)` |
-| House rule (files < 500 lines, functions < 50) | **green** | `make sizecheck` (`--tracked-only`) — 175 files, 0 violations; bare `python3 scripts/sizecheck.py` — 191 files, 0 violations |
+| Coverage of `fmt/` (spec §12.10) | **green** | `BUILD=build-doc-cov2 sh scripts/coverage.sh` — **98.40 %** (1 349 / 1 371 lines), all 22 C suites instrumented |
+| Random-data testing of the recovery path (§12.10) | **green (smoke)** | `make fuzz` — 52 hostile images, 0 violations, 5 s; the 24 h run is `BLOCKED(wall-clock: 24 h of exclusive machine time)` (command: `./build/ambre-fuzz --hours 24 --jobs 8 --report build/fuzz-24h.json`) |
+| House rule (files < 500 lines, functions < 50) | **green** | `make sizecheck` (`--tracked-only`) — 191 files, 0 violations; bare `python3 scripts/sizecheck.py` — 195 files, 0 violations |
 | QNX glue compiles against the stubs | **green** | `make qnx-syntax` — 5/5 glue files OK |
 | Static image + security-policy coherence | **green** | `make image-check` — 11/11 checks pass |
-| Forced process cuts (POSIX bench, real `SIGKILL`) | **200 run, 1 open failure** | `build-e2e/processcut/report-200.json` (18:41): 200 cuts, 0 errors, **0 invariant violations**, 199 `ok` + **1 `check_failed`** (`class_a.fidelity(bench)`, cycle 67 — one point matched no injected row) and 2 upstream findings on `/edr/meta/gaps` monotonicity, both published unresolved. 500-stop level stays `TODO(campaign)` |
-| Latency PERF-01..PERF-08 | **measured on PC only** | `docs/CAMPAIGN-LATENCY.md` — 4 loads × 200 trigger→acquired cycles, `backend=posix`: PERF-03 software share median **10 µs** (target ≤ 500 µs) met; PERF-01 **exceeded** at the tail (p99 up to 203 ms under disk load); PERF-02 **not proven** (99.7 % media time on an NVMe file); PERF-04 volume not reached; PERF-05 not met. Reproduce with `make latency-all`. **Nothing measured on QNX** |
+| Forced process cuts (POSIX bench, real `SIGKILL`) | **500 run, 2 open I7 verdicts** | `build-close/processcut/report-500.json` (close-out): 500 cuts, 0 errors, 498 `ok` + **2 `inconsistent_state` (I7)** published unresolved — qualified in `docs/VALIDATION.md` §3 (`seal_cause=NORMAL` → the seal reached the disk before the kill; a bench-window race, not data loss). The earlier 200-cut run stands as published (0 violations, 1 `check_failed`, 2 upstream findings) |
+| Latency PERF-01..PERF-08 | **measured on PC only** | `docs/CAMPAIGN-LATENCY.md` — 4 loads × 200 trigger→acquired cycles + a 1 000-trigger level-S run (`build-close/latency-none.json`), `backend=posix`: PERF-03 software share median **10 µs** (target ≤ 500 µs) met; PERF-01 **exceeded** at the tail (p99 up to 203 ms under disk load); PERF-02 **not proven** (99.7 % media time on an NVMe file); PERF-04 **measured at the S volume: not met** (18 overshoots of the 20 ms freeze deadline over 1 007 cycles); PERF-05 not met. Reproduce with `make latency-all` / `make BUILD=build-close latency LATENCY_LOAD=none LATENCY_TRIGGERS=1000`. **Nothing measured on QNX** |
 | Executing the five processes on QNX: resource manager `/dev/edr`, `edrctl`, security policy, kernel trace | **missing** | no QNX SDP: `target/*/*_qnx.c` and `image/` are syntax-/statically checked only, never built or booted |
 | Feasibility essays E1–E4, real QEMU power cuts | **missing** | 0/200 socle cuts run: harnesses exist and pass their dry-run tests, but there is no image to cut |
 
@@ -308,20 +309,20 @@ comes out of a campaign. Each row names the requirement it answers
 
 | Measurement | Requirement | Target | Measured |
 |---|---|---|---|
-| Trigger latency, last threshold sample → pulse | PERF-01 | ≤ 2 ms | **median 1.1–2.2 ms, p99 9.2–203 ms** (`backend=posix`, 4 loads × 200 cycles) — at the limit in the median, **exceeded** in the tail; on target: not measured (`docs/CAMPAIGN-LATENCY.md`) |
-| Trigger → durable ("acquired"), reference hardware | PERF-02 | ≤ 20 ms | **median 2.7–4.0 ms, p99 9.3–35.0 ms, max 108 ms on PC** — but 99.7 % of it is NVMe media time, so this is *not* a statement about the reference hardware; on target: not measured |
+| Trigger latency, last threshold sample → pulse | PERF-01 | ≤ 2 ms | **median 1.1–2.2 ms, p99 9.2–203 ms** (`backend=posix`, 4 loads × 200 cycles — 1 000-trigger level-S run: median 1.1 ms over 127 crash triggers, 36 overshoots) — at the limit in the median, **exceeded** in the tail; on target: `BLOCKED(no QNX SDP)` |
+| Trigger → durable ("acquired"), reference hardware | PERF-02 | ≤ 20 ms | **median 2.7–4.0 ms, p99 9.3–35.0 ms, max 108 ms on PC** — but 99.7 % of it is NVMe media time, so this is *not* a statement about the reference hardware; on target: `BLOCKED(no QNX SDP)` |
 | Software share of that deadline, excluding media time | PERF-03 | ≤ 500 µs | **median 10 µs, p99 52–108 µs, p99.9 64–831 µs** (`backend=posix`, journal on tmpfs) — met at median and p99 under every load except `disk` at p99.9 (2 events of 200) |
-| Deadline misses over 10 000 triggers under load | PERF-04 | 0 | **volume not reached** — 200 triggers per campaign on POSIX; the 1 000 / 10 000-trigger runs are `TODO(campaign)` |
+| Deadline misses over 10 000 triggers under load | PERF-04 | 0 | **level-S volume measured on POSIX, NOT met** — 1 007 trigger → acquired cycles (`build-close/latency-none.json`, load `none`): 18 overshoots of the 20 ms freeze deadline (median 5.4 ms, p99 29.9 ms); the C volume (10 000 under CPU+disk load) is `BLOCKED(campaign wall-clock ≈ 4–5 h per load)`; on target `BLOCKED(no QNX SDP)` |
 | Frame send cost at the producer, p99 | PERF-05 | < 50 µs | **not met on POSIX**: p99 falls in the ≤ 5 ms bucket ceiling of the replay histogram — see `docs/CAMPAIGN-LATENCY.md` §4.5 |
-| Capture running after kernel start, recovery included | PERF-06 | < 1 s | not measured — needs the QNX target |
+| Capture running after kernel start, recovery included | PERF-06 | < 1 s | `BLOCKED(no QNX SDP)` — on target: boot `mkqnximage -f image/ambre.build` and read the kernel-start → first-frame delay (recovery included) from the `slog2info` timestamps |
 | Power-cut states explored, zero invariant violations | §7.3 | 1 000 000 | **64 591 states, 0 violations** — the whole reachable space of the reference scenario (the 1 000 000 cap is never reached); `make explore-full` |
-| QEMU power cuts survived, zero data loss | §7.4 | 2 000 | **0 — not started**: no QNX SDP or image on this machine |
-| Forced process stops, real `SIGKILL` + recovery | §7.6 | 500 | **200 done** (`build-e2e/processcut/report-200.json`): 0 invariant violations, 199 ok / 1 `check_failed` (class-A fidelity, cycle 67) + 2 upstream findings — open. The 500 level is `TODO(campaign)` |
+| QEMU power cuts survived, zero data loss | §7.4 | 2 000 | **0 — `BLOCKED(no QNX SDP)`**: no SDP or image on this machine; on target: `python3 host/powercut/powercut_campaign.py --image qnx80.img --scenario build/scenario.txt --random-cuts 200 --seed 4242 --jobs 4 --report build/campaign.json` |
+| Forced process stops, real `SIGKILL` + recovery | §7.6 | 500 | **500 done** (`build-close/processcut/report-500.json`, close-out): 500 cuts, 0 errors, 498 ok + **2 `inconsistent_state` (I7)** published unresolved — qualified in `docs/VALIDATION.md` §3 (`seal_cause=NORMAL` → the seal reached the disk before the kill; bench-window race, not data loss). The earlier 200-cut run stands as published (0 violations, 1 `check_failed`, 2 upstream findings). On target: `BLOCKED(no QNX SDP)` |
 | Worst cases explained by a kernel trace | PERF-07 | 3 | **partial**: the three worst cases are decomposed from the `AMBRE_TRACE` log on POSIX (`docs/CAMPAIGN-LATENCY.md` §4.6); a *kernel* trace needs the QNX target |
 | Line coverage of `fmt/` | §12.10 | > 95 % | **98.40 %** (1 349 / 1 371 lines); `BUILD=build-doc-cov2 sh scripts/coverage.sh` |
 
-What is verified **today** is functional, not temporal: 22 suites and 42 249
-checks pass on PC plus 70 Python tests, the recovery code is exercised on every
+What is verified **today** is functional, not temporal: 23 suites and 48 936
+checks pass on PC plus 162 Python tests (10 suites), the recovery code is exercised on every
 reachable simulated disk image (64 591 states, zero invariant violations), and
 the C trigger arithmetic and its independent Python twin produce byte-identical
 decision files over 10 000 generated scenarios (2 744 840 compared lines).
@@ -361,21 +362,20 @@ the regulation's thresholds and records its data elements, nothing more.
   software share is separated from media time. Real-hardware numbers need a
   Raspberry Pi 5 run.
 
-**One known functional gap, found by the demo itself**
+**The former `edrctl`-on-POSIX gap is closed (week-5 close-out)**
 
-`make demo` prints it rather than hiding it: the frozen `edrctl` binary cannot
-complete a request/reply exchange on the **POSIX** backend, because the
-portability layer has no client-side `ambre_port_conn_request()` yet. Every
-exchange returns `AMBRE_PORT_ERR_UNSUPPORTED` and `edrctl` exits 1 with the
-diagnostic `list unavailable: the portability layer has no client-side reply`
-(`target/ctl/edr_ctl.c`). The service side *is* implemented and tested
-(`tests/test_journal_svc.c`), the CLI logic *is* tested through an injected link
-(`tests/test_edrctl.c`), and the bench drives the same frozen protocol with its
-own client (`host/e2e/ambre_wire.py`) — but `edrctl status` / `list` end to end
-on a real socket is **not** working on PC today. On QNX the transport is
-`MsgSend`/`MsgReceive`, where the reply is part of the same transaction
-(`TODO(week 5)`, needs the SDP). Requirement EXP-01 is therefore recorded as
-*partial* in `docs/VALIDATION.md` §5.6, not as covered.
+The frozen port header now defines `AMBRE_PORT_HAS_CONN_REQUEST` and declares
+`ambre_port_conn_request()`; the POSIX port implements it
+(`target/port/ambre_port_posix_ipc.c`) and `target/ctl/edr_ctl.c` compiles its
+real request/reply binding. `edrctl status` / `list` now complete end to end on
+a real AF_UNIX socket on PC (`make demo` prints `service probe: build/edrctl
+answered (rc=0)`), and `tests/test_ctl_live_py.py` pins it: the full
+STATUS_REPLY body arrives (the old 32-byte truncation gap is gone), usage
+errors exit 2, a refused export exits 1 with an explicit NAK, and a `edrctl`
+killed mid-exchange leaves the journal serving. EXP-01 is therefore *covered*
+on the PC backend; the same exchange over the QNX `MsgSend`/`MsgReceive`
+transport is `BLOCKED(no QNX SDP)` — on target: boot the image and run
+`edrctl --journal /dev/edr status` / `list`.
 
 **Deliberately out of scope:** ISO 26262 functional-safety certification,
 mechanical and thermal qualification, crash detection of production quality,
@@ -409,7 +409,7 @@ glue. It proves **nothing** about runtime.
 | 500 real electrical cuts on a Raspberry Pi 5 | §7.7 extrême | a relay bench and hardware |
 
 What *is* measured on PC and is honestly labelled `backend=posix` is listed in
-§8 and in [`docs/CAMPAIGN.md`](docs/CAMPAIGN.md): 22 suites / 42 249 checks,
+§8 and in [`docs/CAMPAIGN.md`](docs/CAMPAIGN.md): 23 suites / 48 936 checks,
 64 591 explored cut states with zero invariant violations, 2 744 840
 byte-identical trigger decisions, 98.40 % line coverage of `fmt/`, and a demo
 that runs end to end. Those are claims about **logic**, not about QNX

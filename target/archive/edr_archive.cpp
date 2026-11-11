@@ -38,7 +38,7 @@ class FileDisk {
 
     ambre_disk_t vtable()
     {
-        ambre_disk_t disk;
+        ambre_disk_t disk{};
         std::memset(&disk, 0, sizeof(disk));
         disk.ctx = this;
         disk.size = size();
@@ -112,7 +112,7 @@ bool load_event_from_disk(const ambre_disk_t& disk, const ambre_ev_desc_t& desc,
      * whose seq_last is below seq_emerg (blocks fetched over IPC) is walked
      * until the chain stops on its own. */
     for (uint32_t step = 0u; step < 64u; step++) {
-        ambre_block_t head;
+        ambre_block_t head{};
         uint32_t length = 0u;
         const int rc = ambre_read_record(&disk, desc.start_seg, block,
                                          session_id, expect, &head, payload,
@@ -147,7 +147,7 @@ bool list_events(const std::string& image_path,
         return false;
     }
     const ambre_disk_t disk = file.vtable();
-    ambre_alloc_table_t table;
+    ambre_alloc_table_t table{};
     if (!read_table(disk, &table, error)) {
         *error = image_path + ": " + *error;
         return false;
@@ -170,7 +170,7 @@ bool load_event(const std::string& image_path, const ambre_ev_desc_t& desc,
         return false;
     }
     const ambre_disk_t disk = file.vtable();
-    ambre_alloc_table_t table;
+    ambre_alloc_table_t table{};
     if (!read_table(disk, &table, error)) {
         *error = image_path + ": " + *error;
         return false;
@@ -207,7 +207,7 @@ int MemoryDisk::flush_thunk(void*)
 
 ambre_disk_t MemoryDisk::vtable()
 {
-    ambre_disk_t disk;
+    ambre_disk_t disk{};
     std::memset(&disk, 0, sizeof(disk));
     disk.ctx = this;
     disk.size = image_.size();

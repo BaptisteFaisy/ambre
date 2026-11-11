@@ -35,7 +35,7 @@ std::string build_event_mcap(const EventData& event,
     uint64_t t0 = event.trig_ts_us;
     if (t0 == 0u) {
         for (const EventRecord& record : event.records) {
-            ambre_emerg_t emerg;
+            ambre_emerg_t emerg{};
             if (record.rec_type == AMBRE_REC_EMERG &&
                 record.payload.size() >= sizeof(emerg)) {
                 std::memcpy(&emerg, record.payload.data(), sizeof(emerg));

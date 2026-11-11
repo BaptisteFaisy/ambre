@@ -209,7 +209,7 @@ void collect_class_b(const EventData& event, ClassBMap* slots)
         std::map<uint16_t, uint32_t> counters;
         const size_t count = record.payload.size() / sizeof(ambre_sample_t);
         for (size_t i = 0; i < count; i++) {
-            ambre_sample_t sample;
+            ambre_sample_t sample{};
             std::memcpy(&sample, record.payload.data() + i * sizeof(sample),
                         sizeof(sample));
             merge_sample(record.first_ts_us, sample, &counters[sample.signal_id],
@@ -249,7 +249,7 @@ void emit_precrash(const EventData& event, uint64_t t0_us, uint16_t channel_id,
                    mcap::Writer* writer)
 {
     (void)t0_us;
-    ambre_emerg_t emerg;
+    ambre_emerg_t emerg{};
     for (const EventRecord& record : event.records) {
         if (record.rec_type != AMBRE_REC_EMERG || !payload_as(record, &emerg)) {
             continue;
@@ -280,7 +280,7 @@ void emit_delta_v(const EventData& event, uint64_t t0_us, uint16_t channel_id,
     (void)t0_us;
     std::vector<ambre_cont_t> conts;
     for (const EventRecord& record : event.records) {
-        ambre_cont_t cont;
+        ambre_cont_t cont{};
         if (record.rec_type == AMBRE_REC_CONT && payload_as(record, &cont)) {
             conts.push_back(cont);
         }
@@ -301,8 +301,12 @@ void emit_event_summary(const EventData& event, uint64_t t0_us,
                         uint16_t channel_id, mcap::Writer* writer)
 {
     (void)t0_us;
-    ambre_emerg_t emerg;
-    ambre_seal_t seal;
+    /* Zero-initialised: payload_as() only fills them when the record is valid,
+     * and event_payload() reads whichever of the two is present. GCC 14 on the
+     * CI workers cannot prove that and warns (-Werror=maybe-uninitialized);
+     * initialising is correct anyway. */
+    ambre_emerg_t emerg{};
+    ambre_seal_t seal{};
     bool have_emerg = false;
     bool have_seal = false;
     size_t cont_count = 0;
@@ -342,7 +346,7 @@ void emit_gaps(const EventData& event, uint64_t t0_us, uint16_t channel_id,
                mcap::Writer* writer)
 {
     for (const EventRecord& record : event.records) {
-        ambre_gap_t gap;
+        ambre_gap_t gap{};
         if (record.rec_type == AMBRE_REC_GAP && payload_as(record, &gap)) {
             writer->add_message(channel_id, log_time_ns(t0_us, gap.start_ts_us),
                                 gap_payload(gap));
@@ -395,8 +399,8 @@ void attach_metadata(const EventData& event, uint64_t t0_us,
                      const std::string& source_sha256, uint64_t source_bytes,
                      mcap::Writer* writer)
 {
-    ambre_emerg_t emerg;
-    ambre_seal_t seal;
+    ambre_emerg_t emerg{};
+    ambre_seal_t seal{};
     bool have_emerg = false;
     bool have_seal = false;
     uint32_t payload_crc = 0u;

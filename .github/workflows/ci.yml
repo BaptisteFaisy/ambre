@@ -52,6 +52,23 @@ jobs:
       - name: make test
         run: make test
 
+      # C++17 archive (cahier section 9): the MCAP writer and the archive
+      # process, cross-checked against the Python reader in host/mcap.
+      - name: make test_archive_cpp
+        run: make test_archive_cpp
+
+      # The QNX glue compiles against target/qnx-stub/include: objects only,
+      # never linked, so a missing QNX symbol cannot break the PC build.
+      # Proves syntax and prototypes, not behaviour (docs/QNX-PORT.md).
+      - name: make qnx-syntax
+        run: make qnx-syntax
+
+      # Static consistency of image/ (process names, priorities of spec 4.4,
+      # security policy types, distinct partitions, no network, no stop
+      # command). Cannot build a real image without the QNX SDP.
+      - name: make image-check
+        run: make image-check
+
   python-tests:
     name: Python twin tests
     runs-on: [self-hosted, Linux, X64, ambre-worker]

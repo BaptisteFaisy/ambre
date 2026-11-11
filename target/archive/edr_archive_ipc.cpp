@@ -152,7 +152,7 @@ class ServiceLink {
         }
         const uint8_t reply_type = reply[5];
         if (reply_type == static_cast<uint8_t>(AMBRE_MSG_NAK)) {
-            ambre_edr_nak_body_t nak;
+            ambre_edr_nak_body_t nak{};
             std::memcpy(&nak, reply + AMBRE_IPC_HDR_SIZE, sizeof(nak));
             *error = "refused by edr-journal (code " +
                      std::to_string(nak.code) + ")";
@@ -191,13 +191,13 @@ bool load_from_blocks(const std::vector<uint8_t>& blocks, EventData* out)
                 blocks.size());
 
     /* The first block carries the session and the first sequence number. */
-    ambre_block_t head;
+    ambre_block_t head{};
     ambre_block_unpack(image.data() + AMBRE_FIRST_DATA_OFFSET, &head);
     if (ambre_block_validate(&head) != AMBRE_OK) {
         return false;
     }
 
-    ambre_ev_desc_t desc;
+    ambre_ev_desc_t desc{};
     std::memset(&desc, 0, sizeof(desc));
     desc.event_id = out->event_id;
     desc.order = out->order;
@@ -238,7 +238,7 @@ bool list_events_service(const std::string& sock_path,
         *error = "short LIST reply";
         return false;
     }
-    ambre_edr_list_body_t list;
+    ambre_edr_list_body_t list{};
     std::memset(&list, 0, sizeof(list));
     const size_t copy = (body_len < sizeof(list)) ? body_len : sizeof(list);
     std::memcpy(&list, reply + AMBRE_IPC_HDR_SIZE, copy);
@@ -254,7 +254,7 @@ bool list_events_service(const std::string& sock_path,
 static bool fetch_blocks(ServiceLink* link, uint32_t event_id,
                           std::vector<uint8_t>* blocks, std::string* error)
 {
-    ambre_edr_export_req_t req;
+    ambre_edr_export_req_t req{};
     req.event_id = event_id;
     req.first_block = 0u;
     uint8_t reply[AMBRE_EDR_SVC_REPLY_MAX];

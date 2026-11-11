@@ -48,7 +48,9 @@ typedef enum {
 
 #pragma pack(push, 1)
 
-/* Every message starts with this header. */
+/* Every message starts with this header. The trailing reserved2 field pads the
+ * header to 16 bytes so the body starts on a 4-byte boundary; it must stay
+ * zero. */
 typedef struct {
     uint32_t magic;             /* AMBRE_IPC_MAGIC                           */
     uint8_t  version;           /* AMBRE_IPC_VERSION                         */
@@ -56,6 +58,7 @@ typedef struct {
     uint8_t  flags;
     uint8_t  reserved;
     uint32_t body_len;          /* bytes after the header                    */
+    uint32_t reserved2;         /* padding to 16 bytes, zero                 */
 } ambre_ipc_hdr_t;
 
 /* AMBRE_MSG_FRAME body: a batch of class B samples covering <= 10 ms. */

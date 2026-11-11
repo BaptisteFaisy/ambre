@@ -9,6 +9,11 @@ build-*/
 *.gcda
 *.gcno
 
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+
 # Editors / OS
 .vscode/
 .idea/

@@ -299,6 +299,10 @@ class EventExporter:
                 "ignition_cycle": str(summary["ignition_cycle"]),
                 "event_number": str(summary["event_number"]),
                 "seal_cause": summary["seal_cause"],
+                # monotonic T0 of the event (no absolute epoch): lets a
+                # verifier map every class A rel_time_ms back onto the
+                # injected scenario (edr_verify class_a.fidelity).
+                "t0_ts_us": str(self.t0_us),
             },
             "edr.vehicle_type": {"type": "ambre-edr", "variant": "socle",
                                  "version": "1"},

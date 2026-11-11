@@ -123,7 +123,7 @@ Any `signal_id` outside this table is rejected and counted.
 | 14 | 1 | `belt_driver` | 0/1 |
 | 15 | 1 | `airbag_lamp` | 0/1 |
 | 16 | 2 | `yaw_rate_deg_s_x10` (int16) | 0.1 deg/s |
-| 18 | 2 | `rel_time_ms` | ms before T0, 0..5000 |
+| 18 | 2 | `rel_time_ms` | real age of the point before T0, in ms (0..5500) |
 
 `rel_time_ms` is the distance **before** T0: a point 5 s before T0 has
 `rel_time_ms = 5000`, the point at T0 has `0`.

@@ -17,8 +17,11 @@
 #include <unistd.h>
 #include <sys/wait.h>
 
-#define AMBRE_REC_MAX_POINTS 21u
+/* Class A ring: 5 s at 2 Hz = 10 points, plus the point at T0 (spec 6.1). */
+#define AMBRE_REC_MAX_POINTS 11u
 #define AMBRE_POINT_PERIOD_US 500000u   /* class A at 2 Hz */
+#define AMBRE_POINT_MAX_AGE_MS 5500u    /* 5 s window + sampling phase margin */
+#define AMBRE_REL_TIME_MAX_MS 65535u    /* rel_time_ms is a uint16 */
 #define AMBRE_DATA_EVERY_US 1000u       /* one DATA record per ms */
 
 void ambre_explore_cfg_default(ambre_explore_cfg_t *cfg)
@@ -57,6 +60,7 @@ typedef struct {
     ambre_journal_t         *j;
     ambre_simdisk_t         *sd;
     ambre_a_point_t          pts[AMBRE_REC_MAX_POINTS];
+    uint64_t                 pt_ts_us[AMBRE_REC_MAX_POINTS]; /* real sample time */
     uint32_t                 pt_head;
     uint32_t                 pt_count;
     uint32_t                 next_pt_us;
@@ -66,7 +70,8 @@ typedef struct {
 
 static void push_point(ambre_rec_ctx_t *c, const ambre_scen_sample_t *s)
 {
-    ambre_a_point_t *p = &c->pts[c->pt_head % AMBRE_REC_MAX_POINTS];
+    uint32_t slot = c->pt_head % AMBRE_REC_MAX_POINTS;
+    ambre_a_point_t *p = &c->pts[slot];
     memset(p, 0, sizeof(*p));
     p->speed_kmh_x4 = s->speed_kmh_x4;
     p->throttle_pct = s->throttle_pct;
@@ -76,6 +81,7 @@ static void push_point(ambre_rec_ctx_t *c, const ambre_scen_sample_t *s)
     p->accel_long_mm_s2 = (int16_t)s->a_long_mm_s2;
     p->accel_lat_mm_s2 = (int16_t)s->a_lat_mm_s2;
     p->rel_time_ms = 0;
+    c->pt_ts_us[slot] = s->ts_us;
     c->pt_head++;
     if (c->pt_count < AMBRE_REC_MAX_POINTS) c->pt_count++;
 }
@@ -91,7 +97,11 @@ static void store_samples(ambre_rec_ctx_t *c, uint64_t ts, const ambre_sample_t 
     }
 }
 
-/* Build the EMERG snapshot from the class A points still in the ring. */
+/* Build the EMERG snapshot from the class A points still in the ring.
+ * rel_time_ms is the REAL age of each point against T0 (spec 6.1): the ring
+ * keeps the sample timestamp of every point, so no nominal grid is assumed.
+ * Points older than the 5 s window (+ sampling phase margin) are dropped and
+ * point_count only reflects the points actually emitted. */
 static void fill_emerg(ambre_rec_ctx_t *c, ambre_emerg_t *e, uint64_t ts,
                        uint8_t reason, bool locked)
 {
@@ -103,13 +113,18 @@ static void fill_emerg(ambre_rec_ctx_t *c, ambre_emerg_t *e, uint64_t ts,
     e->t0_ts_us = ts;
     e->trig_ts_us = ts;
     e->crash_order = e->event_id;
-    e->point_count = (uint16_t)c->pt_count;
+    uint32_t emitted = 0;
     for (uint32_t i = 0; i < c->pt_count; i++) {
         uint32_t idx = (c->pt_head - c->pt_count + i) % AMBRE_REC_MAX_POINTS;
-        e->points[i] = c->pts[idx];
-        uint32_t rel = (c->pt_count - i - 1u) * 500u;
-        e->points[i].rel_time_ms = (uint16_t)(rel > 5000u ? 5000u : rel);
+        uint64_t age_ms = (ts - c->pt_ts_us[idx]) / 1000u;
+        if (age_ms > AMBRE_POINT_MAX_AGE_MS) continue;
+        e->points[emitted] = c->pts[idx];
+        e->points[emitted].rel_time_ms =
+            (uint16_t)(age_ms > AMBRE_REL_TIME_MAX_MS ? AMBRE_REL_TIME_MAX_MS
+                                                      : age_ms);
+        emitted++;
     }
+    e->point_count = (uint16_t)emitted;
 }
 
 static void do_trigger(ambre_rec_ctx_t *c, const ambre_trig_out_t *out,

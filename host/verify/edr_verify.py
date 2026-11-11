@@ -258,17 +258,31 @@ def _compare_point(payload, row):
     return problems
 
 
-def check_class_a(report, by_topic, scenario):
-    header, rows = scenario
-    if "crash_at_ms" not in header:
-        report.add("class_a.fidelity", False, "scenario has no crash_at_ms")
+def _nearest_scenario_ms(rows, t_us):
+    """Snap t_us to the nearest millisecond present in the scenario grid."""
+    if t_us in rows:
+        return t_us
+    return int(round(t_us / 1000.0)) * 1000
+
+
+def check_class_a(report, by_topic, scenario, reader):
+    """Compare against the EVENT T0 (journal trigger time) read from the
+    edr.event metadata, not the scenario crash_at_ms: the two differ by the
+    trigger latency, and rel_time_ms is the real age of each point."""
+    _, rows = scenario
+    event_meta = reader.metadata.get("edr.event", {})
+    raw_t0 = event_meta.get("t0_ts_us")
+    if raw_t0 is None or not str(raw_t0).isdigit():
+        report.add("class_a.fidelity", False,
+                   "edr.event metadata carries no t0_ts_us: cannot map the "
+                   "class A points onto the scenario")
         return
-    t0_us = int(header["crash_at_ms"]) * 1000
+    t0_us = int(raw_t0)
     points = by_topic.get(TOPIC_PRECRASH, [])
     problems, checked = [], 0
     for message in points:
         payload = json.loads(message["data"].decode("utf-8"))
-        t_us = t0_us - payload["rel_time_ms"] * 1000
+        t_us = _nearest_scenario_ms(rows, t0_us - payload["rel_time_ms"] * 1000)
         row = rows.get(t_us)
         if row is None:
             problems.append("no scenario sample at t_us=%d" % t_us)
@@ -330,7 +344,7 @@ def verify(mcap_path, scenario_path):
     check_t0(report, by_topic)
     check_relative_time(report, reader)
     check_no_absolute_time(report, reader)
-    check_class_a(report, by_topic, scenario)
+    check_class_a(report, by_topic, scenario, reader)
     check_metadata(report, reader)
     check_file_complete(report, reader, by_topic)
     return report, reader

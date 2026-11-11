@@ -96,7 +96,7 @@ static void fill_emerg(ambre_rec_ctx_t *c, ambre_emerg_t *e, uint64_t ts,
                        uint8_t reason, bool locked)
 {
     memset(e, 0, sizeof(*e));
-    e->event_id = c->truth->event_count + 1u;
+    e->event_id = c->truth->event_count;   /* already incremented */
     e->trig_reason = reason;
     e->locked = locked ? 1u : 0u;
     e->event_number = 1;
@@ -152,10 +152,18 @@ static void do_seal(ambre_rec_ctx_t *c, ambre_truth_event_t *te, uint64_t ts)
     seal.time_since_first_ms = (uint32_t)((ts - te->t0_ts_us) / 1000u);
     te->seal = seal;
     te->sealed = true;
+    /* "Sealed before the cut" means the SEAL record reached the disk: that is
+     * the first op of the seal sequence, not the durability mark that follows
+     * the flush. The recovery reads the record, so the ground truth must use
+     * the same instant (invariant I7). */
+    te->sealed_op = (long)ambre_simdisk_op_count(c->sd);
+    te->sealed_flush_op = -1;
     if (ambre_journal_seal(c->j, &seal) == AMBRE_OK) {
-        te->sealed_op = ambre_simdisk_find_mark(c->sd, AMBRE_MARK_SEALED,
-                                                te->event_id);
+        te->sealed_flush_op = ambre_simdisk_find_mark(c->sd, AMBRE_MARK_SEALED,
+                                                      te->event_id);
         if (c->events_open) c->events_open--;
+    } else {
+        te->sealed_op = -1;
     }
 }
 
@@ -202,7 +210,10 @@ static void step_scenario(ambre_rec_ctx_t *c, ambre_trig_state_t *trig,
     ambre_truth_event_t *te = open_event(c);
     if (te) {
         te->last_sample_ts_us = s->ts_us;
-        if (out.event_end) do_seal(c, te, s->ts_us);
+        if (out.event_end) {
+            do_seal(c, te, s->ts_us);
+            ambre_trig_event_closed(trig, s->ts_us);
+        }
     }
     (void)ambre_journal_tick(c->j, s->ts_us);
     c->truth->last_ts_us = s->ts_us;

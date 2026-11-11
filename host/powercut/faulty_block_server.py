@@ -210,8 +210,8 @@ class VolatileCache:
 
 # -- NBD server ------------------------------------------------------------
 
-def _recv_exactly(conn, count):
-    """Read exactly ``count`` bytes, or raise ConnectionError."""
+def recv_exactly(conn, count):
+    """Read exactly ``count`` bytes from ``conn``, or raise ConnectionError."""
     buffer = b""
     while len(buffer) < count:
         chunk = conn.recv(count - len(buffer))
@@ -288,15 +288,15 @@ class NbdServer:
         """Fixed-newstyle handshake; returns True when transmission starts."""
         conn.sendall(NBDMAGIC + IHAVEOPT
                      + struct.pack(">H", NBD_FLAG_FIXED_NEWSTYLE | NBD_FLAG_NO_ZEROES))
-        client_flags = struct.unpack(">I", _recv_exactly(conn, 4))[0]
+        client_flags = struct.unpack(">I", recv_exactly(conn, 4))[0]
         no_zeroes = bool(client_flags & NBD_FLAG_C_NO_ZEROES)
         option_magic = int.from_bytes(IHAVEOPT, "big")
         while True:
-            magic, option, length = struct.unpack(">QII", _recv_exactly(conn, 16))
+            magic, option, length = struct.unpack(">QII", recv_exactly(conn, 16))
             if magic != option_magic:
                 raise ValueError("bad option magic")
             if length:
-                _recv_exactly(conn, length)  # export name / payload, unused
+                recv_exactly(conn, length)  # export name / payload, unused
             if option == NBD_OPT_EXPORT_NAME:
                 conn.sendall(struct.pack(">QH", self.cache.size, TRANSMISSION_FLAGS)
                              + (b"" if no_zeroes else b"\0" * 124))
@@ -323,12 +323,12 @@ class NbdServer:
         """Serve READ / WRITE / FLUSH / TRIM / DISC requests."""
         while True:
             magic, flags, command, handle, offset, length = struct.unpack(
-                ">IHHQQI", _recv_exactly(conn, 28))
+                ">IHHQQI", recv_exactly(conn, 28))
             if magic != NBD_REQUEST_MAGIC:
                 raise ValueError("bad request magic")
             if command == NBD_CMD_DISC:
                 return
-            data = _recv_exactly(conn, length) if command == NBD_CMD_WRITE else b""
+            data = recv_exactly(conn, length) if command == NBD_CMD_WRITE else b""
             error, payload = self._execute(command, flags, offset, length, data)
             conn.sendall(struct.pack(">IIQ", NBD_SIMPLE_REPLY_MAGIC, error, handle)
                          + payload)
@@ -388,21 +388,26 @@ class NbdServer:
 
 # -- standalone entry point ------------------------------------------------
 
-def build_server(args):
-    """Create the cache + server pair from parsed arguments."""
-    log = EventLog(args.log)
-    cache = VolatileCache(args.backing, size=args.size, drop_ratio=args.drop,
-                          log=log, rng=random.Random(args.seed))
-    return NbdServer(cache, log=log, listen=args.listen, export_name=args.export)
+def make_server(backing, listen="unix:/tmp/ambre-nbd.sock", size=None,
+                drop_ratio=0.0, log_path=None, seed=20261111,
+                export_name="ambre"):
+    """Build the cache + server pair (not started yet)."""
+    log = EventLog(log_path)
+    cache = VolatileCache(backing, size=size, drop_ratio=drop_ratio, log=log,
+                          rng=random.Random(seed))
+    return NbdServer(cache, log=log, listen=listen, export_name=export_name)
 
 
 def start_server(backing, listen="unix:/tmp/ambre-nbd.sock", size=None,
                  drop_ratio=0.0, log_path=None, seed=20261111):
-    """Factory shared by the E1 probe and the test suite."""
-    log = EventLog(log_path)
-    cache = VolatileCache(backing, size=size, drop_ratio=drop_ratio,
-                          log=log, rng=random.Random(seed))
-    return NbdServer(cache, log=log, listen=listen).start()
+    """Factory shared by the E1 probe and the test suite (already serving)."""
+    return make_server(backing, listen, size, drop_ratio, log_path, seed).start()
+
+
+def build_server(args):
+    """Create the cache + server pair from parsed command-line arguments."""
+    return make_server(args.backing, args.listen, args.size, args.drop,
+                       args.log, args.seed, args.export)
 
 
 def main(argv=None):

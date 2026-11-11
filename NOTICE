@@ -1,0 +1,90 @@
+Ambre — QNX Event Data Recorder
+================================
+
+Copyright 2026 The Ambre authors
+
+This product includes software developed by the Ambre project
+(https://github.com/ambre-edr/ambre), licensed under the Apache License,
+Version 2.0. A copy of the license is distributed with this product in the file
+LICENSE.
+
+
+Regulatory references (normative texts, not code)
+-------------------------------------------------
+
+The following legal instruments are referenced by the implementation. They are
+reproduced here by reference only; no text of these instruments is included in
+this repository and none of them is a dependency of the code.
+
+  * Regulation (EU) 2019/2144 of the European Parliament and of the Council of
+    16 December 2019 on general safety of vehicles, and in particular Article 6
+    and the provisions requiring an Event Data Recorder on new vehicle types.
+    This regulation is the legal basis for the EDR mandate in the European
+    Union.
+
+  * UN Regulation No. 160 — "Uniform provisions for the approval of vehicles
+    with regard to the Event Data Recorder". Referenced for the data elements
+    of Annex 4 (Class A), the trigger thresholds, the definition of T0, the
+    locking rules, the data storage capacity and the "complete file"
+    indication.
+
+  * Commission Delegated Regulation (EU) 2022/545 of 26 April 2022
+    supplementing Regulation (EU) 2019/2144 with regard to the Event Data
+    Recorder, in particular as regards the requirements for accessing and
+    reading the stored data.
+
+  * 49 CFR Part 563 (United States) — Event Data Recording, the North American
+    data-element and performance profile referenced for comparison purposes.
+
+The implementation is *aligned with* UN Regulation No. 160. It is not
+certified, not homologated and does not claim regulatory compliance.
+
+
+Data formats and specifications
+-------------------------------
+
+  * MCAP — the MCAP specification and the reference C++ library published at
+    mcap.dev (Foxglove). Used for the archive format of sealed events and the
+    Foxglove visualization layout. Licensed upstream under the Apache License,
+    Version 2.0; the licence as published upstream governs any use of that
+    code. The MCAP writer and reader shipped in host/mcap/ are an independent
+    implementation of the published specification.
+
+  * CRC-32C (Castagnoli) — the check value for the variant used by the journal
+    format is CRC32C("123456789") = 0xE3069283. The polynomial and the
+    initial/final values are documented in docs/FORMAT.md.
+
+
+Inspiration (ideas only, no code copied)
+----------------------------------------
+
+  * CrashMonkey — research work on testing file-system consistency and crash
+    behaviour by controlled crash injection.
+  * ALICE — research work on fault injection in storage stacks.
+  * dm-log-writes — work on the correctness of log-structured writes under
+    crash.
+
+These are cited as inspiration for the *method* used in Ambre (crash
+injection, exhaustive exploration of crash states, invariant checking after
+recovery). No code, no text and no data from these projects are reproduced
+here. They are cited from memory and have not been re-verified against the
+current published versions.
+
+
+Datasets (to be used, not yet redistributed)
+--------------------------------------------
+
+  * comma2k19 (comma.ai / comma.ai "comma2k19" driving dataset) — real driving
+    data used to derive realistic vehicle signal traces for scenario
+    generation. Reported licence: MIT. **To be confirmed** before any part of
+    it is downloaded, vendored or redistributed.
+
+  * NHTSA crash test data — public crash-test datasets used to cross-check the
+    trigger arithmetic against documented real crash profiles. **Licence to be
+    confirmed** before use.
+
+Status: no third-party dataset is currently vendored in this repository. The
+scenario files under host/scenarios/ are generated synthetically by the
+repository's own generator. The licences of the two datasets above must be
+confirmed, and the corresponding attributions added here, before any of their
+content is included in a public release or in a demo video.

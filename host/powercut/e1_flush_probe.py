@@ -33,6 +33,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
 import socket
 import struct
 import sys
@@ -79,17 +80,6 @@ GUEST_READBACK_CMD = ("dd if=%s bs=512 skip=%d count=%d | cksum"
 
 # -- reference NBD client --------------------------------------------------
 
-def _recv_exactly(conn, count):
-    """Read exactly ``count`` bytes, or raise ConnectionError."""
-    buffer = b""
-    while len(buffer) < count:
-        chunk = conn.recv(count - len(buffer))
-        if not chunk:
-            raise ConnectionError("server closed")
-        buffer += chunk
-    return buffer
-
-
 class NbdClient:
     """Tiny NBD client: enough to write, read and flush for the probes."""
 
@@ -114,26 +104,26 @@ class NbdClient:
         return self
 
     def _handshake(self):
-        if _recv_exactly(self.sock, 8) != fbs.NBDMAGIC:
+        if fbs.recv_exactly(self.sock, 8) != fbs.NBDMAGIC:
             raise ValueError("not an NBD server")
-        _recv_exactly(self.sock, 10)  # IHAVEOPT magic + handshake flags
+        fbs.recv_exactly(self.sock, 10)  # IHAVEOPT magic + handshake flags
         self.sock.sendall(struct.pack(">I", fbs.NBD_FLAG_C_FIXED_NEWSTYLE
                                       | fbs.NBD_FLAG_C_NO_ZEROES))
         name = self.export_name.encode()
         self.sock.sendall(struct.pack(">QII", int.from_bytes(fbs.IHAVEOPT, "big"),
                                       fbs.NBD_OPT_EXPORT_NAME, len(name)) + name)
-        self.size, _flags = struct.unpack(">QH", _recv_exactly(self.sock, 10))
+        self.size, _flags = struct.unpack(">QH", fbs.recv_exactly(self.sock, 10))
 
     def _request(self, command, offset=0, length=0, data=b"", flags=0):
         self.handle = (self.handle + 1) & 0xFFFFFFFFFFFFFFFF
         self.sock.sendall(struct.pack(">IHHQQI", fbs.NBD_REQUEST_MAGIC, flags, command,
                                       self.handle, offset, length) + data)
-        magic, error, handle = struct.unpack(">IIQ", _recv_exactly(self.sock, 16))
+        magic, error, handle = struct.unpack(">IIQ", fbs.recv_exactly(self.sock, 16))
         if magic != fbs.NBD_SIMPLE_REPLY_MAGIC or handle != self.handle:
             raise ValueError("bad NBD reply")
         if error:
             raise OSError("NBD error %d" % error)
-        return _recv_exactly(self.sock, length) if command == fbs.NBD_CMD_READ else b""
+        return fbs.recv_exactly(self.sock, length) if command == fbs.NBD_CMD_READ else b""
 
     def write(self, offset, data):
         """Write (buffered in the server-side volatile cache)."""
@@ -320,7 +310,6 @@ def main(argv=None):
         else:
             result = probe_with_nbd(workdir)
     finally:
-        import shutil
         shutil.rmtree(workdir, ignore_errors=True)
     result["verdict"] = verdict_of(result)
     if args.report:

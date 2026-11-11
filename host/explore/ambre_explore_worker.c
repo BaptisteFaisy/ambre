@@ -33,19 +33,27 @@ void ambre_explore_ws_free(ambre_explore_ws_t *ws)
     ambre_memdisk_destroy(&ws->nested);
 }
 
-/* Bring ws->plain up to `prefix`, one write at a time (states come in order). */
+/* Bring ws->plain up to `prefix`, one write at a time (states come in order).
+ *
+ * The new writes are applied to BOTH images: ws->plain stays the pristine
+ * prefix image, and ws->work must see them too - otherwise the dirty-block
+ * rollback in ambre_memdisk_sync_from() would leave ws->work holding the
+ * previous prefix for every block the recovery did not touch.
+ */
 static void advance_plain(ambre_explore_ws_t *ws, const ambre_simdisk_t *sd,
                           uint32_t prefix)
 {
     if (prefix < ws->plain_prefix) {
         memset(ws->plain, 0, (size_t)ws->size);
         ws->plain_prefix = 0;
+        ws->work.synced = false;       /* force a full copy in sync_from */
     }
     for (uint32_t i = ws->plain_prefix; i < prefix; i++) {
         const ambre_op_t *op = ambre_simdisk_op(sd, i);
         if (!op || op->kind != AMBRE_OP_WRITE) continue;
         if (op->off + op->len > ws->size) continue;
         memcpy(ws->plain + op->off, sd->data_pool[op->data_id], op->len);
+        memcpy(ws->work.image + op->off, sd->data_pool[op->data_id], op->len);
     }
     ws->plain_prefix = prefix;
 }
@@ -81,20 +89,20 @@ static int build_image(ambre_explore_ws_t *ws, const ambre_simdisk_t *sd,
 {
     const ambre_cut_variant_t *v = &st->variant;
     advance_plain(ws, sd, st->prefix);
-    if (st->variant_type == 2) return build_cache_image(ws, sd, v);
+    if (st->variant_type == AMBRE_VAR_CACHE) return build_cache_image(ws, sd, v);
     if (ambre_memdisk_sync_from(&ws->work, ws->plain) != AMBRE_OK) return -1;
     ambre_disk_t *d = &ws->work.disk;
-    if (st->variant_type == 1 && st->prefix > 0) {
+    if (st->variant_type == AMBRE_VAR_TORN && st->prefix > 0) {
         const ambre_op_t *op = ambre_simdisk_op(sd, st->prefix - 1u);
         if (op && op->kind == AMBRE_OP_WRITE && v->torn_bytes < op->len) {
             if (d->write(d->ctx, op->off, sd->data_pool[op->data_id],
                          v->torn_bytes) != 0) return -1;
         }
-    } else if (st->variant_type == 3 && v->corrupt_off < ws->size) {
+    } else if (st->variant_type == AMBRE_VAR_BITFLIP && v->corrupt_off < ws->size) {
         uint8_t byte = ws->work.image[v->corrupt_off];
         byte ^= (uint8_t)(1u << (v->corrupt_bit_index & 7u));
         if (d->write(d->ctx, v->corrupt_off, &byte, 1u) != 0) return -1;
-    } else if (st->variant_type == 4) {
+    } else if (st->variant_type == AMBRE_VAR_TABLE) {
         static const uint8_t zeros[AMBRE_BLOCK_SIZE] = {0};
         uint32_t len = v->wipe_both_tables ? 2u * AMBRE_BLOCK_SIZE
                                            : AMBRE_BLOCK_SIZE;
@@ -119,7 +127,9 @@ static int run_plain(ambre_explore_ws_t *ws, const ambre_truth_t *truth,
                  rc, st->prefix, st->variant_type);
         return 1;
     }
-    return ambre_check_invariants(truth, &rec, &ws->work.disk, st->prefix, sd, rep);
+    (void)ambre_check_invariants(truth, &rec, &ws->work.disk, st->prefix, sd,
+                                       st->variant_type, rep);
+    return (rep->violated_mask == 0) ? 0 : 1;
 }
 
 /* Nested cut (I8): interrupt recovery after half of its own writes, recover
@@ -137,8 +147,9 @@ static int run_nested(ambre_explore_ws_t *ws, const ambre_truth_t *truth,
     ws->work.log_ops = false;
     if (rc != AMBRE_OK) return run_plain(ws, truth, st, sd, rep);
     if (half == 0) {
-        return ambre_check_invariants(truth, &rec1, &ws->work.disk,
-                                      st->prefix, sd, rep);
+        (void)ambre_check_invariants(truth, &rec1, &ws->work.disk,
+                                     st->prefix, sd, st->variant_type, rep);
+        return (rep->violated_mask == 0) ? 0 : 1;
     }
     if (ambre_memdisk_apply_log(&ws->work, half, &ws->nested,
                                 ws->plain) != AMBRE_OK) {
@@ -153,8 +164,9 @@ static int run_nested(ambre_explore_ws_t *ws, const ambre_truth_t *truth,
                  "I1: nested recovery failed (prefix %u)", st->prefix);
         return 1;
     }
-    return ambre_check_invariants(truth, &rec2, &ws->nested.disk,
-                                  st->prefix, sd, rep);
+    (void)ambre_check_invariants(truth, &rec2, &ws->nested.disk,
+                                 st->prefix, sd, st->variant_type, rep);
+    return (rep->violated_mask == 0) ? 0 : 1;
 }
 
 int ambre_explore_ws_test(ambre_explore_ws_t *ws,
@@ -167,7 +179,7 @@ int ambre_explore_ws_test(ambre_explore_ws_t *ws,
     memset(rep, 0, sizeof(*rep));
     if (build_image(ws, sd, st) != 0) return -1;
     int rc;
-    if (st->variant_type == 5) {
+    if (st->variant_type == AMBRE_VAR_NESTED) {
         rc = run_nested(ws, truth, st, sd, rep);
     } else {
         rc = run_plain(ws, truth, st, sd, rep);

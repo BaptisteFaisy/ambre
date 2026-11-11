@@ -59,43 +59,49 @@ def _diff_fields(py_line: str, c_line: str) -> list:
     return diffs
 
 
+def _ids(line: str) -> tuple:
+    """Extract (scenario_id, sample_index) from a `D ...` line."""
+    t = line.split()
+    sid = t[1] if len(t) > 1 else "?"
+    idx = t[2] if len(t) > 2 else "?"
+    return sid, idx
+
+
 def compare(py_lines: list, c_lines: list, verbose: bool) -> tuple:
-    """Compare Python vs C decision lines. Returns (n_samples, n_div, details)."""
+    """Compare Python vs C decision lines. Returns (n_samples, n_div, details).
+
+    Each detail is (scenario_id, sample_index, field, c_value, py_value).
+    """
     n_div = 0
     details = []
-    n = max(len(py_lines), len(c_lines))
-    for i in range(n):
+    for i in range(max(len(py_lines), len(c_lines))):
         py = py_lines[i] if i < len(py_lines) else None
         c = c_lines[i] if i < len(c_lines) else None
         if py == c:
             continue
         n_div += 1
+        sid, idx = _ids(py if py is not None else c)
         if py is None:
-            details.append((i, "line-count", "<missing>", "C extra: " + (c or "")))
+            details.append((sid, idx, "line-count", "<no C line>", "<py line>"))
             continue
         if c is None:
-            details.append((i, "line-count", "Py extra: " + py, "<missing>"))
+            details.append((sid, idx, "line-count", "<c line>", "<no py line>"))
             continue
         for name, cv, pv in _diff_fields(py, c):
-            details.append((i, name, cv, pv))
-    n_samples = len(py_lines)
+            details.append((sid, idx, name, cv, pv))
     if verbose:
         for i in range(min(len(py_lines), len(c_lines))):
             if py_lines[i] != c_lines[i]:
                 print(f"  line {i}:\n    C : {c_lines[i]}\n    PY: {py_lines[i]}")
-    return n_samples, n_div, details
+    return len(py_lines), n_div, details
 
 
 def _print_report(n_scen, n_samples, n_div, details) -> None:
     print(f"scenarios:        {n_scen}")
     print(f"samples compared: {n_samples}")
     print(f"divergences:      {n_div}")
-    shown = 0
-    for idx, field, cval, pval in details:
-        if shown >= 10:
-            break
-        print(f"  [div {shown + 1}] line={idx} field={field} C={cval} PY={pval}")
-        shown += 1
+    for shown, (sid, idx, field, cval, pval) in enumerate(details[:10], start=1):
+        print(f"  [div {shown}] id={sid} i={idx} field={field} C={cval} PY={pval}")
 
 
 def run_compare(vec_path: str, dec_path: str, verbose: bool) -> int:

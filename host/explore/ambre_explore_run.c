@@ -6,6 +6,8 @@
  * simdisk copy-on-write, so no multi-megabyte image is duplicated per state.
  */
 
+#define _POSIX_C_SOURCE 200809L   /* clock_gettime, fork, waitpid */
+
 #include "ambre_explore_internal.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -41,6 +43,21 @@ static void merge_stats(ambre_explore_stats_t *dst,
     }
 }
 
+/* Events already durable (acquired) before the cut at `prefix`. */
+static uint32_t acquired_before(const ambre_truth_t *truth, uint32_t prefix)
+{
+    uint32_t n = 0u;
+
+    for (uint32_t i = 0u; i < truth->event_count; i++) {
+        const ambre_truth_event_t *te = &truth->events[i];
+
+        if (te->acquired_op >= 0 && (uint32_t)te->acquired_op < prefix) {
+            n++;
+        }
+    }
+    return n;
+}
+
 static void run_range(const ambre_explore_cfg_t *cfg, const ambre_simdisk_t *sd,
                       const ambre_truth_t *truth, const ambre_state_queue_t *q,
                       size_t start, size_t end, ambre_explore_stats_t *out)
@@ -54,11 +71,15 @@ static void run_range(const ambre_explore_cfg_t *cfg, const ambre_simdisk_t *sd,
         if (rc < 0) continue;
         out->states_explored++;
         out->recoveries_run++;
+        out->events_acquired += acquired_before(truth, st->prefix);
         if (st->variant_type >= 0 && st->variant_type < 6) {
             out->states_by_variant[st->variant_type]++;
         }
         if (rc > 0) {
             out->violations++;
+            if (rep.violated_mask & (1u << AMBRE_I3_NO_PHANTOM)) {
+                out->events_phantom++;
+            }
             for (uint32_t k = 0; k < AMBRE_INVARIANT_COUNT; k++) {
                 if (rep.violated_mask & (1u << k)) out->per_invariant[k]++;
             }
@@ -72,7 +93,7 @@ static void run_range(const ambre_explore_cfg_t *cfg, const ambre_simdisk_t *sd,
     ambre_explore_ws_free(&ws);
 }
 
-/* Child side: run a slice and hand the counters back on the shared pipe. */
+/* Child side: run a slice and hand the counters back on its own pipe. */
 static void child_slice(const ambre_explore_cfg_t *cfg, const ambre_simdisk_t *sd,
                         const ambre_truth_t *truth, const ambre_state_queue_t *q,
                         size_t start, size_t end, int fd)
@@ -80,10 +101,25 @@ static void child_slice(const ambre_explore_cfg_t *cfg, const ambre_simdisk_t *s
     ambre_explore_stats_t local;
     memset(&local, 0, sizeof(local));
     run_range(cfg, sd, truth, q, start, end, &local);
-    ssize_t w = write(fd, &local, sizeof(local));
-    (void)w;
+    size_t done = 0;
+    while (done < sizeof(local)) {
+        ssize_t w = write(fd, (const char *)&local + done, sizeof(local) - done);
+        if (w <= 0) break;
+        done += (size_t)w;
+    }
     close(fd);
     _exit(0);
+}
+
+static bool read_stats(int fd, ambre_explore_stats_t *out)
+{
+    size_t got = 0;
+    while (got < sizeof(*out)) {
+        ssize_t n = read(fd, (char *)out + got, sizeof(*out) - got);
+        if (n <= 0) return false;
+        got += (size_t)n;
+    }
+    return true;
 }
 
 static int run_parallel(const ambre_explore_cfg_t *cfg, const ambre_simdisk_t *sd,
@@ -97,30 +133,27 @@ static int run_parallel(const ambre_explore_cfg_t *cfg, const ambre_simdisk_t *s
         run_range(cfg, sd, truth, q, 0, q->count, out);
         return 0;
     }
-    int fds[2];
-    if (pipe(fds) != 0) return -1;
     size_t chunk = (q->count + jobs - 1u) / jobs;
-    uint32_t launched = 0;
     for (uint32_t k = 0; k < jobs; k++) {
         size_t s = (size_t)k * chunk;
         if (s >= q->count) break;
         size_t e = s + chunk;
         if (e > q->count) e = q->count;
+        int fds[2];
+        if (pipe(fds) != 0) return -1;
         pid_t pid = fork();
         if (pid == 0) {
             close(fds[0]);
             child_slice(cfg, sd, truth, q, s, e, fds[1]);
         }
-        if (pid > 0) launched++;
-    }
-    close(fds[1]);
-    for (uint32_t k = 0; k < launched; k++) {
+        close(fds[1]);
+        if (pid < 0) { close(fds[0]); return -1; }
         ambre_explore_stats_t part;
-        ssize_t n = read(fds[0], &part, sizeof(part));
-        if (n == (ssize_t)sizeof(part)) merge_stats(out, &part);
-        (void)wait(NULL);
+        memset(&part, 0, sizeof(part));
+        if (read_stats(fds[0], &part)) merge_stats(out, &part);
+        close(fds[0]);
+        (void)waitpid(pid, NULL, 0);
     }
-    close(fds[0]);
     return 0;
 }
 
@@ -166,7 +199,8 @@ static void write_report(const ambre_explore_cfg_t *cfg,
 int ambre_explore_run(const ambre_explore_cfg_t *cfg, ambre_explore_stats_t *out)
 {
     memset(out, 0, sizeof(*out));
-    clock_t t0 = clock();
+    struct timespec t0, t1;
+    clock_gettime(CLOCK_MONOTONIC, &t0);
     uint64_t size = AMBRE_FIRST_DATA_OFFSET +
                     (uint64_t)cfg->segment_limit * AMBRE_SEGMENT_SIZE;
     ambre_simdisk_t sd;
@@ -185,7 +219,9 @@ int ambre_explore_run(const ambre_explore_cfg_t *cfg, ambre_explore_stats_t *out
         return -1;
     }
     (void)run_parallel(cfg, &sd, &truth, &q, out);
-    out->seconds = (double)(clock() - t0) / (double)CLOCKS_PER_SEC;
+    clock_gettime(CLOCK_MONOTONIC, &t1);
+    out->seconds = (double)(t1.tv_sec - t0.tv_sec) +
+                   (double)(t1.tv_nsec - t0.tv_nsec) / 1e9;
     if (out->seconds <= 0.0) out->seconds = 0.001;
     write_report(cfg, out);
     ambre_state_queue_free(&q);

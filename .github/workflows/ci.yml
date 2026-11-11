@@ -1,0 +1,141 @@
+# Ambre CI — verdict in 5 minutes maximum (user rule 2026-10-24,
+# see ~/Bureau/CI-BUDGET-5MIN.md).
+#
+# Hard rules applied here, on every job:
+#   * timeout-minutes: 5            (never extended, never removed)
+#   * concurrency + cancel-in-progress: true
+#   * actions/checkout with fetch-depth: 1
+#   * no hard-coded sleep > 30 s
+# Anything that does not fit in 5 minutes is NOT here: it lives in
+# nightly.yml (workflow_dispatch / schedule, never on a PR).
+
+name: ci
+
+on:
+  push:
+    paths-ignore: ['**.md']
+  pull_request:
+    paths-ignore: ['**.md']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-test:
+    name: build + C unit tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      # ubuntu-latest already ships gcc + python3; install only if missing.
+      - name: Toolchain
+        run: |
+          command -v gcc >/dev/null && command -v python3 >/dev/null || {
+            sudo apt-get update -qq
+            sudo apt-get install -y --no-install-recommends build-essential python3
+          }
+          # ccache is preinstalled on GitHub runners: warm object cache, no build redo.
+          if command -v ccache >/dev/null 2>&1; then
+            echo "CC=ccache gcc" >> "$GITHUB_ENV"
+          fi
+
+      - name: ccache cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.ccache
+          key: ccache-c-${{ hashFiles('fmt/**', 'host/**', 'tests/**', 'Makefile') }}
+          restore-keys: ccache-c-
+
+      - name: make all
+        run: make all
+
+      - name: make test
+        run: make test
+
+  python-tests:
+    name: Python twin tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Toolchain
+        run: |
+          command -v python3 >/dev/null || {
+            sudo apt-get update -qq
+            sudo apt-get install -y --no-install-recommends python3
+          }
+
+      # Standalone tests: exit code = number of failures (0 = green).
+      - name: tests/test_*_py.py
+        run: |
+          fails=0
+          for t in tests/test_*_py.py; do
+            echo "== $t"
+            timeout 120 python3 "$t" || fails=1
+          done
+          [ "$fails" -eq 0 ] || { echo "PYTHON TESTS FAILED"; exit 1; }
+          echo "PYTHON TESTS PASSED"
+
+      - name: trigger crosscheck self-test
+        run: timeout 120 python3 host/verify/trigger_crosscheck.py --self
+
+  explore:
+    name: power-cut exploration (10 000 states)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Toolchain
+        run: |
+          command -v gcc >/dev/null && command -v python3 >/dev/null || {
+            sudo apt-get update -qq
+            sudo apt-get install -y --no-install-recommends build-essential python3
+          }
+          if command -v ccache >/dev/null 2>&1; then
+            echo "CC=ccache gcc" >> "$GITHUB_ENV"
+          fi
+
+      - name: ccache cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.ccache
+          key: ccache-explore-${{ hashFiles('fmt/**', 'host/**', 'tests/**', 'Makefile') }}
+          restore-keys: ccache-explore-
+
+      # make explore = make all + scenario + 10 000 states (level 1).
+      - name: make explore
+        run: make explore
+
+      - name: exploration report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: explore-report
+          path: build/explore.json
+          if-no-files-found: ignore
+          retention-days: 7
+
+  sizecheck:
+    name: house rule (<500 lines / <50 lines)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: make sizecheck
+        run: make sizecheck

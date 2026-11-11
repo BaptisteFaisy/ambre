@@ -57,64 +57,58 @@ static void test_dec08_case2_81kmh_150ms_triggers(void)
     AMBRE_CHECK(fired && st.in_event);
 }
 
-static void test_dec08_case3_81kmh_151ms_no_trigger_anchored(void)
+/* DEC-08 case 3 driver: 152 ramp samples at 14000 mm/s2 then one 137000 spike.
+ * Returns true if any sample fired; *last holds the final decision. */
+static bool run_slow_ramp(uint8_t mode, ambre_trig_state_t *st,
+                          ambre_trig_out_t *last)
 {
-    /* DEC-08 case 3: a monotonic ramp meant to reach ~8.1 km/h in 151 ms must
-     * NOT trigger — this requires ANCHORED mode.
-     *
-     * WHY ANCHORED IS NECESSARY: the regulation-faithful WINDOW reading ("there
-     * exists a sub-window <= 150 ms whose delta exceeds the threshold") would
-     * still fire on a ramp that only reaches the threshold after 150 ms, because
-     * some 150 ms sub-window of a longer ramp exceeds the threshold. ANCHORED
-     * instead anchors at the first non-zero excursion and fires ONLY if the
-     * threshold is crossed within win_trigger_ms (150 ms) of that anchor, which
-     * correctly rejects the slower ramp. This is the mode used to express
-     * "8.1 km/h reached in 151 ms does not trigger".
-     *
-     * CONSTRUCTION: 1 ms cadence, accel 14000 mm/s2 for the first 151 samples
-     * => per-interval dv = trunc(14000/1000) = 14 mm/s, so dv(151) = 2114 mm/s
-     * and the anchor sits on sample 1 (dv_anchor = 14). The excursion at that
-     * point is 2100 mm/s: still below 2222. Sample 152 then jumps (accel
-     * 137000 => +137 mm/s), bringing dv to 2251 mm/s, i.e. an excursion of 2237
-     * mm/s from the anchor -- genuinely above the 2222 threshold, but reached
-     * 151 ms after the anchor (> win_trigger_ms = 150 ms), so ANCHORED must NOT
-     * fire. The same input in WINDOW mode DOES fire at sample 152, because the
-     * 150 ms window [ts-150ms, ts] then holds dv from 28 to 2251 (delta 2223).
-     * That pair of assertions is exactly why ANCHORED exists. */
     ambre_trig_cfg_t cfg;
     ambre_trig_cfg_default(&cfg);
-    cfg.mode = AMBRE_TRIG_MODE_ANCHORED;
-    ambre_trig_state_t st;
-    ambre_trig_init(&st, &cfg);
-    bool fired_anchored = false;
+    cfg.mode = mode;
+    ambre_trig_init(st, &cfg);
+
+    bool fired = false;
     uint64_t ts = 1000;
     for (int i = 0; i < 152; i++, ts += 1000) {
         ambre_trig_out_t out;
-        ambre_trig_push(&st, ts, 14000, 0, NULL, &out);
-        if (out.fired) fired_anchored = true;
+        ambre_trig_push(st, ts, 14000, 0, NULL, &out);
+        if (out.fired) fired = true;
     }
-    ambre_trig_out_t last;
-    ambre_trig_push(&st, ts, 137000, 0, NULL, &last);
-    if (last.fired) fired_anchored = true;
+    ambre_trig_push(st, ts, 137000, 0, NULL, last);
+    return fired || last->fired;
+}
 
-    /* Sanity: the threshold really was exceeded at that point. */
+static void test_dec08_case3_81kmh_151ms_no_trigger_anchored(void)
+{
+    /* DEC-08 case 3: ~8.1 km/h reached only in 151 ms must NOT trigger. This
+     * case is the reason ANCHORED mode exists.
+     *
+     * WHY ANCHORED IS NECESSARY: the regulation-faithful WINDOW reading ("there
+     * exists a sub-window of <= 150 ms whose delta exceeds the threshold") still
+     * fires on a slow ramp, because once the ramp is long enough some 150 ms
+     * sub-window does exceed the threshold. ANCHORED instead measures the
+     * excursion from the sample where delta-v was last at rest and only counts
+     * it within win_trigger_ms (150 ms) of that anchor, so a ramp that needs
+     * 151 ms is correctly rejected.
+     *
+     * CONSTRUCTION: 1 ms cadence, 152 samples at 14000 mm/s2 => per-interval dv
+     * = trunc(14.0) = 14 mm/s, so dv(151) = 2114 mm/s (excursion 2100 from the
+     * anchor, below 2222). Sample 152 then adds 137 mm/s, bringing dv to
+     * 2251 mm/s: an excursion of 2237 mm/s, genuinely above the threshold, but
+     * reached 151 ms after the anchor. ANCHORED must not fire; WINDOW does fire
+     * because its 150 ms window then holds dv from 28 to 2251 (delta 2223).
+     * Both assertions are checked below, side by side. */
+    ambre_trig_state_t st;
+    ambre_trig_out_t last;
+    bool fired_anchored = run_slow_ramp(AMBRE_TRIG_MODE_ANCHORED, &st, &last);
+
+    /* Sanity: the threshold really was exceeded by the final sample. */
     AMBRE_CHECK(last.dv_long_mm_s > AMBRE_DV_TRIGGER_MM_S);
     AMBRE_CHECK(!fired_anchored && !st.in_event);
 
-    /* Same input, WINDOW mode (the default, regulation-faithful reading). */
-    cfg.mode = AMBRE_TRIG_MODE_WINDOW;
     ambre_trig_state_t st_w;
-    ambre_trig_init(&st_w, &cfg);
-    bool fired_window = false;
-    ts = 1000;
-    for (int i = 0; i < 152; i++, ts += 1000) {
-        ambre_trig_out_t out;
-        ambre_trig_push(&st_w, ts, 14000, 0, NULL, &out);
-        if (out.fired) fired_window = true;
-    }
-    ambre_trig_push(&st_w, ts, 137000, 0, NULL, &last);
-    if (last.fired) fired_window = true;
-    AMBRE_CHECK(fired_window);
+    bool fired_window = run_slow_ramp(AMBRE_TRIG_MODE_WINDOW, &st_w, &last);
+    AMBRE_CHECK(fired_window && st_w.in_event);
 }
 
 static void test_dec02_lateral_trigger(void)

@@ -33,6 +33,7 @@
  */
 
 #include "ambre_trigger.h"
+#include "ambre_trigger_window.h"
 #include <string.h>
 
 #define AMBRE_TRIG_OK 0
@@ -69,145 +70,6 @@ static uint16_t clamp_ms(uint64_t ts, uint64_t t0)
     return (ms > 65535ULL) ? (uint16_t)65535 : (uint16_t)ms;
 }
 
-/* ------------------------------------------------------- deques and rings -- */
-
-/* Oldest valid position in the ring (the slot the next push will overwrite). */
-static uint16_t ring_oldest(const ambre_trig_ring_t *r)
-{
-    return r->head;
-}
-
-static uint16_t dq_front(const ambre_trig_deque_t *d)
-{
-    return d->idx[d->head];
-}
-
-static uint16_t dq_back(const ambre_trig_deque_t *d)
-{
-    return d->idx[(uint16_t)((d->head + d->count - 1u) % RING_SLOTS)];
-}
-
-static void dq_pop_front(ambre_trig_deque_t *d)
-{
-    d->head = (uint16_t)((d->head + 1u) % RING_SLOTS);
-    d->count--;
-}
-
-static void dq_pop_back(ambre_trig_deque_t *d)
-{
-    d->count--;
-}
-
-static void dq_push(ambre_trig_deque_t *d, uint16_t pos)
-{
-    d->idx[(uint16_t)((d->head + d->count) % RING_SLOTS)] = pos;
-    d->count++;
-}
-
-/* Drop a queued index that is about to be overwritten by the next ring push.
- * The ring head is the oldest slot, so it can only sit at the deque front. */
-static void dq_drop_overwritten(ambre_trig_deque_t *d, const ambre_trig_ring_t *r)
-{
-    if (r->count == RING_SLOTS && d->count > 0 && dq_front(d) == ring_oldest(r)) {
-        dq_pop_front(d);
-    }
-}
-
-/* Destructive eviction: entries older than cutoff can never re-enter a window
- * (window cutoffs only move forward), so dropping them is final. */
-static void dq_evict_before(ambre_trig_deque_t *d, const ambre_trig_ring_t *r,
-                            uint64_t cutoff)
-{
-    while (d->count > 0 && r->slots[dq_front(d)].ts_us < cutoff) {
-        dq_pop_front(d);
-    }
-}
-
-/* Non-destructive lookup: the first queued candidate still inside the window.
- * Because deque values are monotonic (decreasing for max, increasing for min),
- * that first survivor carries the extreme of the window. */
-static bool dq_first_since(const ambre_trig_deque_t *d, const ambre_trig_ring_t *r,
-                           uint64_t cutoff, uint16_t *pos)
-{
-    for (uint16_t k = 0; k < d->count; k++) {
-        uint16_t cand = d->idx[(uint16_t)((d->head + k) % RING_SLOTS)];
-        if (r->slots[cand].ts_us >= cutoff) {
-            *pos = cand;
-            return true;
-        }
-    }
-    return false;
-}
-
-/* One axis: its ring plus the two monotonic deques tracking its extrema. */
-typedef struct {
-    ambre_trig_ring_t  *ring;
-    ambre_trig_deque_t *dmax;
-    ambre_trig_deque_t *dmin;
-} trig_axis_t;
-
-static void axis_push(trig_axis_t ax, uint64_t ts_us, int64_t dv)
-{
-    dq_drop_overwritten(ax.dmax, ax.ring);
-    dq_drop_overwritten(ax.dmin, ax.ring);
-
-    uint16_t pos = ax.ring->head;
-    ax.ring->slots[pos].ts_us = ts_us;
-    ax.ring->slots[pos].dv = dv;
-    ax.ring->head = (uint16_t)((ax.ring->head + 1u) % RING_SLOTS);
-    if (ax.ring->count < RING_SLOTS) ax.ring->count++;
-
-    while (ax.dmax->count > 0 && ax.ring->slots[dq_back(ax.dmax)].dv <= dv) {
-        dq_pop_back(ax.dmax);
-    }
-    dq_push(ax.dmax, pos);
-
-    while (ax.dmin->count > 0 && ax.ring->slots[dq_back(ax.dmin)].dv >= dv) {
-        dq_pop_back(ax.dmin);
-    }
-    dq_push(ax.dmin, pos);
-}
-
-/* Cutoff of the inclusive window of win_ms ending at ts_us (A4). */
-static uint64_t window_cutoff(uint64_t ts_us, uint16_t win_ms)
-{
-    uint64_t span = (uint64_t)win_ms * 1000ULL;
-    return (ts_us < span) ? 0 : (ts_us - span);
-}
-
-/* Drop every candidate older than the widest window; narrower windows are then
- * answered without touching the deques, so a 20 ms query never destroys what
- * the next sample's 150 ms query still needs. */
-static void axis_trim(trig_axis_t ax, uint64_t ts_us, uint16_t widest_ms)
-{
-    uint64_t cutoff = window_cutoff(ts_us, widest_ms);
-    dq_evict_before(ax.dmax, ax.ring, cutoff);
-    dq_evict_before(ax.dmin, ax.ring, cutoff);
-}
-
-/* A4: max(dv) - min(dv) over the inclusive window ending at ts_us. */
-static int64_t axis_window_delta(trig_axis_t ax, uint64_t ts_us, uint16_t win_ms)
-{
-    uint64_t cutoff = window_cutoff(ts_us, win_ms);
-    uint16_t hi, lo;
-
-    if (!dq_first_since(ax.dmax, ax.ring, cutoff, &hi)) return 0;
-    if (!dq_first_since(ax.dmin, ax.ring, cutoff, &lo)) return 0;
-
-    return ax.ring->slots[hi].dv - ax.ring->slots[lo].dv;
-}
-
-static trig_axis_t axis_long(ambre_trig_state_t *st)
-{
-    trig_axis_t ax = { &st->ring_long, &st->max_long, &st->min_long };
-    return ax;
-}
-
-static trig_axis_t axis_lat(ambre_trig_state_t *st)
-{
-    trig_axis_t ax = { &st->ring_lat, &st->max_lat, &st->min_lat };
-    return ax;
-}
 
 /* ------------------------------------------------------------ configuration - */
 
@@ -384,7 +246,7 @@ static bool advance_event(ambre_trig_state_t *st, uint64_t ts_us, int64_t w_long
 
     if (!allow_end) return false;
 
-    int64_t w_end = axis_window_delta(axis_long(st), ts_us, st->cfg.win_t0_long_ms);
+    int64_t w_end = ambre_trig_axis_window_delta(ambre_trig_axis_long(st), ts_us, st->cfg.win_t0_long_ms);
     if (w_end <= st->cfg.dv_t0_mm_s) {              /* A9: non-strict */
         st->in_event = false;
         st->have_anchor = false;
@@ -395,8 +257,8 @@ static bool advance_event(ambre_trig_state_t *st, uint64_t ts_us, int64_t w_long
     return false;
 }
 
-static void fill_out(const ambre_trig_state_t *st, bool fired, bool event_end,
-                     uint8_t reason, int64_t w_long, int64_t w_lat,
+static void fill_out(const ambre_trig_state_t *st, uint64_t ts_us, bool fired,
+                     bool event_end, uint8_t reason, int64_t w_long, int64_t w_lat,
                      ambre_trig_out_t *out)
 {
     bool ctx = st->in_event || event_end;
@@ -414,9 +276,10 @@ static void fill_out(const ambre_trig_state_t *st, bool fired, bool event_end,
 
     out->t0_ts_us = st->t0_ts_us;
     out->event_number = st->event_number;
-    if (st->have_crash_group && st->t0_ts_us >= st->crash_first_t0_us) {
+    /* DEC-09: time elapsed since the first T0 of the current crash group. */
+    if (st->have_crash_group && ts_us >= st->crash_first_t0_us) {
         out->time_since_first_ms =
-            (uint32_t)((st->t0_ts_us - st->crash_first_t0_us) / 1000ULL);
+            (uint32_t)((ts_us - st->crash_first_t0_us) / 1000ULL);
     }
     out->dv_since_t0_long_mm_s = st->dv_long - st->dv_at_t0_long;
     out->dv_since_t0_lat_mm_s = st->dv_lat - st->dv_at_t0_lat;
@@ -424,6 +287,48 @@ static void fill_out(const ambre_trig_state_t *st, bool fired, bool event_end,
     out->max_dv_lat_mm_s = st->max_dv_lat;
     out->max_dv_long_at_ms = st->max_dv_long_at_ms;
     out->max_dv_lat_at_ms = st->max_dv_lat_at_ms;
+}
+
+/* Integrate the current sample into the cumulative delta-v (A3, DEC-13):
+ * the clock always advances, an invalid sample is never summed. */
+static void integrate_sample(ambre_trig_state_t *st, uint64_t ts_us,
+                              int32_t accel_long_mm_s2, int32_t accel_lat_mm_s2,
+                              const ambre_trig_ext_t *ext)
+{
+    uint32_t dt_us = clamp_dt(ts_us, st->last_ts_us, st->have_last);
+    st->last_ts_us = ts_us;
+    st->have_last = true;
+
+    bool invalid = (ext != NULL) && ext->sample_invalid;
+    if (invalid || dt_us == 0) return;
+
+    st->dv_long += integrate(accel_long_mm_s2, dt_us);
+    st->dv_lat += integrate(accel_lat_mm_s2, dt_us);
+}
+
+/* Push the sample into both axis rings, trim them, and read the four
+ * window deltas used by the decisions (A4). */
+static void read_windows(ambre_trig_state_t *st, uint64_t ts_us,
+                         int64_t *w_long, int64_t *w_lat,
+                         int64_t *w_t0_long, int64_t *w_t0_lat)
+{
+    ambre_trig_axis_push(ambre_trig_axis_long(st), ts_us, st->dv_long);
+    ambre_trig_axis_push(ambre_trig_axis_lat(st), ts_us, st->dv_lat);
+
+    uint16_t widest = st->cfg.win_trigger_ms;
+    if (st->cfg.win_t0_long_ms > widest) widest = st->cfg.win_t0_long_ms;
+    if (st->cfg.win_t0_lat_ms > widest) widest = st->cfg.win_t0_lat_ms;
+    ambre_trig_axis_trim(ambre_trig_axis_long(st), ts_us, widest);
+    ambre_trig_axis_trim(ambre_trig_axis_lat(st), ts_us, widest);
+
+    *w_long = ambre_trig_axis_window_delta(ambre_trig_axis_long(st), ts_us,
+                                            st->cfg.win_trigger_ms);
+    *w_lat = ambre_trig_axis_window_delta(ambre_trig_axis_lat(st), ts_us,
+                                           st->cfg.win_trigger_ms);
+    *w_t0_long = ambre_trig_axis_window_delta(ambre_trig_axis_long(st), ts_us,
+                                               st->cfg.win_t0_long_ms);
+    *w_t0_lat = ambre_trig_axis_window_delta(ambre_trig_axis_lat(st), ts_us,
+                                              st->cfg.win_t0_lat_ms);
 }
 
 /* ------------------------------------------------------------------ public - */
@@ -434,30 +339,10 @@ int ambre_trig_push(ambre_trig_state_t *st, uint64_t ts_us,
 {
     memset(out, 0, sizeof(*out));
 
-    /* A3 + DEC-13: the clock always advances, an invalid sample is not summed. */
-    uint32_t dt_us = clamp_dt(ts_us, st->last_ts_us, st->have_last);
-    st->last_ts_us = ts_us;
-    st->have_last = true;
+    integrate_sample(st, ts_us, accel_long_mm_s2, accel_lat_mm_s2, ext);
 
-    bool invalid = (ext != NULL) && ext->sample_invalid;
-    if (!invalid && dt_us > 0) {
-        st->dv_long += integrate(accel_long_mm_s2, dt_us);
-        st->dv_lat += integrate(accel_lat_mm_s2, dt_us);
-    }
-
-    axis_push(axis_long(st), ts_us, st->dv_long);
-    axis_push(axis_lat(st), ts_us, st->dv_lat);
-
-    uint16_t widest = st->cfg.win_trigger_ms;
-    if (st->cfg.win_t0_long_ms > widest) widest = st->cfg.win_t0_long_ms;
-    if (st->cfg.win_t0_lat_ms > widest) widest = st->cfg.win_t0_lat_ms;
-    axis_trim(axis_long(st), ts_us, widest);
-    axis_trim(axis_lat(st), ts_us, widest);
-
-    int64_t w_long = axis_window_delta(axis_long(st), ts_us, st->cfg.win_trigger_ms);
-    int64_t w_lat = axis_window_delta(axis_lat(st), ts_us, st->cfg.win_trigger_ms);
-    int64_t w_t0_long = axis_window_delta(axis_long(st), ts_us, st->cfg.win_t0_long_ms);
-    int64_t w_t0_lat = axis_window_delta(axis_lat(st), ts_us, st->cfg.win_t0_lat_ms);
+    int64_t w_long, w_lat, w_t0_long, w_t0_lat;
+    read_windows(st, ts_us, &w_long, &w_lat, &w_t0_long, &w_t0_lat);
 
     latch_t0(st, ts_us, w_t0_long, w_t0_lat);       /* A6 */
 
@@ -487,7 +372,7 @@ int ambre_trig_push(ambre_trig_state_t *st, uint64_t ts_us,
         if (lock_reason != AMBRE_TRIG_NONE && !fired) reason = lock_reason;
     }
 
-    fill_out(st, fired, event_end, reason, w_long, w_lat, out);
+    fill_out(st, ts_us, fired, event_end, reason, w_long, w_lat, out);
     if (event_end) st->t0_ts_us = 0;    /* A6: release after the decision */
 
     return AMBRE_TRIG_OK;

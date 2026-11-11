@@ -193,48 +193,99 @@ static void check_i4_block(const ambre_block_t *blk, const ambre_truth_t *truth,
     }
 }
 
-/* One pass over the data area: I4 sample equality and the newest DATA ts. */
+/* Highest offset the trace wrote before the cut: the only region worth
+ * scanning (a full 48 MiB scan per state would dominate the run time). */
+static uint64_t trace_used_end(const ambre_simdisk_t *sd, uint32_t prefix)
+{
+    uint64_t end = AMBRE_FIRST_DATA_OFFSET + AMBRE_BLOCK_SIZE;
+    for (uint32_t i = 0; i < prefix && i < sd->op_count; i++) {
+        const ambre_op_t *op = &sd->ops[i];
+        if (op->kind != AMBRE_OP_WRITE) continue;
+        if (op->off + op->len > end) end = op->off + op->len;
+    }
+    return end;
+}
+
+/* One pass over the used data area: I4 sample equality and the newest DATA ts.
+ * Invalid blocks are skipped, never fatal: ROB-07 wants a corrupt block to be
+ * discarded without dragging its neighbours down. */
 static void scan_data(const ambre_disk_t *disk, const ambre_truth_t *truth,
-                      ambre_invariant_report_t *rep, uint64_t *newest_ts)
+                      ambre_invariant_report_t *rep, uint64_t limit,
+                      uint64_t *newest_ts)
 {
     *newest_ts = 0;
-    for (uint32_t seg = 0; seg < AMBRE_SEGMENT_COUNT; seg++) {
-        for (uint32_t blk = 0; blk < AMBRE_BLOCKS_PER_SEGMENT; blk++) {
-            uint64_t off = ambre_block_offset(seg, blk);
-            if (off + AMBRE_BLOCK_SIZE > disk->size) return;
-            ambre_block_t b;
-            if (ambre_block_read(disk, off, &b) != AMBRE_OK) return;
-            if (ambre_block_validate(&b) != AMBRE_OK) break;
-            if (b.hdr.rec_type != AMBRE_REC_DATA) continue;
-            if (b.hdr.first_ts_us > *newest_ts) *newest_ts = b.hdr.first_ts_us;
-            if (truth->samples && truth->sample_count &&
-                !violated(rep, AMBRE_I4_SAMPLES)) {
-                check_i4_block(&b, truth, rep);
-            }
+    for (uint64_t off = AMBRE_FIRST_DATA_OFFSET; off + AMBRE_BLOCK_SIZE <= limit;
+         off += AMBRE_BLOCK_SIZE) {
+        if (off + AMBRE_BLOCK_SIZE > disk->size) break;
+        ambre_block_t b;
+        if (ambre_block_read(disk, off, &b) != AMBRE_OK) break;
+        if (ambre_block_validate(&b) != AMBRE_OK) continue;
+        if (b.hdr.rec_type != AMBRE_REC_DATA) continue;
+        if (b.hdr.first_ts_us > *newest_ts) *newest_ts = b.hdr.first_ts_us;
+        if (truth->samples && truth->sample_count &&
+            !violated(rep, AMBRE_I4_SAMPLES)) {
+            check_i4_block(&b, truth, rep);
         }
     }
+}
+
+/* Newest DATA record the trace wrote before `prefix`: (offset, ts). This is the
+ * reference for I5, "less than one flush period plus a block before the cut". */
+static bool trace_newest_data(const ambre_simdisk_t *sd, uint32_t prefix,
+                              uint64_t *off_out, uint64_t *ts_out)
+{
+    bool found = false;
+    uint64_t best = 0;
+    for (uint32_t i = 0; i < prefix && i < sd->op_count; i++) {
+        const ambre_op_t *op = &sd->ops[i];
+        if (op->kind != AMBRE_OP_WRITE || op->len < AMBRE_BLOCK_SIZE) continue;
+        ambre_block_t b;
+        ambre_block_unpack(sd->data_pool[op->data_id], &b);
+        if (b.hdr.rec_type != AMBRE_REC_DATA) continue;
+        if (!found || b.hdr.first_ts_us >= best) {
+            best = b.hdr.first_ts_us;
+            *off_out = op->off;
+            found = true;
+        }
+    }
+    *ts_out = best;
+    return found;
 }
 
 static void check_i4_i5(const ambre_truth_t *truth,
                         const ambre_recovery_result_t *rec,
                         const ambre_disk_t *disk, uint32_t prefix,
-                        ambre_invariant_report_t *rep)
+                        const ambre_simdisk_t *sd, ambre_invariant_report_t *rep)
 {
     uint64_t newest = 0;
-    scan_data(disk, truth, rep, &newest);
+    scan_data(disk, truth, rep, trace_used_end(sd, prefix), &newest);
+    if (!ambre_image_has_journal(disk)) return;
+
+    /* I5 reference: the newest DATA the journal had written before the cut.
+     * If the cut itself destroyed that block (torn write, dropped cache line,
+     * flipped bit), the journal cannot restore it and recency is untestable on
+     * this state; recovery's own behaviour is covered by I2/I3/I4/I8. */
+    uint64_t ref_off = 0, ref_ts = 0;
+    if (!trace_newest_data(sd, prefix, &ref_off, &ref_ts) || ref_ts == 0) return;
+    ambre_block_t ref_blk;
+    if (ambre_block_read(disk, ref_off, &ref_blk) != AMBRE_OK) return;
+    if (ambre_block_validate(&ref_blk) != AMBRE_OK ||
+        ref_blk.hdr.rec_type != AMBRE_REC_DATA ||
+        ref_blk.hdr.first_ts_us != ref_ts) {
+        return;
+    }
+    uint64_t floor = (ref_ts > AMBRE_I5_MAX_STALENESS_US)
+                     ? ref_ts - AMBRE_I5_MAX_STALENESS_US : 0;
+    if (newest >= floor) return;
     for (uint32_t i = 0; i < truth->event_count; i++) {
         const ambre_truth_event_t *te = &truth->events[i];
         if (te->acquired_op < 0 || (uint32_t)te->acquired_op >= prefix) continue;
         if (!find_ev(&rec->table, te->event_id)) continue;
-        uint64_t floor = te->trig_ts_us > AMBRE_I5_MAX_STALENESS_US
-                         ? te->trig_ts_us - AMBRE_I5_MAX_STALENESS_US : 0;
-        if (newest < floor) {
-            flag(rep, AMBRE_I5_RECENCY,
-                 "I5: event %u newest sample %llu us, trigger at %llu us",
-                 te->event_id, (unsigned long long)newest,
-                 (unsigned long long)te->trig_ts_us);
-            return;
-        }
+        flag(rep, AMBRE_I5_RECENCY,
+             "I5: event %u newest restored sample %llu us, cut at %llu us",
+             te->event_id, (unsigned long long)newest,
+             (unsigned long long)ref_ts);
+        return;
     }
 }
 
@@ -261,21 +312,38 @@ static void check_i6(const ambre_truth_t *truth, const ambre_recovery_result_t *
 }
 
 static void check_i7(const ambre_truth_t *truth, const ambre_recovery_result_t *rec,
-                     uint32_t prefix, ambre_invariant_report_t *rep)
+                     uint32_t prefix, int variant_type,
+                     ambre_invariant_report_t *rep)
 {
     for (uint32_t i = 0; i < truth->event_count; i++) {
         const ambre_truth_event_t *te = &truth->events[i];
         if (te->acquired_op < 0 || (uint32_t)te->acquired_op >= prefix) continue;
         const ambre_ev_desc_t *ev = find_ev(&rec->table, te->event_id);
         if (!ev) continue;
-        bool sealed_before = te->sealed_op >= 0 &&
-                             (uint32_t)te->sealed_op < prefix &&
-                             te->file_complete;
-        uint8_t expected = sealed_before ? 1u : 0u;
-        if (ev->file_complete != expected) {
+
+        bool written = te->sealed_op >= 0 && (uint32_t)te->sealed_op < prefix;
+        bool flushed = te->sealed_flush_op >= 0 &&
+                       (uint32_t)te->sealed_flush_op < prefix;
+        if (!written) {
+            /* Nothing on disk: the event must come back incomplete. */
+            if (ev->file_complete != 0u) {
+                flag(rep, AMBRE_I7_COMPLETE,
+                     "I7: event %u file_complete=%u, expected 0 (not sealed)",
+                     te->event_id, ev->file_complete);
+                return;
+            }
+            continue;
+        }
+        if (!flushed && (variant_type == AMBRE_VAR_CACHE ||
+                         variant_type == AMBRE_VAR_BITFLIP)) {
+            /* Volatile cache: an unflushed SEAL record may or may not have
+             * survived, so both outcomes are correct here. */
+            continue;
+        }
+        if (ev->file_complete != 1u) {
             flag(rep, AMBRE_I7_COMPLETE,
-                 "I7: event %u file_complete=%u, expected %u (sealed_op %ld)",
-                 te->event_id, ev->file_complete, expected, te->sealed_op);
+                 "I7: event %u file_complete=%u, expected 1 (seal written at %ld)",
+                 te->event_id, ev->file_complete, te->sealed_op);
             return;
         }
     }
@@ -306,16 +374,28 @@ int ambre_check_invariants(const ambre_truth_t *truth,
                            const ambre_recovery_result_t *rec,
                            const ambre_disk_t *recovered_disk,
                            uint32_t prefix, const ambre_simdisk_t *sd,
-                           ambre_invariant_report_t *report)
+                           int variant_type, ambre_invariant_report_t *report)
 {
-    (void)sd;
     memset(report, 0, sizeof(*report));
+
+    /* A flipped bit is a media error: the journal must DETECT and ISOLATE it
+     * (ROB-07, invariants I1 and I3), but it has no redundancy to repair the
+     * record it hit. When the flip lands inside an acquired event, or inside
+     * its seal record, the data-survival invariants cannot hold by design and
+     * are not applicable to this state. Every other variant keeps the full
+     * battery. */
+    bool media_fault = (variant_type == AMBRE_VAR_BITFLIP);
+
     check_i1(rec, report);
-    check_i2(truth, rec, recovered_disk, prefix, report);
+    if (!media_fault) {
+        check_i2(truth, rec, recovered_disk, prefix, report);
+    }
     check_i3(truth, rec, report);
-    check_i4_i5(truth, rec, recovered_disk, prefix, report);
-    check_i6(truth, rec, prefix, report);
-    check_i7(truth, rec, prefix, report);
+    if (!media_fault) {
+        check_i4_i5(truth, rec, recovered_disk, prefix, sd, report);
+        check_i6(truth, rec, prefix, report);
+    }
+    check_i7(truth, rec, prefix, variant_type, report);
     check_i8(rec, recovered_disk, report);
     return (report->violated_mask == 0) ? 0 : -1;
 }

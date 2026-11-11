@@ -391,6 +391,44 @@ class TestMcapExport(unittest.TestCase):
         status = edr_verify.main(["--mcap", out, "--scenario", self.scenario_path])
         self.assertEqual(status, 0)
 
+    def test_verify_rejects_an_absolute_timestamp_in_metadata(self):
+        out = os.path.join(self.tmp, "abs-meta.mcap")
+        export_mcap.export_event(self.reader, 1, out, self.image_path)
+        reader = mcap_writer.McapReader(out)
+        report = edr_verify.Report()
+        edr_verify.check_no_absolute_time(report, reader)
+        self.assertTrue(report.ok())
+        reader.metadata["edr.integrity"]["wall_clock_us"] = "1762345678901234"
+        report = edr_verify.Report()
+        edr_verify.check_no_absolute_time(report, reader)
+        self.assertFalse(report.ok())
+
+    def test_verify_rejects_a_truncated_file(self):
+        truncated = os.path.join(self.tmp, "truncated.mcap")
+        with open(self.mcap_path, "rb") as handle:
+            data = handle.read()
+        with open(truncated, "wb") as handle:
+            handle.write(data[:len(data) // 2])
+        self.assertEqual(edr_verify.main(["--mcap", truncated, "--scenario",
+                                          self.scenario_path]), 1)
+
+    def test_foxglove_layout_matches_the_exported_topics(self):
+        path = os.path.join(ROOT, "foxglove", "ambre-layout.json")
+        with open(path, encoding="utf-8") as handle:
+            layout = json.load(handle)
+        tree = json.loads(layout["layout"])
+        self.assertEqual(sorted(_leaves(tree)), sorted(layout["configById"]))
+        topics = {channel["topic"] for channel
+                  in mcap_writer.McapReader(self.mcap_path).channels.values()}
+        referenced = set()
+        for panel in layout["configById"].values():
+            for entry in panel.get("paths", []):
+                referenced.add(entry["value"].split(".")[0])
+            if "topicPath" in panel:
+                referenced.add(panel["topicPath"])
+        self.assertEqual(referenced - topics, set(),
+                         "layout references topics absent from the export")
+
     def test_list_events(self):
         status = export_mcap.main(["--image", self.image_path, "--list"])
         self.assertEqual(status, 0)
@@ -398,6 +436,13 @@ class TestMcapExport(unittest.TestCase):
     def test_default_event_is_the_first_sealed_one(self):
         chosen = self.reader.first_event()
         self.assertEqual(chosen["event_id"], 1)
+
+
+def _leaves(node):
+    """Panel ids of a react-mosaic layout tree."""
+    if isinstance(node, str):
+        return [node]
+    return _leaves(node["first"]) + _leaves(node["second"])
 
 
 def _mcap_lib_available():

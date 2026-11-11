@@ -17,11 +17,14 @@ BUILD    := build
 JOBS     ?= $(shell nproc 2>/dev/null || echo 4)
 
 WARN     := -Wall -Wextra -Wshadow -Wpedantic
-CFLAGS   ?= -std=c11 -O2 -g $(WARN) -Werror -Ifmt -I. -Itests
+CFLAGS   ?= -std=c11 -O2 -g $(WARN) -Werror -Ifmt -I. -Itests -Ihost/simdisk -Ihost/explore
 LDFLAGS  ?=
 
 FMT_SRC  := $(sort $(wildcard fmt/*.c))
-HOST_SRC := $(sort $(wildcard host/simdisk/*.c))
+# host tools linked into the PC library: the crash explorer and its support.
+# host/explore/main.c stays out (it holds main()); it is linked by the CLI.
+HOST_SRC := $(sort $(wildcard host/simdisk/*.c)) \
+            $(sort $(filter-out %/main.c,$(wildcard host/explore/*.c)))
 LIB_SRC  := $(FMT_SRC) $(HOST_SRC)
 LIB_OBJ  := $(patsubst %.c,$(BUILD)/%.o,$(LIB_SRC))
 LIB      := $(BUILD)/libambre.a
@@ -29,8 +32,8 @@ LIB      := $(BUILD)/libambre.a
 TEST_SRC := $(sort $(wildcard tests/test_*.c))
 TEST_BIN := $(patsubst tests/%.c,$(BUILD)/%,$(TEST_SRC))
 
-EXPLORE_SRC := $(sort $(wildcard host/explore/*.c))
-TOOLS       := $(BUILD)/ambre-explore $(BUILD)/ambre-dump-truth
+EXPLORE_MAIN := host/explore/main.c
+TOOLS        := $(BUILD)/ambre-explore $(BUILD)/ambre-dump-truth
 
 .PHONY: all test explore explore-full crosscheck demo sizecheck clean tools \
         scenario mcap verify help
@@ -54,9 +57,9 @@ $(BUILD)/test_%: tests/test_%.c tests/ambre_test_util.c $(LIB)
 
 tools: $(TOOLS)
 
-$(BUILD)/ambre-explore: $(EXPLORE_SRC) $(LIB)
+$(BUILD)/ambre-explore: $(EXPLORE_MAIN) $(LIB)
 	@mkdir -p $(BUILD)
-	$(CC) $(CFLAGS) $(EXPLORE_SRC) $(LIB) -o $@ $(LDFLAGS) -lm
+	$(CC) $(CFLAGS) $(EXPLORE_MAIN) $(LIB) -o $@ $(LDFLAGS) -lm
 
 $(BUILD)/ambre-dump-truth: tests/dump_truth.c $(LIB)
 	@mkdir -p $(BUILD)
@@ -106,16 +109,7 @@ demo: all
 	./scripts/demo.sh
 
 sizecheck:
-	@fail=0; \
-	for f in $$(git ls-files '*.c' '*.h' '*.py' 2>/dev/null || \
-	           find fmt host tests -name '*.c' -o -name '*.h' -o -name '*.py'); do \
-	  n=$$(wc -l < $$f); \
-	  if [ $$n -ge 500 ]; then echo "TOO LONG: $$f ($$n lines)"; fail=1; fi; \
-	done; \
-	awk '/^[A-Za-z_].*\)\s*(\{|$$)/{if(infn&&len>50){print "LONG FUNC: "fn" ("len" lines) in "FILENAME; fail=1} infn=1; fn=FILENAME": "$$0; len=0; next} infn{len++} /^\}/{if(infn&&len>50){print "LONG FUNC ("len" lines) in "FILENAME; fail=1} infn=0}' \
-	  $$(find fmt host tests -name '*.c') >/dev/null 2>&1 || true; \
-	if [ $$fail -ne 0 ]; then echo "SIZE CHECK FAILED"; exit 1; fi; \
-	echo "sizecheck: all files < 500 lines"
+	@$(PYTHON) scripts/sizecheck.py fmt host tests scripts
 
 clean:
 	rm -rf $(BUILD)

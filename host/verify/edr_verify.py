@@ -39,6 +39,9 @@ from ambre_mcap_writer import McapError, McapReader             # noqa: E402
 T0_NS = 60 * 1_000_000_000          # T0 is placed at 60 s (FORMAT.md §12)
 MAX_NS = 120 * 1_000_000_000        # no export may reach past 120 s
 NS_PER_US = 1000
+# A monotonic uptime stays far below this; a wall-clock epoch in microseconds is
+# around 1.8e15, so anything above 1e15 us can only be an absolute timestamp.
+ABSOLUTE_TIME_THRESHOLD_US = 10 ** 15
 
 TOPIC_PRECRASH = "/edr/a/precrash"
 TOPIC_DELTA_V = "/edr/a/delta_v"
@@ -208,6 +211,40 @@ def check_relative_time(report, reader):
                   "" if not bad else " (first: %s)" % bad[0]))
 
 
+def _integer_values(node):
+    """Yield every integer found in a decoded JSON value."""
+    if isinstance(node, bool):
+        return
+    if isinstance(node, int):
+        yield node
+    elif isinstance(node, dict):
+        for value in node.values():
+            yield from _integer_values(value)
+    elif isinstance(node, list):
+        for value in node:
+            yield from _integer_values(value)
+
+
+def check_no_absolute_time(report, reader):
+    """VIE-02/EXP-04: no absolute timestamp may appear in payloads or metadata."""
+    leaks = []
+    for message in reader.messages:
+        try:
+            payload = json.loads(message["data"].decode("utf-8"))
+        except (UnicodeDecodeError, ValueError):
+            continue
+        for value in _integer_values(payload):
+            if value >= ABSOLUTE_TIME_THRESHOLD_US:
+                leaks.append(("payload", value))
+    for name, mapping in reader.metadata.items():
+        for key, value in mapping.items():
+            if value.isdigit() and int(value) >= ABSOLUTE_TIME_THRESHOLD_US:
+                leaks.append(("%s.%s" % (name, key), int(value)))
+    report.add("timestamps.no_absolute", not leaks,
+               "%d value(s) >= %d us (an absolute epoch would be), e.g. %s"
+               % (len(leaks), ABSOLUTE_TIME_THRESHOLD_US, leaks[:3]))
+
+
 def _compare_point(payload, row):
     problems = []
     for field, scenario_field, scale, tolerance in CLASS_A_COMPARE:
@@ -292,6 +329,7 @@ def verify(mcap_path, scenario_path):
     check_monotonic(report, reader)
     check_t0(report, by_topic)
     check_relative_time(report, reader)
+    check_no_absolute_time(report, reader)
     check_class_a(report, by_topic, scenario)
     check_metadata(report, reader)
     check_file_complete(report, reader, by_topic)

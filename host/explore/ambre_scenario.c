@@ -36,7 +36,8 @@ static void synth_sample(ambre_scen_sample_t *s, uint32_t i, uint32_t crash_idx)
         /* 150 ms deceleration ramp: well above the 8 km/h delta-v trigger. */
         s->a_long_mm_s2 = -120000;
         s->brake_active = 1;
-        s->ext_flags = 0x01u; /* restraint deployed */
+        /* Restraint deployment is a single-sample event (one crash, one event). */
+        if (i == crash_idx) s->ext_flags = 0x01u;
     } else if (crash_idx > 0 && i >= crash_idx + 150u) {
         s->a_long_mm_s2 = -800;
         s->brake_active = 1;

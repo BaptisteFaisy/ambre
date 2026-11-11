@@ -9,9 +9,6 @@ idiv_trunc(num, den) reproduces C truncating division (toward zero); Python's
 `//` floors toward -inf and is never used for the contract divisions. Delta-v
 lives in a C `int64_t`; here it is a Python int kept in the signed 64-bit range
 by `to_int64()` after every update, so wrap-around matches the C engine.
-
-Ambiguities of A1..A9 are listed in the final report; each is resolved here in
-the most literal reading and documented inline where it matters.
 """
 
 from dataclasses import dataclass, field
@@ -19,7 +16,6 @@ from typing import List, Optional
 
 AMBRE_TRIG_MODE_WINDOW = 0
 AMBRE_TRIG_MODE_ANCHORED = 1
-
 AMBRE_TRIG_DT_MAX_US = 10000
 AMBRE_TRIG_RING_SLOTS = 192
 
@@ -286,7 +282,7 @@ def _assign_group(state: TrigState) -> None:
         state.event_number = 1
 
 
-def _advance_event(state: TrigState, ts_us: int, w_long: int,
+def _advance_event(state: TrigState, ts_us: int, w_long: int, w_t0_long: int,
                    allow_end: bool) -> tuple[bool, int]:
     """Update extrema, DEC-04 lock elevation and DEC-06 end of event."""
     rel_ms = (ts_us - state.t0_ts_us) // 1000
@@ -307,8 +303,7 @@ def _advance_event(state: TrigState, ts_us: int, w_long: int,
 
     if not allow_end:
         return False, lock_reason
-    w_end = _window_delta(state.ring_long, ts_us, state.cfg.win_t0_long_ms)
-    if w_end <= state.cfg.dv_t0_mm_s:            # non-strict, A9
+    if w_t0_long <= state.cfg.dv_t0_mm_s:        # non-strict, A9
         state.in_event = False
         state.t0_set = False
         state.have_anchor = False
@@ -316,13 +311,14 @@ def _advance_event(state: TrigState, ts_us: int, w_long: int,
     return False, lock_reason
 
 
-def _build_out(state: TrigState, fired: bool, event_end: bool, reason: int,
-               w_long: int, w_lat: int) -> TrigOut:
+def _build_out(state: TrigState, ts_us: int, fired: bool, event_end: bool,
+               reason: int, w_long: int, w_lat: int) -> TrigOut:
     """Assemble the per-sample output (event fields only inside an event)."""
     ctx = state.in_event or event_end
     tsf = 0
-    if ctx and state.have_crash_group:
-        tsf = max(0, (state.t0_ts_us - state.crash_first_t0_us) // 1000)
+    if ctx and state.have_crash_group and ts_us >= state.crash_first_t0_us:
+        # DEC-09: time elapsed since the first T0 of the current crash group.
+        tsf = (ts_us - state.crash_first_t0_us) // 1000
     return TrigOut(
         fired=fired,
         event_end=event_end,
@@ -344,24 +340,30 @@ def _build_out(state: TrigState, fired: bool, event_end: bool, reason: int,
     )
 
 
-def push(state: TrigState, ts_us: int, accel_long: int,
-         accel_lat: int, ext: Optional[TrigExt] = None) -> TrigOut:
-    """Push one acceleration sample and return the decision for it."""
-    if ext is None:
-        ext = TrigExt()
-
+def _integrate_sample(state: TrigState, ts_us: int, accel_long: int,
+                      accel_lat: int, ext: TrigExt) -> None:
+    """A3 + DEC-13: advance the clock, integrate unless the sample is invalid."""
     dt_us = 0
     if state.have_last and ts_us >= state.last_ts_us:
         dt_us = min(ts_us - state.last_ts_us, AMBRE_TRIG_DT_MAX_US)
     state.last_ts_us = ts_us
     state.have_last = True
 
-    if not ext.sample_invalid and dt_us > 0:          # DEC-13
+    if not ext.sample_invalid and dt_us > 0:
         state.dv_long = to_int64(state.dv_long + _integrate(accel_long, dt_us))
         state.dv_lat = to_int64(state.dv_lat + _integrate(accel_lat, dt_us))
 
     state.ring_long.push(ts_us, state.dv_long)
     state.ring_lat.push(ts_us, state.dv_lat)
+
+
+def push(state: TrigState, ts_us: int, accel_long: int,
+         accel_lat: int, ext: Optional[TrigExt] = None) -> TrigOut:
+    """Push one acceleration sample and return the decision for it."""
+    if ext is None:
+        ext = TrigExt()
+
+    _integrate_sample(state, ts_us, accel_long, accel_lat, ext)
 
     w_trig_long = _window_delta(state.ring_long, ts_us, state.cfg.win_trigger_ms)
     w_trig_lat = _window_delta(state.ring_lat, ts_us, state.cfg.win_trigger_ms)
@@ -387,11 +389,12 @@ def push(state: TrigState, ts_us: int, accel_long: int,
     event_end = False
     if state.in_event:
         event_end, lock_reason = _advance_event(state, ts_us, w_trig_long,
-                                                allow_end=not fired)
+                                                w_t0_long, allow_end=not fired)
         if lock_reason != AMBRE_TRIG_NONE and not fired:
             reason = lock_reason
 
-    return _build_out(state, fired, event_end, reason, w_trig_long, w_trig_lat)
+    return _build_out(state, ts_us, fired, event_end, reason,
+                      w_trig_long, w_trig_lat)
 
 
 def event_closed(state: TrigState, ts_us: int) -> None:

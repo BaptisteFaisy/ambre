@@ -33,7 +33,6 @@ import argparse
 import json
 import os
 import random
-import statistics
 import sys
 import tempfile
 import threading
@@ -187,14 +186,14 @@ def run_one_cut(args, scenario, cut_ms, cycle):
 # -- sweep instants + resumable state --------------------------------------
 
 def build_cut_list(args):
-    """Deterministic sweep instants plus optional random cuts."""
+    """Deterministic sweep instants plus optional random cuts, deduplicated."""
     cuts = list(range(args.sweep_from_ms, args.sweep_to_ms + 1, args.step_ms))
     if args.random_cuts > 0:
         rng = random.Random(args.seed)
         span = max(1, args.sweep_to_ms - args.sweep_from_ms)
         cuts += [rng.randint(args.sweep_from_ms, args.sweep_from_ms + span)
                  for _ in range(args.random_cuts)]
-    return cuts
+    return list(dict.fromkeys(cuts))  # a random cut may repeat a sweep instant
 
 
 class StateStore:
@@ -229,38 +228,8 @@ class StateStore:
 
 # -- reporting -------------------------------------------------------------
 
-def histogram_text(values, title, buckets=8):
-    """Render a plain-text histogram (no third-party plotting library)."""
-    if not values:
-        return "%s: no samples\n" % title
-    low, high = min(values), max(values)
-    if high <= low:
-        return "%s: all %d samples = %.3fs\n" % (title, len(values), low)
-    width = (high - low) / buckets
-    counts = [0] * buckets
-    for value in values:
-        counts[min(buckets - 1, int((value - low) / width))] += 1
-    peak = max(counts) or 1
-    lines = ["%s (%d samples)" % (title, len(values))]
-    for index, count in enumerate(counts):
-        start = low + index * width
-        bar = "#" * int(round(40.0 * count / peak))
-        lines.append("  %7.3f-%7.3f s | %-40s %d" % (start, start + width, bar, count))
-    return "\n".join(lines) + "\n"
-
-
-def stats(values):
-    """min / median / max of a sample list (None when empty)."""
-    if not values:
-        return None
-    ordered = sorted(values)
-    return {"count": len(ordered), "min": round(ordered[0], 4),
-            "median": round(statistics.median(ordered), 4),
-            "max": round(ordered[-1], 4)}
-
-
 def summarise(records):
-    """Aggregate verdicts and timings over every recorded run."""
+    """Aggregate verdicts and cycle timings over every recorded run."""
     verdicts = {}
     for record in records:
         verdict = record.get("verdict", VERDICT_ERROR)
@@ -270,7 +239,8 @@ def summarise(records):
     return {"cuts": len(records), "verdicts": verdicts,
             "violations": verdicts.get(VERDICT_LOSS, 0)
             + verdicts.get(VERDICT_PRESENCE, 0),
-            "errors": verdicts.get(VERDICT_ERROR, 0), "cycle_s": stats(cycles)}
+            "errors": verdicts.get(VERDICT_ERROR, 0),
+            "cycle_s": qemu_vm.stats(cycles)}
 
 
 def write_reports(args, records):
@@ -308,11 +278,15 @@ def print_summary(summary, records, args):
     print("  verdicts           : %s" % json.dumps(summary["verdicts"], sort_keys=True))
     print("  violations         : %d" % summary["violations"])
     print("  errors             : %d" % summary["errors"])
-    if summary["cycle_s"]:
+    for record in records:
+        if record.get("error"):
+            print("  first error        : cut %d ms: %s"
+                  % (record["cut_ms"], record["error"]))
+    if summary["cycle_s"].get("count"):
         print("  cycle time (s)     : min %.3f  median %.3f  max %.3f"
               % (summary["cycle_s"]["min"], summary["cycle_s"]["median"],
                  summary["cycle_s"]["max"]))
-    print(histogram_text(cycles, "cycle time histogram"), end="")
+    print(qemu_vm.histogram_text(cycles, "cycle time histogram"), end="")
     print("  report             : %s" % args.report)
     print("  violations file    : %s" % args.violation_file)
 

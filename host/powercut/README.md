@@ -144,6 +144,12 @@ QEMU side (the cache under test is the server's, not QEMU's), and the drop
 ratio is a *sector* probability — `1.0` is the worst case, `0.5` a realistic
 half-written cache, `0.0` the level-2 control run.
 
+The server has already been checked against the **real** QEMU block client:
+`qemu-io -c "write ..." -c flush "nbd+unix:///?socket=/tmp/ambre-nbd.sock"`
+connects, writes, sends the FLUSH and the server journals it. The remaining
+unknown is only the QNX guest behaviour (does the QNX block driver emit a
+FLUSH for a raw partition — essay E1).
+
 ## What is still missing until the QNX image exists
 
 1. `e1_flush_probe.py --mode guest`: run it on the image and confirm that

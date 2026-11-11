@@ -21,8 +21,8 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from ambre_journal_reader import (JournalReader, SEAL_CAUSE_NAMES,  # noqa: E402
-                                 crc32c)
+from ambre_journal_reader import (EV_STATE_NAMES, JournalReader,  # noqa: E402
+                                  SEAL_CAUSE_NAMES, crc32c)
 
 from ambre_mcap_writer import McapWriter                          # noqa: E402
 
@@ -347,21 +347,27 @@ def export_event(reader, event_id, out_path, image_path=None, chunk_size=None):
 
 
 def list_events(reader):
-    """Print one line per event: id, locked, complete, T0, points, records."""
+    """One line per event: id, state, locked, complete, T0, points, records.
+
+    `t0_us` is the monotonic microsecond value carried by the journal (no
+    absolute epoch); `t0_at_s` is where T0 lands in the MCAP file, always the
+    fixed 60 s offset of FORMAT.md §12.
+    """
     events = reader.events()
     if not events:
         print("no event in the allocation table")
         return 0
-    print("%-6s %-7s %-8s %-9s %-14s %-7s %s"
-          % ("id", "state", "locked", "complete", "t0_us", "points", "records"))
+    print("%-6s %-7s %-8s %-9s %-14s %-9s %-7s %s"
+          % ("id", "state", "locked", "complete", "t0_us", "t0_at_s",
+             "points", "records"))
     for event in events:
         view = reader.read_event(event["event_id"])
-        state = {0: "empty", 1: "open", 2: "sealed"}.get(event["state"], "?")
-        print("%-6d %-7s %-8s %-9s %-14d %-7d %d"
-              % (event["event_id"], state,
+        print("%-6d %-7s %-8s %-9s %-14d %-9.1f %-7d %d"
+              % (event["event_id"], EV_STATE_NAMES.get(event["state"], "?"),
                  "yes" if view.locked else "no",
                  "yes" if view.file_complete else "no",
-                 view.t0_ts_us, view.point_count, len(view.records)))
+                 view.t0_ts_us, T0_OFFSET_NS / 1e9,
+                 view.point_count, len(view.records)))
     return len(events)
 
 

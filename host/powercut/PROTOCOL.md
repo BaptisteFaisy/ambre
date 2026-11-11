@@ -128,13 +128,27 @@ the overlay is lost. `R = 1.0` loses everything unflushed (worst case),
 `R = 0.5` is a realistic half-written cache, `R = 0.0` keeps everything (the
 level-2 behaviour, useful as a control run).
 
-## 7. Reference client
+## 7. Interoperability check
+
+The implementation was validated against the **real** QEMU block client:
+
+```sh
+python3 faulty_block_server.py --listen unix:/tmp/ambre.sock --backing disk.img \
+    --log flushes.jsonl &
+qemu-io -f raw -c "write -P 0x5a 0 4096" -c flush "nbd+unix:///?socket=/tmp/ambre.sock"
+```
+
+The handshake, the WRITE, the FLUSH and the journal entry (`"event": "flush"`)
+all work with the stock client; `qemu-system-x86_64 -drive file=nbd:unix:...`
+attaches as well.
+
+## 8. Reference client
 
 `NbdClient` in `e1_flush_probe.py` is the reference implementation of the
 client side (`connect`, `read`, `write`, `flush`, `disconnect`). `flush()`
 returns the measured round-trip latency, which is what essay E1 reports.
 
-## 8. Limits and TODO
+## 9. Limits and TODO
 
 * One export, raw format, no `NBD_OPT_LIST`, no `NBD_OPT_STRUCTURED_REPLY`, no
   `NBD_CMD_CACHE`, no multi-connection.

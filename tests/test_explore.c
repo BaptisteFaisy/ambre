@@ -158,7 +158,7 @@ static void test_acquisition_boundary(void)
     }
     ambre_invariant_report_t rep;
     AMBRE_CHECK_EQ_I64(ambre_check_invariants(&fx.truth, &rec, &md.disk, after,
-                                              &fx.sd, &rep), 0);
+                                              &fx.sd, 0, &rep), 0);
     ambre_memdisk_destroy(&md);
     fixture_free(&fx);
 }
@@ -173,14 +173,16 @@ static void test_complete_flag_both_sides(void)
 
     ambre_memdisk_t md;
     ambre_recovery_result_t rec;
-    uint32_t before = (uint32_t)te->sealed_op;
+    /* The SEAL mark is emitted after the table commit, so "before the seal" is
+     * the state where the event is acquired but still open. */
+    uint32_t before = (uint32_t)te->acquired_op + 1u;
     AMBRE_CHECK_OK(recover_state(&fx, before, NULL, &md, &rec));
     const ambre_ev_desc_t *ev = table_event(&rec.table, te->event_id);
     AMBRE_CHECK(ev != NULL);
     if (ev) AMBRE_CHECK_EQ_U64(ev->file_complete, 0);
     ambre_invariant_report_t rep;
     AMBRE_CHECK_EQ_I64(ambre_check_invariants(&fx.truth, &rec, &md.disk, before,
-                                              &fx.sd, &rep), 0);
+                                              &fx.sd, 0, &rep), 0);
     ambre_memdisk_destroy(&md);
 
     uint32_t after = (uint32_t)te->sealed_op + 1u;
@@ -189,7 +191,7 @@ static void test_complete_flag_both_sides(void)
     AMBRE_CHECK(ev != NULL);
     if (ev) AMBRE_CHECK_EQ_U64(ev->file_complete, 1);
     AMBRE_CHECK_EQ_I64(ambre_check_invariants(&fx.truth, &rec, &md.disk, after,
-                                              &fx.sd, &rep), 0);
+                                              &fx.sd, 0, &rep), 0);
     ambre_memdisk_destroy(&md);
     fixture_free(&fx);
 }
@@ -211,7 +213,10 @@ static void test_double_recovery(void)
 
     ambre_explore_cfg_t cfg = fx.cfg;
     cfg.nested_recovery = true;
-    cfg.max_states = 200u;
+    /* No state budget: the generator spends it on the plain prefixes first
+     * (every reachable cut instant), then on the variants. A small budget
+     * would never reach the nested states this test is about. */
+    cfg.max_states = 0u;
     cfg.variant_bitflip = false;
     cfg.variant_table_wipe = false;
     ambre_explore_stats_t st;
@@ -238,7 +243,7 @@ static void test_bitflip_detected(void)
     AMBRE_CHECK_OK(recover_state(&fx, prefix, &var, &md, &rec));
     ambre_invariant_report_t rep;
     AMBRE_CHECK_EQ_I64(ambre_check_invariants(&fx.truth, &rec, &md.disk, prefix,
-                                              &fx.sd, &rep), 0);
+                                              &fx.sd, 0, &rep), 0);
     ambre_memdisk_destroy(&md);
     fixture_free(&fx);
 }
@@ -263,7 +268,7 @@ static void test_table_destruction(void)
         AMBRE_CHECK(ev != NULL);
         ambre_invariant_report_t rep;
         AMBRE_CHECK_EQ_I64(ambre_check_invariants(&fx.truth, &rec, &md.disk,
-                                                  prefix, &fx.sd, &rep), 0);
+                                                  prefix, &fx.sd, 0, &rep), 0);
         ambre_memdisk_destroy(&md);
     }
     fixture_free(&fx);

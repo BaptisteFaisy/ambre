@@ -66,6 +66,27 @@ void ambre_block_unpack(const uint8_t buf[AMBRE_BLOCK_SIZE], ambre_block_t *b);
 int ambre_block_write(const ambre_disk_t *d, uint64_t off, const ambre_block_t *b);
 int ambre_block_read(const ambre_disk_t *d, uint64_t off, ambre_block_t *b);
 
+/* Read one whole record starting at (seg, blk).
+ *
+ * A record spans 1..AMBRE_REC_MAX_BLOCKS consecutive blocks that share the
+ * same seq, session_id and chunk_count. Every chunk must be valid (magic,
+ * version, CRCs) and must belong to the same record; otherwise the record is
+ * torn (AMBRE_ERR_TORN) and must be dropped (REP-05).
+ *
+ * expect_seq >= 0 : the record must carry exactly that sequence number and
+ *                   that session id (AMBRE_ERR_STALE otherwise);
+ * expect_seq < 0  : any record is accepted, whatever its session and sequence;
+ *                   the actual ones are reported through head_out. The chunks
+ *                   must still belong to the same record as the head.
+ *
+ * payload_out may be NULL; otherwise it receives the reassembled payload
+ * (up to AMBRE_REC_MAX_BLOCKS * AMBRE_BLOCK_PAYLOAD_MAX bytes) and
+ * payload_len_out the number of valid bytes. */
+int ambre_read_record(const ambre_disk_t *d, uint32_t seg, uint32_t blk,
+                      uint64_t session_id, int64_t expect_seq,
+                      ambre_block_t *head_out, uint8_t *payload_out,
+                      uint32_t *payload_len_out);
+
 /* Offset of block index `blk` inside segment `seg`. */
 uint64_t ambre_block_offset(uint32_t seg, uint32_t blk);
 /* Inverse: offset -> seg/blk. Returns false if outside the data area. */
@@ -88,6 +109,9 @@ int ambre_table_commit(ambre_disk_t *d, ambre_alloc_table_t *t);
 
 /* Event table helpers (oldest-first overwrite, locked never touched). */
 ambre_ev_desc_t *ambre_table_find_event(ambre_alloc_table_t *t, uint32_t event_id);
+/* Read-only variant, for callers that only hold a const table. */
+const ambre_ev_desc_t *ambre_table_find_event_const(const ambre_alloc_table_t *t,
+                                                     uint32_t event_id);
 int ambre_table_add_event(ambre_alloc_table_t *t, const ambre_ev_desc_t *ev);
 /* Pick a victim segment for a new event; -AMBRE_ERR_FULL if none (STO-08). */
 int ambre_table_pick_victim(ambre_alloc_table_t *t, uint32_t *seg_out);

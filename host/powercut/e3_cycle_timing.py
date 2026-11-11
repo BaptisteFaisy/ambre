@@ -25,7 +25,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import statistics
 import sys
 import tempfile
 import time
@@ -68,27 +67,15 @@ def run_cycles(args):
     return records
 
 
-def statistics_of(values):
-    """min / median / p99 / max of a sample list."""
-    if not values:
-        return {"count": 0}
-    ordered = sorted(values)
-    index = min(len(ordered) - 1, int(round(0.99 * (len(ordered) - 1))))
-    return {"count": len(ordered), "min": round(ordered[0], 4),
-            "median": round(statistics.median(ordered), 4),
-            "p99": round(ordered[index], 4), "max": round(ordered[-1], 4),
-            "mean": round(statistics.fmean(ordered), 4)}
-
-
 def summarise(records):
     """Aggregate the cycle timings and answer the E3 question."""
     totals = [record["total_s"] for record in records]
     summary = {
         "cycles": len(records),
-        "total_s": statistics_of(totals),
-        "cut_s": statistics_of([record["cut_s"] for record in records]),
-        "boot_s": statistics_of([record["boot_s"] for record in records]),
-        "service_s": statistics_of([record["service_s"] for record in records]),
+        "total_s": qemu_vm.stats(totals),
+        "cut_s": qemu_vm.stats([record["cut_s"] for record in records]),
+        "boot_s": qemu_vm.stats([record["boot_s"] for record in records]),
+        "service_s": qemu_vm.stats([record["service_s"] for record in records]),
         "service_failures": sum(1 for record in records if not record["service_ok"]),
         "target_s": CYCLE_TARGET_S,
     }
@@ -97,27 +84,6 @@ def summarise(records):
                          if summary["under_target"] else
                          "no: at least one cycle exceeds %.0f s" % CYCLE_TARGET_S)
     return summary
-
-
-def histogram(values, buckets=8):
-    """Plain-text histogram of the cycle times."""
-    if not values:
-        return "no samples\n"
-    low, high = min(values), max(values)
-    if high <= low:
-        return "all %d samples = %.3fs\n" % (len(values), low)
-    width = (high - low) / buckets
-    counts = [0] * buckets
-    for value in values:
-        counts[min(buckets - 1, int((value - low) / width))] += 1
-    peak = max(counts) or 1
-    lines = []
-    for index, count in enumerate(counts):
-        start = low + index * width
-        lines.append("  %7.3f-%7.3f s | %-40s %d"
-                     % (start, start + width,
-                        "#" * int(round(40.0 * count / peak)), count))
-    return "\n".join(lines) + "\n"
 
 
 def build_parser():
@@ -160,8 +126,8 @@ def main(argv=None):
                   % (phase, stats["min"], stats["median"], stats["p99"],
                      stats["max"], stats["mean"]))
     print("  service failures: %d" % summary["service_failures"])
-    print("cycle time histogram")
-    print(histogram([record["total_s"] for record in records]), end="")
+    print(qemu_vm.histogram_text([record["total_s"] for record in records],
+                                 "cycle time histogram"), end="")  # shared helper
     print("  under %.0f s per cycle? %s" % (CYCLE_TARGET_S, summary["answer"]))
     ok = summary["under_target"] and summary["service_failures"] == 0
     return 0 if ok else 1

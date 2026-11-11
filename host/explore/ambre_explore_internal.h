@@ -10,6 +10,14 @@
 
 #include "ambre_explore.h"
 
+/* State variant kinds (ambre_explore_state_t.variant_type). */
+#define AMBRE_VAR_PREFIX   0   /* plain cut after `prefix` ops              */
+#define AMBRE_VAR_TORN     1   /* last write torn at a sector boundary      */
+#define AMBRE_VAR_CACHE    2   /* volatile disk cache: unflushed writes lost */
+#define AMBRE_VAR_BITFLIP  3   /* one flipped bit anywhere in the data area */
+#define AMBRE_VAR_TABLE    4   /* allocation table copies destroyed         */
+#define AMBRE_VAR_NESTED   5   /* cut inside the recovery itself (I8)       */
+
 /* ------------------------------------------------------------- mem disk -- */
 
 #define AMBRE_MEMDISK_MAX_OPS    256u
@@ -29,6 +37,7 @@ typedef struct {
     uint64_t     dirty[AMBRE_MEMDISK_MAX_DIRTY];
     uint32_t     dirty_n;
     bool         dirty_overflow;
+    bool         synced;        /* image already derived from a base  */
 } ambre_memdisk_t;
 
 int  ambre_memdisk_init(ambre_memdisk_t *md, uint64_t size);

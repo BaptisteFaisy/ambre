@@ -54,7 +54,7 @@ static void add_torn(const ambre_simdisk_t *sd, uint32_t prefix,
         v.prefix = prefix;
         v.torn_last_write = true;
         v.torn_bytes = cut;
-        if (queue_push(q, prefix, 1, &v) != AMBRE_OK) return;
+        if (queue_push(q, prefix, AMBRE_VAR_TORN, &v) != AMBRE_OK) return;
     }
 }
 
@@ -80,7 +80,7 @@ static void add_cache(const ambre_simdisk_t *sd, uint32_t prefix,
         v.prefix = prefix;
         v.drop_unflushed = true;
         v.keep_mask = mask;
-        if (queue_push(q, prefix, 2, &v) != AMBRE_OK) return;
+        if (queue_push(q, prefix, AMBRE_VAR_CACHE, &v) != AMBRE_OK) return;
     }
 }
 
@@ -99,7 +99,7 @@ static void add_bitflip(const ambre_simdisk_t *sd, uint32_t prefix,
     v.corrupt_off = AMBRE_FIRST_DATA_OFFSET + (uint64_t)(r % (span / AMBRE_BLOCK_SIZE))
                     * AMBRE_BLOCK_SIZE + (r >> 8) % AMBRE_BLOCK_SIZE;
     v.corrupt_bit_index = (uint8_t)((r >> 20) & 7u);
-    if (queue_push(q, prefix, 3, &v) != AMBRE_OK) return;
+    if (queue_push(q, prefix, AMBRE_VAR_BITFLIP, &v) != AMBRE_OK) return;
 }
 
 /* Table copy A destroyed, then both copies destroyed (REP-02). */
@@ -109,11 +109,20 @@ static void add_table_wipe(uint32_t prefix, ambre_state_queue_t *q)
     memset(&v, 0, sizeof(v));
     v.prefix = prefix;
     v.wipe_table_a = true;
-    if (queue_push(q, prefix, 4, &v) != AMBRE_OK) return;
+    if (queue_push(q, prefix, AMBRE_VAR_TABLE, &v) != AMBRE_OK) return;
     memset(&v, 0, sizeof(v));
     v.prefix = prefix;
     v.wipe_both_tables = true;
-    if (queue_push(q, prefix, 4, &v) != AMBRE_OK) return;
+    if (queue_push(q, prefix, AMBRE_VAR_TABLE, &v) != AMBRE_OK) return;
+}
+
+/* Nested cut (I8): a state whose recovery is itself interrupted by a cut. */
+static void add_nested(uint32_t prefix, ambre_state_queue_t *q)
+{
+    ambre_cut_variant_t v;
+    memset(&v, 0, sizeof(v));
+    v.prefix = prefix;
+    if (queue_push(q, prefix, AMBRE_VAR_NESTED, &v) != AMBRE_OK) return;
 }
 
 int ambre_explore_gen_states(const ambre_simdisk_t *sd,
@@ -121,12 +130,26 @@ int ambre_explore_gen_states(const ambre_simdisk_t *sd,
                              ambre_state_queue_t *q)
 {
     uint32_t total = ambre_simdisk_op_count(sd);
+
+    /* Pass 1: every plain prefix, so the whole set of reachable cut points is
+     * covered before any variant spends the budget. The variants of the
+     * early prefixes would otherwise eat the whole budget and the crash
+     * window would never be explored. */
     for (uint32_t p = 1; p <= total; p++) {
-        if (queue_push(q, p, 0, NULL) != AMBRE_OK) return AMBRE_ERR_IO;
+        if (queue_push(q, p, AMBRE_VAR_PREFIX, NULL) != AMBRE_OK) return AMBRE_ERR_IO;
+        if (cfg->max_states && q->count >= cfg->max_states) {
+            q->count = cfg->max_states;
+            return AMBRE_OK;
+        }
+    }
+
+    /* Pass 2: the variants, prefix by prefix. */
+    for (uint32_t p = 1; p <= total; p++) {
         if (cfg->variant_torn) add_torn(sd, p, q);
         if (cfg->variant_volatile_cache) add_cache(sd, p, q);
         if (cfg->variant_bitflip) add_bitflip(sd, p, q);
         if (cfg->variant_table_wipe) add_table_wipe(p, q);
+        if (cfg->nested_recovery) add_nested(p, q);
         if (cfg->max_states && q->count >= cfg->max_states) {
             q->count = cfg->max_states;
             break;

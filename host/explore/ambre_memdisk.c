@@ -113,13 +113,14 @@ int ambre_memdisk_copy_from(ambre_memdisk_t *md, const uint8_t *src)
     memcpy(md->image, src, (size_t)md->size);
     md->dirty_n = 0;
     md->dirty_overflow = false;
+    md->synced = true;
     return AMBRE_OK;
 }
 
 int ambre_memdisk_sync_from(ambre_memdisk_t *md, const uint8_t *base)
 {
     if (!md || !base) return AMBRE_ERR_PARAM;
-    if (md->dirty_overflow) {
+    if (!md->synced || md->dirty_overflow) {
         memcpy(md->image, base, (size_t)md->size);
     } else {
         for (uint32_t i = 0; i < md->dirty_n; i++) {
@@ -131,6 +132,7 @@ int ambre_memdisk_sync_from(ambre_memdisk_t *md, const uint8_t *base)
     }
     md->dirty_n = 0;
     md->dirty_overflow = false;
+    md->synced = true;
     return AMBRE_OK;
 }
 
@@ -138,6 +140,11 @@ int ambre_memdisk_apply_log(const ambre_memdisk_t *src, uint32_t count,
                             ambre_memdisk_t *dst, const uint8_t *base)
 {
     if (!src || !dst || !base) return AMBRE_ERR_PARAM;
+    /* Force a full copy from base: dst may still hold blocks written by a
+     * previous state that are not in its dirty list any more, and `base` has
+     * moved on since (new prefix writes). A partial rollback would mix two
+     * different cut instants. */
+    dst->synced = false;
     if (ambre_memdisk_sync_from(dst, base) != AMBRE_OK) return AMBRE_ERR_IO;
     for (uint32_t i = 0; i < count && i < src->op_count; i++) {
         const ambre_op_t *op = &src->ops[i];

@@ -32,7 +32,8 @@ typedef struct {
     bool     file_complete;        /* value carried by the injected SEAL     */
     long     emerg_op;             /* op index of the EMERG write, -1        */
     long     acquired_op;          /* op index of MARK_ACQUIRED, -1          */
-    long     sealed_op;            /* op index of MARK_SEALED, -1            */
+    long     sealed_op;            /* op index of the SEAL record write, -1  */
+    long     sealed_flush_op;      /* op index of MARK_SEALED (after flush)  */
     uint64_t t0_ts_us;
     uint64_t trig_ts_us;
     uint64_t first_sample_ts_us;
@@ -116,7 +117,7 @@ int ambre_check_invariants(const ambre_truth_t *truth,
                            const ambre_recovery_result_t *rec,
                            const ambre_disk_t *recovered_disk,
                            uint32_t prefix, const ambre_simdisk_t *sd,
-                           ambre_invariant_report_t *report);
+                           int variant_type, ambre_invariant_report_t *report);
 
 void ambre_truth_free(ambre_truth_t *truth);
 

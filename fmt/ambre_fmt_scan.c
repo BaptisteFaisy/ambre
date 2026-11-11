@@ -17,66 +17,6 @@ uint32_t ambre_fmt_table_body_crc(const ambre_alloc_table_t *t);
 /* Read and validate a single block at (seg, blk). Returns AMBRE_OK on valid
  * block, AMBRE_ERR_IO when the block is outside the disk or unreadable, or
  * the codec error reported by ambre_block_validate(). */
-static int read_valid_block(const ambre_disk_t *d, uint32_t seg, uint32_t blk,
-                            ambre_block_t *out)
-{
-    int rc = ambre_block_read(d, ambre_block_offset(seg, blk), out);
-
-    if (rc != AMBRE_OK) {
-        return rc;
-    }
-    return ambre_block_validate(out);
-}
-
-/* Verify that a complete record (1..AMBRE_REC_MAX_BLOCKS) starting at `blk`
- * matches `session_id` and `expected_seq`, and that all chunks are valid and
- * reassemble to total_len. If `payload_out` is non-NULL, copies reassembled
- * payload bytes into it (buffer must be AMBRE_REC_MAX_BLOCKS * PAYLOAD_MAX). */
-static int read_record(const ambre_disk_t *d, uint32_t seg, uint32_t blk,
-                       uint64_t session_id, uint64_t expected_seq,
-                       ambre_block_t *head_out, uint8_t *payload_out)
-{
-    ambre_block_t b;
-    uint16_t nchunks;
-    uint32_t acc_len;
-
-    if (read_valid_block(d, seg, blk, &b) != AMBRE_OK) {
-        return AMBRE_ERR_TORN;
-    }
-    if (b.hdr.session_id != session_id || b.hdr.seq != expected_seq ||
-        b.hdr.chunk_index != 0u) {
-        return AMBRE_ERR_STALE;
-    }
-    nchunks = b.hdr.chunk_count;
-    if (blk + (uint32_t)nchunks > AMBRE_BLOCKS_PER_SEGMENT) {
-        return AMBRE_ERR_TORN;
-    }
-    acc_len = b.hdr.payload_len;
-    if (payload_out != NULL && acc_len > 0u) {
-        memcpy(payload_out, b.payload, acc_len);
-    }
-    for (uint16_t ci = 1u; ci < nchunks; ci++) {
-        ambre_block_t c;
-        if (read_valid_block(d, seg, blk + ci, &c) != AMBRE_OK) {
-            return AMBRE_ERR_TORN;
-        }
-        if (c.hdr.session_id != session_id || c.hdr.seq != expected_seq ||
-            c.hdr.rec_type != b.hdr.rec_type || c.hdr.chunk_count != nchunks ||
-            c.hdr.chunk_index != ci || c.hdr.total_len != b.hdr.total_len) {
-            return AMBRE_ERR_TORN;
-        }
-        if (payload_out != NULL && c.hdr.payload_len > 0u) {
-            memcpy(payload_out + acc_len, c.payload, c.hdr.payload_len);
-        }
-        acc_len += c.hdr.payload_len;
-    }
-    if (acc_len != b.hdr.total_len) {
-        return AMBRE_ERR_TORN;
-    }
-    *head_out = b;
-    return AMBRE_OK;
-}
-
 int ambre_scan_segment(const ambre_disk_t *d, uint64_t session_id,
                        uint64_t expected_first_seq, uint32_t seg,
                        uint32_t start_blk, ambre_scan_result_t *out)
@@ -97,7 +37,7 @@ int ambre_scan_segment(const ambre_disk_t *d, uint64_t session_id,
 
     while (blk < AMBRE_BLOCKS_PER_SEGMENT) {
         ambre_block_t head;
-        if (read_record(d, seg, blk, session_id, seq, &head, NULL) != AMBRE_OK) {
+        if (ambre_read_record(d, seg, blk, session_id, (int64_t)seq, &head, NULL, NULL) != AMBRE_OK) {
             break;
         }
         out->valid_blocks += head.hdr.chunk_count;
@@ -203,8 +143,8 @@ static void scan_seg_records(const ambre_disk_t *d, uint32_t seg,
 
     while (blk < info->scan.next_block) {
         ambre_block_t head;
-        if (read_record(d, seg, blk, info->session_id, seq, &head,
-                        payload) != AMBRE_OK) {
+        if (ambre_read_record(d, seg, blk, info->session_id, (int64_t)seq, &head,
+                               payload, NULL) != AMBRE_OK) {
             break;
         }
         if (emerg_pass && head.hdr.rec_type == (uint8_t)AMBRE_REC_EMERG) {
@@ -298,7 +238,7 @@ static void scan_all_segments(const ambre_disk_t *d, seg_info_t *segs,
 
     for (uint32_t s = 0u; s < max_segs; s++) {
         ambre_block_t b0;
-        if (read_valid_block(d, s, 0u, &b0) == AMBRE_OK &&
+        if (ambre_read_record(d, s, 0u, 0u, -1, &b0, NULL, NULL) == AMBRE_OK &&
             b0.hdr.chunk_index == 0u) {
             segs[s].session_id = b0.hdr.session_id;
             segs[s].first_seq  = b0.hdr.seq;

@@ -1,0 +1,93 @@
+# Ambre nightly — the long runs, OUTSIDE PRs (user rule 2026-10-24,
+# see ~/Bureau/CI-BUDGET-5MIN.md: a CI run that needs more than 5 minutes is
+# moved out of the PR path, it is never given a longer timeout there).
+#
+# Never triggered by pull_request: only schedule + workflow_dispatch.
+# Each job still carries an explicit timeout-minutes, justified below.
+
+name: nightly
+
+on:
+  schedule:
+    # 02:17 UTC every night (off the top of the hour: less runner contention).
+    - cron: '17 2 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nightly-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  explore-full:
+    name: full exploration (1 000 000 states)
+    runs-on: ubuntu-latest
+    # 60 min : full 1M-state exploration + nested variants, hors PR (règle CI 5 min).
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Toolchain
+        run: |
+          command -v gcc >/dev/null && command -v python3 >/dev/null || {
+            sudo apt-get update -qq
+            sudo apt-get install -y --no-install-recommends build-essential python3
+          }
+          if command -v ccache >/dev/null 2>&1; then
+            echo "CC=ccache gcc" >> "$GITHUB_ENV"
+          fi
+
+      - name: ccache cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.ccache
+          key: ccache-nightly-${{ hashFiles('fmt/**', 'host/**', 'tests/**', 'Makefile') }}
+          restore-keys: ccache-nightly-
+
+      # make explore-full = make all + scenario + 1 000 000 states (--nested).
+      - name: make explore-full
+        run: make explore-full
+
+      - name: full exploration report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: explore-full-report
+          path: build/explore-full.json
+          if-no-files-found: ignore
+          retention-days: 14
+
+  crosscheck:
+    name: C vs Python crosscheck (10 000 scenarios)
+    runs-on: ubuntu-latest
+    # 60 min : 10 000 scenarios, vecteurs + binaire C + jumeau Python, hors PR (règle CI 5 min).
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Toolchain
+        run: |
+          command -v gcc >/dev/null && command -v python3 >/dev/null || {
+            sudo apt-get update -qq
+            sudo apt-get install -y --no-install-recommends build-essential python3
+          }
+          if command -v ccache >/dev/null 2>&1; then
+            echo "CC=ccache gcc" >> "$GITHUB_ENV"
+          fi
+
+      - name: ccache cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.ccache
+          key: ccache-crosscheck-${{ hashFiles('fmt/**', 'host/**', 'tests/**', 'Makefile') }}
+          restore-keys: ccache-crosscheck-
+
+      # make crosscheck = make all + 10 000 vectors + C decisions + Python diff.
+      - name: make crosscheck
+        run: make crosscheck

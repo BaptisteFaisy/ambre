@@ -205,6 +205,12 @@ ambre_ev_desc_t *ambre_table_find_event(ambre_alloc_table_t *t, uint32_t event_i
     return NULL;
 }
 
+const ambre_ev_desc_t *ambre_table_find_event_const(const ambre_alloc_table_t *t,
+                                                     uint32_t event_id)
+{
+    return ambre_table_find_event((ambre_alloc_table_t *)t, event_id);
+}
+
 int ambre_table_add_event(ambre_alloc_table_t *t, const ambre_ev_desc_t *ev)
 {
     uint32_t free_slot = AMBRE_MAX_EVENTS;

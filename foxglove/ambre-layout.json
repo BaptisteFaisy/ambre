@@ -1,0 +1,114 @@
+{
+  "configById": {
+    "TimeSeries!ambre-delta-v": {
+      "title": "Delta-v (long / lat)",
+      "paths": [
+        {
+          "value": "/edr/a/delta_v.dv_long_kmh",
+          "enabled": true,
+          "timestampMethod": "receiveTime",
+          "label": "longitudinal"
+        },
+        {
+          "value": "/edr/a/delta_v.dv_lat_kmh",
+          "enabled": true,
+          "timestampMethod": "receiveTime",
+          "label": "lateral"
+        }
+      ],
+      "showLegend": true,
+      "legendDisplay": "floating",
+      "xAxisVal": "timestamp",
+      "followingViewWidth": 10,
+      "showXAxisLabels": true,
+      "showYAxisLabels": true
+    },
+    "TimeSeries!ambre-accel": {
+      "title": "Accelerations (mm/s2)",
+      "paths": [
+        {
+          "value": "/edr/b/accel.x_mm_s2",
+          "enabled": true,
+          "timestampMethod": "receiveTime",
+          "label": "x long"
+        },
+        {
+          "value": "/edr/b/accel.y_mm_s2",
+          "enabled": true,
+          "timestampMethod": "receiveTime",
+          "label": "y lat"
+        },
+        {
+          "value": "/edr/b/accel.z_mm_s2",
+          "enabled": true,
+          "timestampMethod": "receiveTime",
+          "label": "z vert"
+        }
+      ],
+      "showLegend": true,
+      "legendDisplay": "floating",
+      "xAxisVal": "timestamp",
+      "followingViewWidth": 10,
+      "showXAxisLabels": true,
+      "showYAxisLabels": true
+    },
+    "Plot!ambre-speed": {
+      "title": "Speed (km/h)",
+      "paths": [
+        {
+          "value": "/edr/a/precrash.speed_kmh",
+          "enabled": true,
+          "timestampMethod": "receiveTime",
+          "label": "speed"
+        }
+      ],
+      "showLegend": true,
+      "xAxisVal": "timestamp",
+      "followingViewWidth": 10,
+      "showXAxisLabels": true,
+      "showYAxisLabels": true
+    },
+    "StateTransitions!ambre-states": {
+      "title": "States (gear / ADAS / belts)",
+      "paths": [
+        {
+          "value": "/edr/b/status.gear",
+          "enabled": true,
+          "timestampMethod": "receiveTime",
+          "label": "gear"
+        },
+        {
+          "value": "/edr/b/status.adas",
+          "enabled": true,
+          "timestampMethod": "receiveTime",
+          "label": "ADAS bitmask"
+        },
+        {
+          "value": "/edr/b/status.belts",
+          "enabled": true,
+          "timestampMethod": "receiveTime",
+          "label": "belts bitmask"
+        }
+      ],
+      "showIdLabels": true,
+      "showTickLabels": true,
+      "showLegend": true,
+      "xAxisVal": "timestamp",
+      "followingViewWidth": 10
+    },
+    "RawMessages!ambre-event": {
+      "title": "Event summary",
+      "topicPath": "/edr/a/event",
+      "diffEnabled": false,
+      "diffMethod": "custom",
+      "diffTopicPath": "",
+      "showFullMessageForDiff": false
+    }
+  },
+  "globalVariables": {},
+  "userNodes": {},
+  "playbackConfig": {
+    "speed": 1
+  },
+  "layout": "{\"direction\":\"column\",\"first\":{\"direction\":\"row\",\"first\":\"TimeSeries!ambre-delta-v\",\"second\":\"TimeSeries!ambre-accel\",\"splitPercentage\":50},\"second\":{\"direction\":\"row\",\"first\":{\"direction\":\"column\",\"first\":\"Plot!ambre-speed\",\"second\":\"StateTransitions!ambre-states\",\"splitPercentage\":50},\"second\":\"RawMessages!ambre-event\",\"splitPercentage\":65},\"splitPercentage\":55}"
+}

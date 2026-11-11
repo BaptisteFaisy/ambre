@@ -1,0 +1,28 @@
+{
+  "tool": "scripts/explore-campaign.sh (2 batches)",
+  "generated_at_utc": "2026-11-11T20:16:11Z",
+  "scenarios": 18,
+  "states_explored": 1379264,
+  "events_acquired_observed": 2567421,
+  "violations": 0,
+  "states_by_variant": {
+    "prefix": 127186,
+    "torn": 279552,
+    "cache": 463782,
+    "bitflip": 127186,
+    "table": 254372,
+    "nested": 127186
+  },
+  "invariants_checked": [
+    "I1",
+    "I2",
+    "I3",
+    "I4",
+    "I5",
+    "I6",
+    "I7",
+    "I8"
+  ],
+  "backend": "posix (simulated disk, exhaustive op-trace prefixes)",
+  "note": "One 30 s scenario exhausts its own reachable state space (64 591 states); the one million states the spec asks for at 'complet' level is reached by summing several scenarios of different seeds, durations, crash instants and delta-v."
+}

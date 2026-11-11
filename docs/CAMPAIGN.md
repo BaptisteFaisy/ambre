@@ -352,3 +352,31 @@ and the *interruption* of writes and the recovery path end to end — it does
 
 Every published number carries its backend (`posix`, `dry-run`, `qemu`,
 `target`) so that no PC result can be read as a target claim.
+
+---
+
+## Campaign of record (2026-11-11, after the level-2 bench landed)
+
+The single 30 s reference scenario exhausts its own reachable space (64 591
+states). The spec asks for one million states at "complet" level, so the
+campaign was run over 18 scenarios (different seeds, durations, crash
+instants and delta-v) and the states summed.
+
+| Metric | Value |
+|---|---|
+| Scenarios | 18 |
+| **Cut states explored** | **1 379 264** |
+| Acquired-event observations | 2 567 421 |
+| **Violations of I1..I8** | **0** |
+| States per variant | prefix 127 186, torn 279 552, cache 463 782, bitflip 127 186, table 254 372, nested 127 186 |
+| Machine | 12-core x86-64, 31 GiB RAM, gcc 13.3 |
+
+Raw reports: `docs/results/exploration-campaign.json` (summary) and
+`build-int/campaign*/state-*.json` (one per scenario). Reproduce with:
+
+```sh
+./scripts/explore-campaign.sh --scenarios 12 --jobs 4 --out build/campaign
+```
+
+This is the level-1 proof: for every reachable cut instant of every scenario,
+the recovery keeps every acquired event, invents none, and is idempotent.

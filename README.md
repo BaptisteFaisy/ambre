@@ -290,7 +290,7 @@ comes out of a campaign. Each row names the requirement it answers
 | Format: block codec, CRC-32C, allocation table, scan, record | **green** | `make test` — 22 suites (21 C + 1 C++), **42 249 checks**, 0 failures |
 | Journal engine, five processes' portable logic, power-cut recovery | **green** | `make test` — incl. `test_journal` (4 195), `test_journal_svc` (8 277), `test_simdisk` (3 345), `test_recovery` (124), `test_capture` (43), `test_ipc` (102), `test_edrctl` (97) |
 | Trigger arithmetic (UN R160) + independent Python twin | **green** | `make crosscheck` — 10 000 scenarios, 2 744 840 decision lines, byte-identical, 0 divergences |
-| Exhaustive exploration of power-cut states | **green** | `make explore-full` — 64 591 states (every reachable state), 46 390 acquisitions, **0 violations of I1..I8** (495 s); `make explore` 10 000 states in 29 s |
+| Exhaustive exploration of power-cut states | **green** | `make explore-full` — 64 591 states for the 30 s reference scenario (its whole reachable space); **campaign of record: 1 379 264 states over 18 scenarios, 2 567 421 acquisitions, 0 violations of I1..I8** (`docs/CAMPAIGN.md`); `make explore` 10 000 states in 29 s |
 | MCAP export + `edr-verify` | **green** | `make verify` — 10/10 checks incl. `class_a.fidelity` (11 points); `python3 tests/test_mcap_py.py` — 24 tests OK |
 | C++17 MCAP archive | **green** | `make test_archive_cpp` — 71 checks, 0 failures |
 | One-command demo | **green** | `make demo` — `DEMO OK`: real 3-process chain, `SIGKILL` in the `acquired` window, recovery, export verified, class A 11/11 points identical |

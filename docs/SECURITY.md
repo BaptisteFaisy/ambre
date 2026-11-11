@@ -61,16 +61,21 @@ Notes on internal paths:
 
 ## 3. Requirements Coverage (SEC-01..SEC-06, VIE-01, VIE-03)
 
-| ID | Requirement | Mechanism | Verification Status |
+One line per requirement: **what implements it** (file + function) and **what
+proves it** (named test case, or the static check, or the honest statement that
+it needs the target). Test case names are the ones printed by the test
+binaries; `make BUILD=build-mine test` runs them all.
+
+| ID | Requirement | Implemented in (path → function) | Proven by |
 |---|---|---|---|
-| **VIE-01** | No VIN, GPS position, absolute wall-clock time, or driver identity | Signal whitelist at `edr-capture` (`ACQ-04`); no RTC/location fields in `ambre_sample_t` or MCAP schema | **Verified on PC** (unit & verify tests) |
-| **VIE-03** | Closed loop: zero network connections | No `io-sock`, `dhclient`, `sshd`, `libsocket`, or network type in `image/ambre.build`, `image/buildfile`, or `image/ambre.sec`; QEMU is launched without any network device (`image/README.md` §3) | **Statically checked on PC** (`scripts/check-image.sh`); target runtime `UNVERIFIED (needs QNX SDP 8.0)` |
-| **SEC-01** | QNX security policy types; producer writes input only; service reads only; journal alone accesses raw partition | `image/ambre.sec` (`type`, `allow`, `allow_attach`) + `ambre_port_access_allowed()` | Decision function **verified on PC**; kernel enforcement `UNVERIFIED (needs QNX SDP 8.0)` |
-| **SEC-02** | No command disables the recorder; forced kill triggers respawn and logs interruption | No `stop` / `disable` / `erase` IPC message (`target/edr_ipc.h`) or CLI command; `image/ambre-supervise.sh` respawns killed processes and logs to `slog2` | IPC/CLI absence **statically checked on PC**; target kill/respawn `UNVERIFIED (needs QNX SDP 8.0)` |
-| **SEC-03** | Locked events cannot be erased by any application command | No erase/delete message in `ambre_ipc_msg_t`; allocation table victim policy skips `LOCKED` segments (`fmt/ambre_fmt_table.c`) | **Verified on PC** (`test_table`, `test_explore`) |
-| **SEC-04** | Export SHA-256 hash chain + vehicle-type signature (compatible with anonymisation) | `edr.integrity` metadata of `host/mcap/export_mcap.py`: SHA-256 digest of the journal image and of the configuration | **Partially verified on PC** (`test_mcap_py.py`, `edr_verify.py`); the record-level hash chain and the vehicle-type signature are still a placeholder (`"signature": "none"`) and remain to be implemented |
-| **SEC-05** | Malformed frames rejected and counted without affecting service | `ambre_ipc_header_validate()` / `ambre_ipc_frame_check()` drop bad frames and increment counters | **Verified on PC** (`test_ipc`, `test_journal_svc`) |
-| **SEC-06** | Read-only configuration in boot image; digest stamped in every event | `[perms=0444] /etc/ambre/config.conf` in `image/ambre.build`; read-only grants in `image/ambre.sec` | Layout **statically checked on PC**; IFS runtime permissions and per-event digest `UNVERIFIED (needs QNX SDP 8.0)` |
+| **VIE-01** | No VIN, position, absolute wall-clock time or driver identity can be recorded | `target/capture/edr_capture.c` → `ambre_capture_is_forbidden()` (`signal_id >= 90 && <= 99`), `ambre_capture_is_whitelisted()`; the on-disk structs carry no such field (`fmt/ambre_types.h`: `ambre_sample_t` = id/quality/value) | `tests/test_capture.c::capture_whitelist_forbidden` (1 unlisted → `samples_rejected`, 2 forbidden → `samples_forbidden`), 43 checks green; `tests/test_mcap_py.py::test_verify_rejects_an_absolute_timestamp_in_metadata` |
+| **VIE-03** | Closed loop: zero network connections | absent by construction: no `io-sock`, `dhclient`, `sshd` or socket library in `image/ambre.build`, `image/buildfile` or `image/ambre.sec` | `make image-check` → check 8 (*no network stack, daemon or socket library in `image/`*), green; QEMU is launched with no `-netdev` (`docs/QNX-PORT.md` §4 step 4) |
+| **SEC-01** | One QNX type per process; producers write the input only; the service reads only; the journal alone reaches the raw partition | `image/ambre.sec` (`type`, `provides`, `allow`, `allow_attach`, one type per `ambre_peer_type_t`) + `target/port/ambre_port_posix.c` → `ambre_port_access_allowed()` + its QNX twin `target/port/ambre_port_qnx.c` + `target/journal/edr_journal_qnx.c` (`iofunc_client_info()` → `ambre_port_access_allowed()`) | **Decision function:** `tests/test_port_posix.c::access control (SEC-01)` (16 rows of the full matrix), `tests/test_edrctl.c::access_control_sec01`, `tests/test_journal_svc.c::access_control_and_no_stop` (an `AMBRE_PEER_UNKNOWN` producer gets `AMBRE_PORT_ERR_PERM` + `NAK`). **Policy coherence:** `make image-check` → check 9 (*every `ambre_peer_type_t` mapped*) and check 10 (*no non-journal type granted raw device access*). **Kernel enforcement is `UNVERIFIED (needs QNX SDP 8.0)`** |
+| **SEC-02** | No command can disable the recorder; a forced kill triggers respawn and logs the interruption | no `stop`/`disable`/`erase` message exists (`target/edr_ipc.h` lists every type: FRAME, EXTERNAL, TRIGGER, CONTINUE, SEAL, GAP, EVENT_READY, STATUS, LIST, EXPORT, VERIFY, ACK, NAK, …_REPLY) and no such CLI verb in `target/ctl/`; `image/ambre-supervise.sh` respawns and logs to `slog2` | absence: `make image-check` → check 11 (`check_no_disable_command`: *no recorder stop/disable command exists*); unknown opcode refused: `tests/test_journal_svc.c::access_control_and_no_stop` (`0x7F` and a truncated frame both answer `NAK`, `refused_count >= 5`, `malformed_count >= 2`). **Respawn on target: `UNVERIFIED (needs QNX SDP 8.0)`** |
+| **SEC-03** | A locked event cannot be erased by any application command | no erase/delete message type in `ambre_ipc_msg_t`; the victim policy never returns a locked segment: `fmt/ambre_fmt_table.c` → `ambre_table_pick_victim()` skips `AMBRE_SEG_LOCKED` and any event with `locked != 0` | `tests/test_table.c::table_pick_victim_policy`, `tests/test_journal.c::locked_event_is_never_recycled`, `tests/test_journal_svc.c::locked_event_cannot_be_erased` (fill the partition, refuse the new event, both locked events still present), `tests/test_recovery.c::locked_event_is_kept`, + invariant I6 over 64 591 explored cut states |
+| **SEC-04** | Export carries an integrity envelope, compatible with anonymisation | `host/mcap/export_mcap.py` writes the `edr.integrity` metadata record (`image_sha256`, `image_bytes`, `event_payload_crc32c`, `t0_offset_ns`, `trig_ts_us`); the C++ archive computes the same digest in `target/archive/ambre_sha256.cpp` / `edr_archive_store.cpp` (`source_sha256`, `source_bytes`) | **partial** — `tests/test_archive_cpp.cpp::test_sha256_vectors` (SHA-256 known vectors), `tests/test_mcap_py.py` (metadata present and accepted by `edr_verify.py`); the record-level **hash chain** and the vehicle-type **signature** are still a placeholder: `export_mcap.py` writes `"signature": "none"`, and `edr_verify.py` accepts it. Those two remain to be implemented |
+| **SEC-05** | Malformed frames are rejected and counted without affecting the service | `target/ipc/edr_ipc.c` → `ambre_ipc_header_validate()` (magic, version, type, body length) and `ambre_ipc_frame_check()` (whole frame against its declared length); `target/journal/edr_journal_svc.c` counts `refused_count` / `malformed_count` and answers `NAK` | `tests/test_ipc.c` — *reject bad magic*, *reject unknown version*, *reject body above the ceiling*, *reject null header*, *reject incoherent body_len* (102 checks green); `tests/test_journal_svc.c::access_control_and_no_stop` (service keeps serving after refusals); `tests/test_capture.c::capture_overload_non_blocking` |
+| **SEC-06** | Read-only configuration in the boot image; digest stamped in every event | `[perms=0444] /etc/ambre/config.conf` in `image/ambre.build`; read-only grants and no write ability on the config path in `image/ambre.sec`; `config_sha256` in the `edr.build` metadata record (`host/mcap/export_mcap.py`) | **partial** — layout: `make image-check` (file list + policy coherence, checks 1, 7, 8). IFS runtime permissions and the per-event digest on target: `UNVERIFIED (needs QNX SDP 8.0)` |
 
 ---
 
@@ -81,14 +86,28 @@ Notes on internal paths:
    in `target/port/ambre_port_posix.c` implements the exact 4-operation matrix
    above and returns `AMBRE_PORT_ERR_PERM` for every unauthorized `(peer_type, op)`
    pair and `AMBRE_PORT_ERR_PARAM` for invalid operations.
-2. **Static image & policy coherence (`scripts/check-image.sh` / `make image-check`)**:
-   - Every process in `image/ambre.build` has a matching build target in `Makefile` / `image/buildfile`.
+   *Measured 2026-11-11:* `./build-doc/test_port_posix` → `access control
+   (SEC-01) ok`, `PASSED: 87 checks, 0 failures`; the table in
+   `tests/test_port_posix.c` (`acl_rows[]`) has 16 explicit rows.
+2. **Service-level enforcement of the same matrix**: the journal service refuses
+   the peer, answers `NAK` and counts it —
+   `./build-doc/test_journal_svc` → `access_control_and_no_stop ok`,
+   `PASSED: 8277 checks, 0 failures`.
+3. **Static image & policy coherence (`scripts/check-image.sh` / `make image-check`)**,
+   measured `IMAGE CHECK PASSED`, 11/11:
+   - Every process in `image/ambre.build` has a matching build target in `Makefile` / `image/buildfile` (checks 2–6).
    - Process priorities in `image/ambre.build` and `image/buildfile` match spec §4.4
-     (`edr-capture` 60–61, `edr-journal` 62, `edr-archive` 8, `edrctl` 10, `edr-replay` 50).
-   - Every `ambre_peer_type_t` in `target/port/ambre_port.h` is mapped in `image/ambre.sec`.
-   - Zero network stack, daemon, or socket library is referenced under `image/` (VIE-03).
-   - Raw journal partition (`/dev/hd0t177`, disk 0) and Power-Safe archive partition (`/dev/hd1t177`, disk 1) are distinct devices (STO-01, STO-07).
-   - No `stop` or `disable` recorder command exists in `image/` (SEC-02).
+     (`edr-capture` 60–61, `edr-journal` 62, `edr-archive` 8, `edrctl` 10, `edr-replay` 50) (check 7).
+   - Every `ambre_peer_type_t` in `target/port/ambre_port.h` is mapped in `image/ambre.sec` (check 8).
+   - Zero network stack, daemon, or socket library is referenced under `image/` (VIE-03) (check 9).
+   - Raw journal partition (`/dev/hd0t177`, disk 0) and Power-Safe archive partition (`/dev/hd1t177`, disk 1) are distinct devices, and `edr-journal` starts before `fs-qnx6.so` (STO-01, STO-07, QNX-07) (check 10).
+   - No `stop` or `disable` recorder command exists in `image/` (SEC-02) (check 11).
+4. **QNX glue compiles**: `make qnx-syntax` → `qnx-syntax: 5 glue file(s)
+   compile against the stubs`, which includes `target/port/ambre_port_qnx.c`
+   (slog2, trace, `SchedSet`, `mlockall`), `ambre_port_disk_qnx.c`
+   (`devctl(DCMD_FLUSH_CACHE)`), `ambre_port_ipc_qnx.c` (channels, pulses,
+   `_PULSE_CODE_DISCONNECT`) and `edr_journal_qnx.c` (`iofunc_client_info()` →
+   `ambre_port_access_allowed()`). Syntax only — see the boundary above.
 
 ### Target-only — `UNVERIFIED (needs QNX SDP 8.0)`
 1. **Kernel enforcement of `image/ambre.sec`**: compiling with `secpolcompile`,

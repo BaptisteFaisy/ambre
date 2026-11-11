@@ -8,6 +8,8 @@ import os
 
 from vm_util import histogram_text, stats
 
+ROW_SLOP_MS = 4      # documented row slop of the strict class A comparison
+
 VIOLATION_VERDICTS = ("unexpected_loss", "inconsistent_state")
 
 BACKEND = "posix"
@@ -24,8 +26,9 @@ HONESTY = (
 def summarise(records):
     """Aggregate the verdicts, the cut windows and the timings."""
     verdicts, windows, kinds = {}, {}, {}
-    freeze, cycles, kills = [], [], []
+    freeze, cycles, kills, skews = [], [], [], []
     violations = 0
+    strict_fidelity = 0
     for record in records:
         verdict = record.get("verdict") or "error"
         verdicts[verdict] = verdicts.get(verdict, 0) + 1
@@ -40,11 +43,17 @@ def summarise(records):
             cycles.append(record["cycle_s"])
         if isinstance(record.get("kill_at_ms"), (int, float)):
             kills.append(record["kill_at_ms"] / 1000.0)
+        fidelity = record.get("fidelity") or {}
+        if fidelity.get("ok_strict"):
+            strict_fidelity += 1
+        if fidelity.get("skew_ms"):
+            skews.append(float(fidelity["skew_ms"]))
     return {"cuts": len(records), "verdicts": verdicts, "windows": windows,
             "kinds": kinds, "violations": violations,
             "errors": verdicts.get("error", 0),
             "freeze_ms": stats(freeze), "cycle_s": stats(cycles),
-            "kill_at_s": stats(kills)}
+            "kill_at_s": stats(kills),
+            "class_a_strict": strict_fidelity, "harness_skew_ms": stats(skews)}
 
 
 def write_reports(args, records, summary, plan) -> str:
@@ -96,6 +105,12 @@ def print_summary(args, records, summary, elapsed_s):
     for record in records:
         for item in record.get("violations") or []:
             print("    violation     : cycle %s: %s" % (record["cycle"], item))
+    skew = summary.get("harness_skew_ms", {})
+    skewed = skew.get("count", 0)
+    print("  class A fidelity: %d cycle(s) strict (row slop <= %d ms), "
+          "%d with a measured harness skew (max %s ms)"
+          % (summary.get("class_a_strict", 0), ROW_SLOP_MS, skewed,
+             skew.get("max", "-")))
     freeze = summary["freeze_ms"]
     if freeze.get("count"):
         print("  freeze (ms)     : min %.3f  median %.3f  p99 %.3f  max %.3f"

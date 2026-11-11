@@ -1,0 +1,75 @@
+# NHTSA crash-test pulse extract — synthetic fixture (NOT real NHTSA data)
+#
+# Purpose: exercise host/data/import_nhtsa.py without the public crash-test
+# database, which is not vendored here (and whose file format is still to be
+# confirmed — see host/data/README.md).
+#
+# The columns mirror what a NHTSA frontal-barrier test report exposes once its
+# channels are flattened to text:
+#
+#   time_ms        -> channel time base, milliseconds from the impact
+#   accel_long_g   -> "Vehicle Longitudinal Acceleration", in g (SAE J211 CFC 60)
+#   accel_lat_g    -> "Vehicle Lateral Acceleration", in g
+#   velocity_kmh   -> "Vehicle Velocity Change", integrated delta-v, km/h
+#
+# One row per millisecond over 200 ms, i.e. the decimation the importer applies
+# to the 10 kHz raw channels of a real test. Values are synthetic: a frontal
+# pulse that integrates to about 56 km/h of delta-v, which is the order of
+# magnitude of a US NCAP 56 km/h full-frontal rigid-barrier test (the figure is
+# a property of the test, not a claim about any particular published test).
+t_ms,accel_long_g,accel_lat_g,velocity_kmh
+0,0.0,0.0,0.000
+1,-0.4,0.0,0.014
+2,-1.2,0.0,0.056
+3,-2.6,0.0,0.148
+4,-4.5,0.0,0.307
+5,-7.1,0.0,0.558
+6,-10.4,0.0,0.925
+7,-14.2,0.0,1.426
+8,-18.6,0.0,2.083
+9,-23.1,0.0,2.898
+10,-27.5,0.0,3.869
+11,-31.2,0.0,4.971
+12,-33.8,0.0,6.164
+13,-35.4,0.0,7.414
+14,-36.2,0.0,8.692
+15,-36.5,0.0,9.980
+16,-36.1,0.0,11.255
+17,-35.2,0.0,12.498
+18,-34.0,0.0,13.698
+19,-32.4,0.0,14.842
+20,-30.6,0.0,15.922
+21,-28.8,0.0,16.939
+22,-27.1,0.0,17.896
+23,-25.6,0.0,18.799
+24,-24.2,0.0,19.654
+25,-22.9,0.0,20.462
+26,-21.7,0.0,21.228
+27,-20.6,0.0,21.956
+28,-19.5,0.0,22.644
+29,-18.4,0.0,23.294
+30,-17.3,0.0,23.904
+35,-12.6,0.0,26.128
+40,-9.1,0.0,27.735
+45,-6.6,0.0,28.900
+50,-4.8,0.0,29.747
+55,-3.5,0.0,30.365
+60,-2.6,0.0,30.824
+65,-1.9,0.0,31.159
+70,-1.4,0.0,31.406
+75,-1.0,0.0,31.583
+80,-0.7,0.0,31.706
+85,-0.5,0.0,31.795
+90,-0.4,0.0,31.865
+95,-0.3,0.0,31.918
+100,-0.2,0.0,31.954
+110,-0.1,0.0,31.989
+120,-0.1,0.0,32.024
+130,0.0,0.0,32.024
+140,0.0,0.0,32.024
+150,0.0,0.0,32.024
+160,0.0,0.0,32.024
+170,0.0,0.0,32.024
+180,0.0,0.0,32.024
+190,0.0,0.0,32.024
+200,0.0,0.0,32.024

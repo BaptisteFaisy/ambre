@@ -25,13 +25,14 @@ no QNX SDP 8.0 is installed (see `docs/QNX-PORT.md`).
 | §8 | one-command demo | green | **`DEMO OK`** — 1 000 cut states explored, 0 violations, export verified | `make demo` |
 | QNX-01..07 | QNX glue compiles against the stubs | 5/5 | **5/5 glue files OK** | `make qnx-syntax` |
 | SEC/VIE | image + security policy statically coherent | all checks | **11/11 static checks pass** | `make image-check` |
-| PERF-01..07 | latency (2 ms / 20 ms / 500 µs) | measured on target | **not measured** — requires the QNX target and its kernel trace | see §7 below |
+| PERF-01..07 | latency (2 ms / 20 ms / 500 µs) | measured on target | **not measured** — requires the QNX target and its kernel trace; a POSIX campaign is in flight, no figure published here | see §7 below |
 | Level 3 | real electrical cuts (§7.7 extrême, 500) | 500 | **TODO(campaign)** — no Raspberry Pi 5 bench | — |
 
-House rule (`make sizecheck`, `python3 scripts/sizecheck.py`): 172 files
-scanned, 4 violations on 2026-11-11 — all four in `host/energy/energy_model.py`
-and `host/latency/measure.py`, work-in-progress files owned by other agents;
-0 violations in `fmt/`, `target/`, `tests/` and in the documentation.
+House rule (`make sizecheck`, `python3 scripts/sizecheck.py`): 191 files
+scanned, 3 violations on 2026-11-11 — all three in `host/e2e/` and
+`host/processcut/`, work-in-progress files owned by other agents;
+0 violations in `fmt/`, `target/`, `tests/`, `scripts/`, `image/`, `codelab/`
+and `docs/` (133 files scanned).
 
 ---
 
@@ -97,29 +98,48 @@ against the recovered data alone.
 
 ## 4. Level 2 — process cuts (POSIX bench) and QEMU cuts
 
-**Process cuts (`host/e2e/`)** — the bench exists: `e2e_run.py` drives
-replay → capture → journal with real processes, `SIGKILL`s the journal at a
-chosen instant (`pre`, `acquired`, `sealed`), restarts it on the same disk
-file, then recovers, exports and verifies. The campaign itself is
-**`TODO(campaign)`**: the owning agent is still finishing it
-(`tests/test_e2e_posix.c` and `host/e2e/README.md` are not in the tree yet),
-so no count is published. Command that will produce the number:
+**Process cuts — harness complete, campaign `TODO(campaign)`.** Two pieces now
+exist and are documented by their owning agent:
+
+- `host/e2e/` — the single-cut bench (`e2e_run.py`, `e2e_cycle.py`,
+  `e2e_check.py`, `e2e_fidelity.py`, `README.md`): replay → capture → journal
+  over AF_UNIX with the frozen `target/edr_ipc.h` protocol, a real `SIGKILL` on
+  the journal at a chosen instant (`pre`, `acquired`, `sealed`, `recovery`,
+  `random`, or a millisecond), restart on the **same** disk file so the recovery
+  runs (REP-01), then service calls, MCAP export and verification.
+- `host/processcut/campaign.py` — the campaign runner over that bench, with a
+  sweep (`--sweep-from-ms -50 --sweep-to-ms 500 --step-ms 1`), random instants,
+  `--jobs`, `--resume` and a violations directory.
 
 ```sh
 python3 host/e2e/e2e_run.py --bins build --scenario build/scenario.txt \
-        --cut-at acquired --out report.json
+        --cut-at acquired --out build/e2e-report.json
+python3 host/processcut/campaign.py --bins build --scenario build/scenario.txt \
+        --cycles 200 --report build/processcut-report.json
 ```
 
-Note carried by the bench itself (`host/e2e/e2e_check.py`): `class_a.fidelity`
-cannot pass on the real process chain (the journal stamps monotonic time and
-the replay does not emit wheel speeds); the bench substitutes the field-level
-check of `host/e2e/e2e_fidelity.py`.
+**No count is published here.** A 200-cycle run was in flight in
+`build-e2e/processcut/` while this report was being written (started 17:27 on
+2026-11-11) and had not produced its report; quoting a partial or contended run
+would be exactly the number this report refuses to carry. The 500 forced
+process stops of §7.7 remain `TODO(campaign)`.
+
+Two honesty notes carried by the bench itself, and repeated here because they
+are the difference between a claim and a measurement:
+
+- `class_a.fidelity` cannot pass on the real process chain (the journal stamps
+  monotonic time, the replay does not emit wheel speeds); `host/e2e/e2e_fidelity.py`
+  substitutes a field-level check of what the chain really carries.
+- This is **POSIX**, not a power cut: the "raw partition" is a regular file
+  (`pwrite` + `fdatasync`) and the "cut" is a `SIGKILL`. It exercises the order
+  and the interruption of writes and the whole recovery path — not the loss of a
+  volatile cache (see §10).
 
 **QEMU cuts (`host/powercut/`)** — **0/200 (socle), not started**: no QNX SDP
 and no QNX image exist on the machine. The orchestrator, the E1/E3 probes and
 the faulty block server are written and their logic is green in dry-run
-(`python3 tests/test_powercut_py.py`: 18 tests OK, measured). Commands, once
-an image exists (`docs/QNX-PORT.md` §"What is needed to finish the target"):
+(`python3 tests/test_powercut_py.py`: Ran 18 tests, OK, 3.5 s — re-measured
+2026-11-11). Commands, once an image exists (`docs/QNX-PORT.md` §4):
 
 ```sh
 python3 host/powercut/powercut_campaign.py --image qnx80.img \
@@ -175,13 +195,38 @@ an ASan+UBSan twin (`make fuzz-asan`). The 24-hour run is `TODO(campaign)`.
 
 ## 7. Latency (PERF-01..PERF-07)
 
-**Not measured — and not measurable on this machine.** Every latency figure
-of §5.7 requires the QNX target: real priorities, real message passing to the
-block driver, and the kernel trace (OBS-03) that turns the 20 ms claim into
-evidence. The PC bench under `host/latency/` is still being written by its
-owning agent (`docs/CAMPAIGN-LATENCY.md` does not exist yet), so no software
-share is published either: `TODO(campaign)`. When it lands, its numbers will
-be labelled `backend=posix` and will never be presented as target latencies.
+**No latency figure is published in this report — `TODO(campaign)`.** Two
+different reasons, and they must not be confused:
+
+1. **On the QNX target, nothing is measurable here.** PERF-01..PERF-05 as the
+   specification defines them (real priorities, real message passing to the
+   block driver, real media time) require the QNX target and its kernel trace
+   (OBS-03). There is no QNX SDP, so those cells stay empty. PERF-02 on the
+   reference hardware in particular includes the flush of the target's eMMC; a
+   PC file on NVMe with `fdatasync()` cannot stand in for it.
+2. **On the POSIX backend, a campaign exists but is not finished.** The harness
+   is written (`host/latency/`: `measure.py`, `campaign.py`, `load_gen.py`,
+   `multi_shock.py`), it drives the real five-process chain, and partial
+   reports are being produced (`build-lat/latency-none.json`,
+   `latency-cpu.json`, `latency-disk.json`, schema
+   `ambre.latency.campaign/1`, `backend=posix`). The remaining loads and the
+   published analysis belong to `docs/CAMPAIGN-LATENCY.md`, which its owning
+   agent has not written yet. **No number from those partial runs is quoted
+   here**: a figure taken from an unfinished campaign, on a machine running
+   three other campaigns at the same time, is not a measurement worth
+   publishing. Commands, for whoever finishes it:
+
+   ```sh
+   make BUILD=build-mine latency LATENCY_LOAD=none     # one load
+   make BUILD=build-mine latency-all                   # none, cpu, disk, mem
+   ```
+
+What is therefore true today: the *software* part of the freeze path is
+structurally bounded (codelab chapter 4: one write, one table commit, one
+flush, no allocation, fixed-size state), and its measured cost will be
+published in `docs/CAMPAIGN-LATENCY.md`, labelled `backend=posix`, with the
+media share separated from the software share and the three worst cases
+explained. Until then the 20 ms freeze deadline remains a **target**.
 
 The only timing figures this report publishes are the throughputs of the PC
 campaigns themselves (states/s of §3, img/s of §6), which are properties of

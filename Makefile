@@ -229,3 +229,31 @@ $(BUILD)/ambre-fuzz-asan: $(FUZZ_SRC) $(FMT_SRC) $(HOST_SRC)
 
 fuzz-asan: $(BUILD)/ambre-fuzz-asan
 	@ASAN_OPTIONS=detect_leaks=0 $(BUILD)/ambre-fuzz-asan --quick
+
+# --- latency campaign (spec 7.5) -------------------------------------------
+# Software share measured, media share decomposed; every number carries
+# backend=posix (docs/CAMPAIGN-LATENCY.md).  One crash is measured per
+# journal boot, because the live journal holds 8 event slots.
+#   make latency                 one campaign under CPU load
+#   make latency LOAD=mem        one campaign under another load
+#   make latency-all             the three loads of spec 7.5, plus the baseline
+.PHONY: latency latency-all
+LATENCY_LOAD    ?= cpu
+LATENCY_TRIGGERS ?= 200
+LATENCY_SCENARIO = $(BUILD)/scenario-latency.txt
+
+$(LATENCY_SCENARIO):
+	$(PYTHON) host/latency/multi_shock.py --triggers 30 --cycle-ms 1000 \
+	  --dv-kmh 9.0,10.8,12.6 --out $(LATENCY_SCENARIO)
+
+latency: processes $(LATENCY_SCENARIO)
+	$(PYTHON) host/latency/measure.py --bins $(BUILD) \
+	  --scenario $(LATENCY_SCENARIO) --triggers $(LATENCY_TRIGGERS) \
+	  --load $(LATENCY_LOAD) --report $(BUILD)/latency-$(LATENCY_LOAD).json
+
+latency-all: processes $(LATENCY_SCENARIO)
+	@for load in none cpu disk mem; do \
+	  $(PYTHON) host/latency/measure.py --bins $(BUILD) \
+	    --scenario $(LATENCY_SCENARIO) --triggers $(LATENCY_TRIGGERS) \
+	    --load $$load --report $(BUILD)/latency-$$load.json || exit 1; \
+	done

@@ -49,10 +49,15 @@ for src in fmt/*.c; do
     $CC $CFLAGS --coverage $INCLUDES -c "$src" -o "$OBJDIR/$base.c.o"
 done
 
-# 2. the support code the tests need, without instrumentation.
-for src in host/simdisk/*.c host/explore/*.c; do
+# 2. the support code the tests need, without instrumentation. The target/
+#    portable sources are needed too: the process test suites (capture, ipc,
+#    journal_svc, port, edrctl) link them, and those suites exercise the fmt/
+#    library, so skipping them would under-measure the coverage. The QNX glue
+#    (*_qnx.c) is deliberately excluded: it includes real QNX headers.
+for src in host/simdisk/*.c host/explore/*.c target/port/*.c target/ipc/*.c \
+           target/*/[a-z]*.c; do
     case "$src" in
-        */main.c) continue ;;
+        */main.c|*_qnx.c) continue ;;
     esac
     base=$(basename "$src" .c)
     $CC $CFLAGS $INCLUDES -c "$src" -o "$OBJDIR/$base.c.o"

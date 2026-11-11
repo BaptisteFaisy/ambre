@@ -152,6 +152,35 @@ cut. If the cut itself destroyed that block (torn, dropped cache line, flipped
 bit), recency is untestable on that state and `check_i4_i5` returns without
 flagging; the recovery's behaviour is still covered by I2/I3/I4/I8.
 
+#### Summary: what each variant demands
+
+| Variant | States measured | I1 | I2 | I3 | I4 | I5 | I6 | I7 | I8 |
+|---|---|---|---|---|---|---|---|---|---|
+| `prefix` | 5 803 | full | full | full | full | full* | full | full | full |
+| `torn` | 14 336 | full | full | full | full | full* | full | full | full |
+| `cache` | 21 240 | full | full | full | full | full* | full | **relaxed: written-but-unflushed seal may vanish** | full |
+| `bitflip` | 5 803 | full | **n/a** | full | **n/a** | **n/a** | **n/a** | **relaxed (same as cache)** | full |
+| `table` | 11 606 | full | full | full | full | full* | full | full | full |
+| `nested` | 5 803 | full | full | full | full | full* | full | full | full |
+
+`full` = the invariant is demanded and was satisfied on every state.
+`n/a` = not applicable by design (the cut destroyed the very bytes the
+invariant is about — a media fault, not a power cut).
+`*` = I5 is untestable on the individual states where the reference DATA block
+did not survive; it is demanded and satisfied everywhere else.
+
+The two relaxed expectations, in one sentence each:
+
+- **Volatile cache** — a seal that was *written* but *not flushed* may
+  legitimately disappear, so `file_complete = 0` is a correct outcome for that
+  event even though the seal write precedes the cut. Everything *flushed* is
+  demanded in full: the flush acknowledgement **is** the durability promise
+  (GEL-02).
+- **Bit flip** — the journal has no redundancy, so it **detects and isolates**
+  the damaged record (CRC, dropped block, neighbours untouched, ROB-07) but
+  **does not repair** it. Demanding I2/I4/I5/I6 there would be demanding an
+  error-correcting code the format does not claim to implement.
+
 #### Two explorer bugs found by the exploration itself
 
 The exhaustive campaign is also a test of the explorer. Two bugs were found
@@ -163,36 +192,50 @@ and fixed thanks to it, and their non-regression cases live in
    grew, writes appended since the previous state were not resynchronised into
    the working image, so some states were checked against a stale disk. Fix:
    resync the working image from the snapshot of the new prefix before
-   applying cheap variants.
+   applying cheap variants. Non-regression:
+   `test:tests/test_explore.c::explore_nominal_prefixes` (the whole explorer
+   re-run over every nominal prefix — the incremental path that went stale).
 2. **I7 ground truth keyed on the durability mark instead of the SEAL record
    write.** The checker compared `file_complete` against `MARK_SEALED` (which
    is logged *after* the flush) rather than against the SEAL record *write*
    operation; a cut between the write and the flush was expected to give
    `file_complete = 1` while the record could legitimately still be in the
    volatile cache. Fix: ground truth now distinguishes `sealed_op` (record
-   written) from `sealed_flush_op` (durability mark), which is also what makes
-   the relaxed cache semantics above precise.
+   written, `host/explore/ambre_explore.c`) from `sealed_flush_op` (durability
+   mark, `host/explore/ambre_explore.h`), which is also what makes the relaxed
+   cache semantics above precise. Non-regression:
+   `test:tests/test_explore.c::explore_complete_flag_both_sides` (I7 pinned on
+   both sides of the SEAL write op) + `test:tests/test_recovery.c::sealed_event_keeps_complete_flag`.
 
 ### Level 2 — real cuts under QEMU, and the POSIX process-cut bench
 
-**Process cuts on the POSIX bench (`host/e2e/`) — harness present, campaign
-`TODO(campaign)`.** `host/e2e/e2e_run.py` drives the real chain
-(replay → capture → journal) with real processes, `SIGKILL`s the journal at a
-chosen instant (`pre`, `acquired`, `sealed`), restarts it on the same disk
-file so the recovery runs (REP-01), then exports and verifies:
+**Process cuts on the POSIX bench (`host/e2e/`, `host/processcut/`) — harness
+present, campaign `TODO(campaign)`.** The bench drives the real chain
+(replay → capture → journal over AF_UNIX with the frozen `target/edr_ipc.h`
+protocol), `SIGKILL`s the journal at a chosen instant (`pre`, `acquired`,
+`sealed`, `recovery`, `random`, or a millisecond), restarts it on the same disk
+file so the recovery runs (REP-01), then reads the recovered state, exports the
+event to MCAP and verifies it. `host/processcut/campaign.py` runs N such cycles
+with a sweep of cut instants and `--resume`.
 
 ```sh
 python3 host/e2e/e2e_run.py --bins build --scenario build/scenario.txt \
-        --cut-at acquired --out report.json
+        --cut-at acquired --out build/e2e-report.json
+python3 host/processcut/campaign.py --bins build --scenario build/scenario.txt \
+        --cycles 200 --report build/processcut-report.json
 ```
 
-The bench is still being finished by its owning agent (`tests/test_e2e_posix.c`
-and `host/e2e/README.md` are not in the tree on 2026-11-11), so **no cut count
-is published** — the 500 forced process stops of §7.7 remain `TODO(campaign)`.
-Carried by the bench itself: `class_a.fidelity` cannot pass on the real
-process chain (the journal stamps monotonic time, the replay does not emit
-wheel speeds); `host/e2e/e2e_fidelity.py` substitutes a field-level check of
-what the chain really carries.
+At the time of writing (2026-11-11, 17:4x) a 200-cycle run was **in flight** in
+`build-e2e/processcut/` and had produced no report yet, so **no cut count and no
+violation count is published here** — the 500 forced process stops of §7.7
+remain `TODO(campaign)`. The bench itself carries two honesty notes:
+`class_a.fidelity` cannot pass on the real process chain (the journal stamps
+monotonic time, the replay does not emit wheel speeds — `host/e2e/e2e_fidelity.py`
+substitutes a field-level check of what the chain really carries), and a
+`SIGKILL` on a POSIX process is **not** a power cut: the "raw partition" is a
+regular file with `pwrite` + `fdatasync`, so this level exercises the order and
+the interruption of writes and the whole recovery path, not the loss of a
+volatile cache (§10).
 
 **QEMU cuts — status (2026-11-11): 0 real QEMU cut run — not started.** The
 orchestrator and its harnesses exist in `host/powercut/` and their logic is
@@ -313,11 +356,11 @@ exploration and the MCAP round-trip (`make mcap && make verify`); without
 (`make explore-full`). It prints a summary and exits 0 only when every step is
 green — a failing step is listed `FAIL`, never hidden. Measured 2026-11-11:
 `--quick` reports **7/7 steps green** with `AMBRE_BUILD_DIR=build-docs`.
-Caveat of the same day: `make sizecheck` currently reports **4 violations** in
-`host/energy/energy_model.py` and `host/latency/measure.py` — work-in-progress
-files of two other agents — so a full `verify-all.sh` run is red on that first
-step until they land; `fmt/`, `target/` and `tests/` have 0 violations
-(172 files scanned).
+Caveat of the same day: `make sizecheck` currently reports **3 violations** in
+`host/e2e/` and `host/processcut/` — work-in-progress files of two other agents
+— so a full `verify-all.sh` run is red on that first step until they land;
+`fmt/`, `target/`, `tests/`, `scripts/`, `image/`, `codelab/` and `docs/` are at
+0 violations (133 files scanned).
 
 ### 4.2 Level 0 — unit tests
 
@@ -462,12 +505,15 @@ the latency histogram on real hardware are `TODO(campaign)`.
 The latency campaign reuses the kernel trace events of OBS-03: the trigger,
 the submission of the emergency write, the acknowledgement of the flush and the
 sealing. The published result is a histogram with median, 99th percentile,
-99.9th percentile, maximum, and the three worst cases explained. The PC bench
-(`host/latency/`: `measure.py`, `campaign.py`, `load_gen.py`, `multi_shock.py`)
-is still being written by its owning agent and `docs/CAMPAIGN-LATENCY.md` does
-not exist yet: **`TODO(campaign)`** for the software share
-(`backend=posix`), and not measurable at all for PERF-01..PERF-05 on the
-target without the QNX SDP.
+99.9th percentile, maximum, and the three worst cases explained. The POSIX
+bench exists and is producing partial reports
+(`host/latency/measure.py`; `make BUILD=build-mine latency LATENCY_LOAD=none`,
+`latency-all`; reports in `$(BUILD)/latency-<load>.json`, schema
+`ambre.latency.campaign/1`), but the campaign is unfinished and
+`docs/CAMPAIGN-LATENCY.md` does not exist yet: **`TODO(campaign)`** for the
+software share (`backend=posix`), and not measurable at all for PERF-01..PERF-05
+on the target without the QNX SDP. No figure from those partial runs is quoted
+in this document — see `docs/CAMPAIGN.md` §7 for why.
 
 ### 4.8 Export and verification
 
@@ -500,7 +546,7 @@ scenario, the mandatory metadata and the coherence of `file_complete`.
 
 One line per level-S requirement of the specification §5. The column "how it
 is verified" names the test or the campaign. Requirements that no test covers
-yet are marked explicitly with `TODO(week 2+)`; no result is invented.
+yet are marked explicitly with `TODO(week 5)`; no result is invented.
 
 Legend of the verification column: `test:<file>::<case>` = a named case of a
 test file; `campaign:<name>` = a campaign that produces the evidence.
@@ -509,11 +555,11 @@ test file; `campaign:<name>` = a campaign that produces the evidence.
 
 | ID | Requirement (S) | How it is verified |
 |---|---|---|
-| ACQ-01 | Frames from several producers accepted on `/dev/edr/in`, ≤ 10 ms and ≤ 4 KiB per frame | `TODO(week 2+)` — the QNX resource manager and the frame path do not exist yet; only the portable codec is covered |
-| ACQ-02 | Timestamp on reception, monotonic clock, ≤ 100 µs resolution, no absolute timestamp | **partial** — `TODO(week 2+)` for the reception path; partially covered today by `test:tests/test_trigger_py.py::test_non_monotonic_ts_no_integration` and by `test:tests/test_mcap_py.py::test_verify_rejects_an_absolute_timestamp_in_metadata` |
-| ACQ-03 | Supported rates 1 kHz / 100 Hz / 10 Hz, list fixed at build time | `TODO(week 2+)` — the signal whitelist table exists in `docs/FORMAT.md` §5, the runtime enforcement does not yet |
-| ACQ-04 | A signal outside the whitelist is rejected and counted | `TODO(week 2+)` — rejection is specified in `docs/FORMAT.md` §5 but not implemented in `fmt/` yet |
-| ACQ-06 | A capture interruption longer than three periods is marked with a `GAP` record | **partial** — `campaign:level 1` (the `GAP` record type exists in the format; the injection of a gap in the explorer is `TODO(week 2+)`) |
+| ACQ-01 | Frames from several producers accepted on `/dev/edr/in`, ≤ 10 ms and ≤ 4 KiB per frame | `test:tests/test_ipc.c::4096-byte message passes exactly`, `test:tests/test_capture.c::capture_frame_valid`, `capture_frame_too_big` (PC backend); the QNX resource manager runtime is `TODO(week 5)` — glue syntax-checked only (`make qnx-syntax`, needs the SDP) |
+| ACQ-02 | Timestamp on reception, monotonic clock, ≤ 100 µs resolution, no absolute timestamp | **partial** — `test:tests/test_port_posix.c::clock is monotonic` + `test:tests/test_capture.c::capture_quality_and_time` + `test:tests/test_mcap_py.py::test_verify_rejects_an_absolute_timestamp_in_metadata`; the ≤ 100 µs resolution on the target clock is `TODO(week 5)` |
+| ACQ-03 | Supported rates 1 kHz / 100 Hz / 10 Hz, list fixed at build time | **partial** — the fixed table is `ambre_capture_signal_period_us()` (`target/capture/edr_capture.c`), pinned by `test:tests/test_capture.c::capture_gap_detection` (signal 1 at exactly 1 kHz); a dedicated per-rate test is `TODO(week 5)` |
+| ACQ-04 | A signal outside the whitelist is rejected and counted | `test:tests/test_capture.c::capture_whitelist_forbidden` (`samples_rejected` = 1 unlisted, `samples_forbidden` = 2 of ids 90..99) |
+| ACQ-06 | A capture interruption longer than three periods is marked with a `GAP` record | `test:tests/test_capture.c::capture_gap_detection` (GAP emitted after > 3 periods; the record type is in `docs/FORMAT.md` §3) |
 | ACQ-05 | A replay producer reads a scenario file and injects it | Level S but marked "D" (demonstration) in §5.1 — `scripts/demo.sh` (the scenario generator feeds the explorer) |
 
 ### 5.2 Trigger (DEC)
@@ -533,12 +579,12 @@ test file; `campaign:<name>` = a campaign that produces the evidence.
 
 | ID | Requirement (S) | How it is verified |
 |---|---|---|
-| GEL-01 | On trigger, the emergency record (pre-crash class A) is written in one contiguous write | `campaign:level 1` (the explorer asserts the EMERG write is a single operation) + inspection of `fmt/ambre_journal.h`; a dedicated unit test is `TODO(week 2+)` |
-| GEL-02 | The emergency write is followed by the allocation-table update, then a flush of the medium cache; the event is *acquired* at the flush acknowledgement | `campaign:level 1` (acquisition boundary: `test:tests/test_explore.c::explore_acquisition_boundary`) |
-| GEL-03 | The path from trigger to "acquired" allocates nothing, page-faults nothing and waits on no lower-priority process | **partial** — inspection of `fmt/ambre_journal.h` (fixed-size state, pre-allocated staging buffers) + `campaign:latency` for the software part |
-| GEL-04 | During the event, a continuation record is written and flushed every 10 ms | `campaign:level 1` (the during-event flush cadence is part of the recorded trace) + inspection of `fmt/ambre_journal.h`; a dedicated unit test is `TODO(week 2+)` |
-| GEL-05 | At the end of the event, a sealing record carries the maximum delta-v, its instant, the deployment times and "file complete = yes" | `test:tests/test_mcap_py.py::test_emerg_cont_seal_fields` + `campaign:level 1` |
-| GEL-06 | No archive write happens while an event is open | **partial** — inspection of the process roles (`docs/ARCHITECTURE.md` §1: `edr-archive` reads only sealed segments) — a runtime test is `TODO(week 2+)` |
+| GEL-01 | On trigger, the emergency record (pre-crash class A) is written in one contiguous write | `test:tests/test_journal.c::trigger_path_is_write_commit_flush` (the EMERG record is one write, then commit, then flush) + `campaign:level 1` (the explorer asserts the EMERG write is a single operation) |
+| GEL-02 | The emergency write is followed by the allocation-table update, then a flush of the medium cache; the event is *acquired* at the flush acknowledgement | `test:tests/test_journal.c::trigger_path_is_write_commit_flush` + `campaign:level 1` (acquisition boundary: `test:tests/test_explore.c::explore_acquisition_boundary`) |
+| GEL-03 | The path from trigger to "acquired" allocates nothing, page-faults nothing and waits on no lower-priority process | **partial** — inspection of `fmt/ambre_journal.h` (fixed-size state, pre-allocated staging buffers, no allocation call in `fmt/ambre_journal_event.c`) + `campaign:latency` for the software part — `TODO(campaign)` |
+| GEL-04 | During the event, a continuation record is written and flushed every 10 ms | `test:tests/test_journal.c::continue_and_seal` (CONT records during the event) + `campaign:level 1` (the during-event flush cadence is part of the recorded trace); the 10 ms cadence *on the target clock* is `TODO(week 5)` |
+| GEL-05 | At the end of the event, a sealing record carries the maximum delta-v, its instant, the deployment times and "file complete = yes" | `test:tests/test_mcap_py.py::test_emerg_cont_seal_fields` + `test:tests/test_journal.c::continue_and_seal` + `test:tests/test_coverage_gaps_trigger.c` (lateral maximum tracked during the event) + `campaign:level 1` |
+| GEL-06 | No archive write happens while an event is open | `test:tests/test_archive_cpp.cpp::test_gel06_no_write_while_event_open`, `test_ipc_service_and_gel06` (the journal answers a NAK to EXPORT while an event is open, `target/archive/edr_archive_ipc.cpp`) + `test:tests/test_journal.c` one-event-at-a-time refusal (`refused_busy` in `ambre_journal_trigger`) |
 
 | GEL-07 and GEL-08 are level C (not in this table). GEL-07 — the class B data
 already written before the trigger, and the loss bound — is covered by
@@ -559,7 +605,7 @@ state.
 
 | ID | Requirement (S) | How it is verified |
 |---|---|---|
-| REP-01 | At start-up, recovery runs before any new capture | **partial** — inspection of `fmt/ambre_journal.h` (`ambre_journal_open` runs `ambre_recover` unless the partition was just formatted) — a runtime test on the target is `TODO(week 2+)` |
+| REP-01 | At start-up, recovery runs before any new capture | `test:tests/test_journal_svc.c::recovery_before_capture` (PC backend) + inspection of `fmt/ambre_journal_core.c` (`ambre_journal_open` runs `ambre_recover` unless the partition was just formatted); the boot sequence on the QNX target is `TODO(week 5)` |
 | REP-02 | Recovery keeps the most recent valid table copy; if none is valid, it rebuilds the table by scanning | `test:tests/test_table.c::table_read_best_highest_gen` + `test:tests/test_scan.c::scan_rebuild_table_exact_events` + `test:tests/test_explore.c::explore_table_destruction` |
 | REP-03 | Every event left open is sealed with "file complete = no" and the cause | `campaign:level 1` — invariant I7 + `test:tests/test_explore.c::explore_complete_flag_both_sides` |
 | REP-04 | Recovery gives the same result if run twice, or interrupted by a new cut then relaunched | `test:tests/test_explore.c::explore_double_recovery` + invariant I8 in `campaign:level 1` (nested variant) |
@@ -569,7 +615,7 @@ state.
 
 | ID | Requirement (S) | How it is verified |
 |---|---|---|
-| EXP-01 | `edrctl status` and `edrctl list` show the state, the events, their locking and their completeness | `TODO(week 2+)` — `edrctl` (the QNX service tool) does not exist yet; the equivalent on the PC is `build/ambre-explore --export-image` plus `python3 host/mcap/export_mcap.py --list` |
+| EXP-01 | `edrctl status` and `edrctl list` show the state, the events, their locking and their completeness | `test:tests/test_journal_svc.c::trigger_status_list_export_verify` + `test:tests/test_edrctl.c::mock_status_list_nak` (the portable `edrctl` logic against the journal service, PC backend); the QNX resource-manager runtime is `TODO(week 5)` |
 | EXP-02 | Each event is exported to one valid MCAP file: summary, index, chunk CRCs | `test:tests/test_mcap_py.py::test_mcap_structure`, `test_export_counts`, `test_message_count_matches` + `campaign:make verify` |
 | EXP-03 | The file opens in Foxglove without an extension; a screen layout is provided | `test:tests/test_mcap_py.py::test_foxglove_layout_matches_the_exported_topics` + `foxglove/ambre-layout.json`; the opening in Foxglove itself is a manual demonstration, `TODO(campaign)` |
 
@@ -580,44 +626,44 @@ measured value exists yet; every figure below is a target.
 
 | ID | Requirement (S) | How it is verified |
 |---|---|---|
-| PERF-01 | From the sample that crosses the threshold to the trigger pulse: ≤ 2 ms | `TODO(week 2+)` — the latency campaign has not been run: `campaign:latency` — `TODO(campaign)` |
-| PERF-02 | From the trigger to "acquired": ≤ 20 ms on the reference hardware | `TODO(week 2+)` — the latency campaign has not been run: `campaign:latency` — `TODO(campaign)` |
-| PERF-03 | The software part of that delay, excluding the medium, does not exceed 500 µs | `TODO(week 2+)` — the latency campaign has not been run: `campaign:latency` — `TODO(campaign)` |
-| PERF-04 | No overrun over 1 000 triggers (S), 10 000 under processor and disk load (C) | `TODO(week 2+)` — the latency campaign has not been run: `campaign:latency` — `TODO(campaign)` |
-| PERF-05 | Sending a frame costs the producer less than 50 µs at the 99th percentile | `TODO(week 2+)` — the input path does not exist yet; the campaign slot is `TODO(campaign)` |
+| PERF-01 | From the sample that crosses the threshold to the trigger pulse: ≤ 2 ms | `TODO(week 5)` — the latency campaign has not been run: `campaign:latency` — `TODO(campaign)`; needs the QNX target |
+| PERF-02 | From the trigger to "acquired": ≤ 20 ms on the reference hardware | `TODO(week 5)` — the latency campaign has not been run: `campaign:latency` — `TODO(campaign)`; needs the QNX target |
+| PERF-03 | The software part of that delay, excluding the medium, does not exceed 500 µs | `TODO(week 5)` — `campaign:latency` — `TODO(campaign)`; the PC bench (`host/latency/`) is being finished |
+| PERF-04 | No overrun over 1 000 triggers (S), 10 000 under processor and disk load (C) | `TODO(week 5)` — the latency campaign has not been run: `campaign:latency` — `TODO(campaign)`; needs the QNX target |
+| PERF-05 | Sending a frame costs the producer less than 50 µs at the 99th percentile | `TODO(week 5)` — the frame path exists and is tested for correctness (`test:tests/test_ipc.c`, `test:tests/test_capture.c`) but its cost has not been measured: `campaign:latency` — `TODO(campaign)` |
 
 ### 5.8 Robustness (ROB)
 
 | ID | Requirement (S) | How it is verified |
 |---|---|---|
 | ROB-01 | A power cut at any instant respects the invariants of §7.2 | `campaign:level 1` (every prefix of the trace, all variants) + `campaign:level 2` (QEMU cuts) |
-| ROB-02 | A crash of `edr-archive` or `edrctl` has no effect on capture nor on the freeze | `TODO(week 2+)` — requires the QNX processes; the architectural guarantee is that neither process touches the raw partition for writing (`docs/ARCHITECTURE.md` §1) |
+| ROB-02 | A crash of `edr-archive` or `edrctl` has no effect on capture nor on the freeze | **partial** — `test:tests/test_port_posix.c::transport detects a closed connection` (the peer is told, GAP instead of silent loss) + the process roles of `docs/ARCHITECTURE.md` §1 (neither process writes the raw partition); the runtime kill bench (`host/e2e/e2e_run.py`) is `TODO(campaign)` |
 | ROB-07 | A corrupted block (bit flipped) is detected and discarded, without affecting the neighbouring blocks | `test:tests/test_explore.c::explore_bitflip_detected` + `test:tests/test_block.c::block_corruption_error_codes` + `test:tests/test_mcap_py.py::test_corrupt_block_is_dropped` |
 
 ### 5.9 Security and privacy (VIE, SEC)
 
 | ID | Requirement (S) | How it is verified |
 |---|---|---|
-| VIE-01 | The system cannot record a VIN, a position, an absolute date or time, nor the driver identity; the signal whitelist imposes it | **partial** — `test:tests/test_mcap_py.py::test_verify_rejects_an_absolute_timestamp_in_metadata` + inspection of the whitelist in `docs/FORMAT.md` §5; the runtime rejection of a non-whitelisted signal is `TODO(week 2+)` |
+| VIE-01 | The system cannot record a VIN, a position, an absolute date or time, nor the driver identity; the signal whitelist imposes it | `test:tests/test_capture.c::capture_whitelist_forbidden` (signal ids 90..99 are rejected and counted, `samples_forbidden` = 2) + `test:tests/test_mcap_py.py::test_verify_rejects_an_absolute_timestamp_in_metadata` + the whitelist of `docs/FORMAT.md` §5 |
 | VIE-02 | Time is expressed relative to T0 and in ignition cycles | `test:tests/test_mcap_py.py::test_t0_is_at_sixty_seconds` + `test:tests/test_mcap_py.py::test_verify_rejects_an_absolute_timestamp_in_metadata` |
-| SEC-05 | A malformed frame is rejected and counted, without effect on the service | `TODO(week 2+)` — the input path does not exist yet; the codec rejects an invalid block at the format level (`test:tests/test_block.c::block_invalid_lengths_and_chunks`) |
+| SEC-05 | A malformed frame is rejected and counted, without effect on the service | `test:tests/test_ipc.c::reject bad magic`, `reject unknown version`, `reject body above the ceiling`, `reject null header`, `reject incoherent body_len` + `test:tests/test_capture.c::capture_overload_non_blocking` + format-level refusal `test:tests/test_block.c::block_invalid_lengths_and_chunks` |
 
 ### 5.10 Observability (OBS)
 
 | ID | Requirement (S) | How it is verified |
 |---|---|---|
-| OBS-01 | The processes write to the QNX system log (slog2) | `TODO(week 2+)` — requires the QNX processes |
-| OBS-02 | `/dev/edr/status` gives the state as text: mode, current segment, events, counters, health | `TODO(week 2+)` — the counters exist in `ambre_journal_stats_t` (`fmt/ambre_journal.h`) but the resource manager interface does not exist yet |
-| OBS-03 | User events are inserted into the kernel trace at the trigger, at the submission of the write, at the flush acknowledgement and at the sealing | `TODO(week 2+)` — the equivalent milestones exist in the portable core as the journal marks `AMBRE_MARK_EMERG_WRITTEN`, `AMBRE_MARK_ACQUIRED`, `AMBRE_MARK_SEALED` (`fmt/ambre_journal.h`), but the kernel trace insertion is on the target |
+| OBS-01 | The processes write to the QNX system log (slog2) | **partial** — `target/port/ambre_port_qnx.c` implements the slog2 sink and `make qnx-syntax` proves it compiles (5/5); the PC backend logs through the same `ambre_port_log()` API; runtime on the target is `TODO(week 5)` |
+| OBS-02 | `/dev/edr/status` gives the state as text: mode, current segment, events, counters, health | `test:tests/test_journal_svc.c::trigger_status_list_export_verify` + `test:tests/test_edrctl.c::mock_status_list_nak` (PC backend, journal service); the QNX resource-manager exposure under `/dev/edr/status` is `TODO(week 5)` |
+| OBS-03 | User events are inserted into the kernel trace at the trigger, at the submission of the write, at the flush acknowledgement and at the sealing | **partial** — the milestones exist in the portable core as the journal marks `AMBRE_MARK_EMERG_WRITTEN`, `AMBRE_MARK_ACQUIRED`, `AMBRE_MARK_SEALED` (`fmt/ambre_journal.h`), and `ambre_port_trace()` in `target/port/ambre_port_qnx.c` maps them to `trace_logi()` user events (syntax-checked only); the trace itself needs the target: `TODO(week 5)` |
 
 ### 5.11 Use of QNX-specific technologies (QNX)
 
 | ID | Requirement (S) | How it is verified |
 |---|---|---|
-| QNX-01 | The journal is a resource manager; its interface is reduced to `open`, `write`, `read` and `devctl` | `TODO(week 2+)` — `target/` is empty; the portable core exposes exactly the four operations through the disk vtable `read` / `write` / `flush` (+ optional `mark`) |
-| QNX-02 | A kernel trace shows that the disk driver handles the emergency write at the journal's priority | `TODO(week 2+)` — requires the QNX image; this is the demonstration item of the video (§8, 2:25–2:45) |
-| QNX-03 | Timeouts and inter-process notifications use pulses | `TODO(week 2+)` — requires the QNX processes |
-| QNX-04 | The critical processes lock their memory at start-up | `TODO(week 2+)` — requires the QNX processes; on the PC the equivalent property is checked by the fixed-size structures of `fmt/ambre_journal.h` |
+| QNX-01 | The journal is a resource manager; its interface is reduced to `open`, `write`, `read` and `devctl` | **partial** — `target/journal/edr_journal_qnx.c` implements exactly that interface and **compiles against the QNX stubs** (`make qnx-syntax`, 5/5 OK); the portable service logic behind it is tested on PC (`test:tests/test_journal_svc.c`); executing it under `procnto` is `TODO(week 5)` — needs the SDP |
+| QNX-02 | A kernel trace shows that the disk driver handles the emergency write at the journal's priority | `TODO(week 5)` — requires a booted QNX image and `tracelogger`; this is the demonstration item of the video (§8, 2:25–2:45) |
+| QNX-03 | Timeouts and inter-process notifications use pulses | **partial** — the pulse/timeout transport is written in `target/port/ambre_port_ipc_qnx.c` and syntax-checked; the runtime behaviour on the target is `TODO(week 5)` |
+| QNX-04 | The critical processes lock their memory at start-up | **partial** — `ambre_port_lock_memory()` in `target/port/ambre_port_qnx.c` (syntax-checked only); the PC equivalent property is the fixed-size state of `fmt/ambre_journal.h`; the target run is `TODO(week 5)` |
 
 ### 5.12 Summary of the coverage
 
@@ -626,36 +672,37 @@ Three columns, counted line by line from the tables above:
 - **Covered**: a named test case or a named campaign proves the requirement.
 - **Partial**: the requirement is only inspected, or only part of it is proved
   (the cell says which part).
-- **TODO**: the line is marked `TODO(week 2+)`; nothing is claimed yet.
+- **TODO**: the line is marked `TODO(week 5)`; nothing is claimed yet.
 
-| Family | Level-S requirements | Covered | Partial | TODO(week 2+) |
+| Family | Level-S requirements | Covered | Partial | TODO(week 5) |
 |---|---|---|---|---|
-| ACQ | 6 | 1 | 2 | 3 |
+| ACQ | 6 | 3 | 3 | 0 |
 | DEC | 8 | 8 | 0 | 0 |
-| GEL | 6 | 2 | 2 | 2 |
+| GEL | 6 | 4 | 2 | 0 |
 | STO | 6 | 5 | 1 | 0 |
-| REP | 5 | 4 | 1 | 0 |
-| EXP | 3 | 2 | 0 | 1 |
+| REP | 5 | 5 | 0 | 0 |
+| EXP | 3 | 3 | 0 | 0 |
 | PERF | 5 | 0 | 0 | 5 |
-| ROB | 3 | 2 | 0 | 1 |
-| VIE / SEC | 3 | 1 | 1 | 1 |
-| OBS | 3 | 0 | 0 | 3 |
-| QNX | 4 | 0 | 0 | 4 |
-| **Total** | **52** | **25** | **7** | **20** |
+| ROB | 3 | 2 | 1 | 0 |
+| VIE / SEC | 3 | 3 | 0 | 0 |
+| OBS | 3 | 1 | 2 | 0 |
+| QNX | 4 | 0 | 4 | 0 |
+| **Total** | **52** | **34** | **13** | **5** |
 
 Note on the counts: the "Covered" column counts a requirement only when a
 **named test case or a named campaign** proves it. A requirement that is only
 **inspected** — the raw partition with no file system, the fixed-size journal
 state, the process roles — is counted as "Partial", because inspection is
-weaker than a test. When a line carries both `**partial**` and
-`TODO(week 2+)`, it is counted in the "Partial" column, and the TODO marker
+weaker than a test. When a line carries both `**partial**` and a
+`TODO(...)` marker, it is counted in the "Partial" column, and the marker
 says which part is still missing. GEL-07 and GEL-08 are level C and are not
 counted here. The PERF family is entirely TODO because the latency campaign
-has not been run: a target is not a verification. The gap is otherwise
-concentrated in the requirements that need the QNX target (`target/` is still
-empty): the resource manager, the service interfaces, the security policy, the
-kernel trace. They are scheduled in weeks 2 and 3 of the plan (specification
-§10).
+has not been run: a target is not a verification. The remaining gap is
+concentrated in what the QNX target alone can show — kernel enforcement of the
+security policy, the resource manager under `procnto`, the kernel trace, the
+memory lock and the latencies: those lines are "Partial" because the glue is
+written and **compiles against the QNX stubs** (`make qnx-syntax`, 5/5), never
+because it has executed. Nothing in the repository claims otherwise.
 
 ---
 

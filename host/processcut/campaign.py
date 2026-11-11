@@ -46,8 +46,8 @@ for sub in (("host", "e2e"), ("host", "powercut")):
 
 import e2e_cycle                                       # noqa: E402
 import e2e_env                                         # noqa: E402
-from campaign_report import (BACKEND, CUT_KIND, HONESTY, exit_code,  # noqa: E402
-                             print_summary, summarise, write_reports)
+from campaign_report import (exit_code, print_summary, summarise,  # noqa: E402
+                             write_reports)
 
 NAMED_WINDOWS = ("pre", "acquired", "sealed", "recovery")
 RANDOM_SPAN_MS = (-500, 800)
@@ -148,10 +148,13 @@ def record_of(result: dict, item: dict, cycle: int) -> dict:
             "freeze_us": timeline.get("freeze_us"),
             "cycle_s": result.get("cycle_s"),
             "replay_rc": result.get("replay_rc"),
+            "edrctl_used": (result.get("edrctl") or {}).get("used"),
             "recovery_cut": result.get("recovery_cut"),
             "fidelity": {key: checks.get("fidelity", {}).get(key)
-                         for key in ("ok", "matched", "total",
-                                     "matched_exact_ms", "outside_scenario")},
+                         for key in ("ok", "ok_strict", "matched", "total",
+                                     "matched_exact_ms", "outside_scenario",
+                                     "worst_row_slop_ms", "skew_ms",
+                                     "problems")},
             "official": checks.get("official", {})}
 
 
@@ -166,3 +169,78 @@ def run_one(args, item, cycle):
     record = record_of(result, item, cycle)
     record["wall_s"] = round(time.monotonic() - started, 3)
     return record
+
+
+def prepare_paths(args):
+    """Resolve the report, state and violation paths; start clean unless
+    --resume was asked."""
+    report = args.report or os.path.join(args.bins, "processcut-report.json")
+    args.report = os.path.abspath(report)
+    parent = os.path.dirname(args.report)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
+    args.state = os.path.abspath(args.state or (args.report + ".state.jsonl"))
+    args.violation_dir = os.path.abspath(
+        args.violation_dir or (args.report + "-violations"))
+    if not args.resume:
+        with open(args.state, "w"):
+            pass
+
+
+def worker(args, item, cycle, state, lock, counter):
+    """One cycle, then its record in the state file and one progress line."""
+    record = run_one(args, item, cycle)
+    state.append(record)
+    with lock:
+        counter[0] += 1
+        if not args.quiet:
+            print("[%3d/%3d] cycle %3d %-9s window=%-18s verdict=%-17s "
+                  "events=%d" % (counter[0], counter[1], cycle,
+                                 str(record.get("kind"))[:9],
+                                 record.get("window"), record.get("verdict"),
+                                 record.get("events", 0)), flush=True)
+    return record
+
+
+def run_plan(args, plan, state):
+    """Execute every pending cycle, serially or with a pool of workers."""
+    todo = [(index, item) for index, item in enumerate(plan)
+            if not state.has(index)]
+    lock = threading.Lock()
+    counter = [0, len(todo)]
+    started = time.monotonic()
+    if args.jobs <= 1:
+        for index, item in todo:
+            worker(args, item, index, state, lock, counter)
+    else:
+        with ThreadPoolExecutor(max_workers=args.jobs) as pool:
+            futures = [pool.submit(worker, args, item, index, state, lock,
+                                   counter) for index, item in todo]
+            for future in futures:
+                future.result()
+    return time.monotonic() - started
+
+
+def main(argv=None) -> int:
+    args = parse_args(argv)
+    prepare_paths(args)
+    if not os.path.isfile(args.scenario):
+        raise SystemExit("error: scenario not found: %s" % args.scenario)
+    try:
+        e2e_env.resolve_binaries(args.bins)
+    except e2e_env.BenchError as exc:
+        raise SystemExit("error: %s" % exc)
+    crash_ms = int(e2e_cycle.scenario_header(args.scenario)
+                   .get("crash_at_ms", 0))
+    plan = build_plan(args, crash_ms)
+    state = StateStore(args.state)
+    elapsed = run_plan(args, plan, state)
+    records = state.records()
+    summary = summarise(records)
+    write_reports(args, records, summary, plan)
+    print_summary(args, records, summary, elapsed)
+    return exit_code(summary)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

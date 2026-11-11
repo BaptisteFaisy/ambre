@@ -22,10 +22,13 @@ concurrency:
 
 jobs:
   explore-full:
-    name: full exploration (1 000 000 states)
+    name: exhaustive exploration (every reachable state)
     runs-on: ubuntu-latest
-    # 60 min : full 1M-state exploration + nested variants, hors PR (règle CI 5 min).
-    timeout-minutes: 60
+    # 30 min : `--states 1000000` is an upper bound; the reachable state space
+    # of the reference 30 s scenario measures 64 591 states (334 s exploration,
+    # 5 min 37 s wall including build, dev machine 2026-11-11). 30 min keeps a
+    # >= 5x margin for slower runners, hors PR (règle CI 5 min).
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
         with:
@@ -48,7 +51,9 @@ jobs:
           key: ccache-nightly-${{ hashFiles('fmt/**', 'host/**', 'tests/**', 'Makefile') }}
           restore-keys: ccache-nightly-
 
-      # make explore-full = make all + scenario + 1 000 000 states (--nested).
+      # make explore-full = make all + scenario + exhaustive exploration:
+      # --states 1000000 is a cap above the reachable space (64 591 states
+      # measured on the reference scenario, nested variant included).
       - name: make explore-full
         run: make explore-full
 
@@ -64,8 +69,11 @@ jobs:
   crosscheck:
     name: C vs Python crosscheck (10 000 scenarios)
     runs-on: ubuntu-latest
-    # 60 min : 10 000 scenarios, vecteurs + binaire C + jumeau Python, hors PR (règle CI 5 min).
-    timeout-minutes: 60
+    # 15 min : mesuré 2 min 32 s sur la machine de dev (2026-11-11) —
+    # 10 000 scénarios, 2 744 840 lignes de décisions comparées, fichiers
+    # .dec identiques octet pour octet. Marge >= 5x pour runners plus lents,
+    # hors PR (règle CI 5 min).
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
         with:

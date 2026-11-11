@@ -4,6 +4,14 @@ Ambre is an Event Data Recorder (EDR) for QNX 8.0: an automotive "black box"
 that must write to the medium **at the worst possible moment** — the instant a
 crash is detected.
 
+> **Implementation status (2026-11-11).** This document describes the *target*
+> runtime architecture. The QNX side is **not implemented**: `target/` and
+> `image/` are empty, no QNX SDP is installed, and no process below exists yet.
+> What runs today is the portable core (`fmt/`), the PC proof tools (`host/`)
+> and the test suites — everything that does not need the target. Sections 1 to
+> 3 are design; sections 4 to 7 describe code that exists and is measured in
+> `docs/VALIDATION.md`.
+
 This document describes the runtime architecture, the critical path that turns a
 detected crash into an *acquired* event, the two-stage storage model, and the
 guarantees that survive a power cut.
@@ -292,15 +300,24 @@ budget. It is quantified by the latency campaign, `TODO(campaign)`.
 
 ## 7. The portable core
 
-The same C11 sources build for the PC tools and for QNX 8.0:
+The same C11 sources build for the PC tools and, once written, for QNX 8.0.
+File names below are the real ones in the tree (2026-11-11):
 
 | Layer | Files | Role |
 |---|---|---|
-| `fmt/` | `ambre_crc32c.c`, `ambre_fmt_block.c`, `ambre_fmt_table.c`, `ambre_fmt_scan.c`, `ambre_journal.c`, `ambre_fmt_recovery.c`, `ambre_trigger.c` | block/table codec, scan, journal engine, recovery, trigger arithmetic |
-| `host/simdisk/` | `ambre_simdisk.c` | simulated disk that logs every write and flush in order |
-| `host/explore/` | `ambre_explore*.c`, `ambre_invariants.c` | exhaustive exploration of cut states, invariant checker I1..I8 |
-| `host/mcap/`, `host/verify/` | `export_mcap.py`, `edr_verify.py` | MCAP export and independent verification |
-| `target/` | QNX processes | `edr-capture`, `edr-journal`, `edr-archive`, `edrctl`, `edr-replay` |
+| `fmt/` | `ambre_crc32c.c` | CRC-32C (Castagnoli), incremental and one-shot |
+| | `ambre_fmt_block.c`, `ambre_fmt_record.c` | 512-byte block codec; record-level access (a record = consecutive blocks sharing seq/session/chunk count) |
+| | `ambre_fmt_table.c` | allocation table: two copies, generation counter, commit/read-best, victim policy |
+| | `ambre_fmt_scan.c` | segment scan: last valid block, EMERG detection, table rebuild |
+| | `ambre_fmt_recovery.c` | power-cut recovery (FORMAT.md §10) |
+| | `ambre_journal_core.c`, `ambre_journal_event.c` | journal engine: lifecycle, capture, flush cadence, segment rotation; and the event path: trigger → EMERG write → table commit → flush (acquired), continuation, sealing, read back |
+| | `ambre_trigger.c`, `ambre_trigger_window.c` | UN R160 trigger arithmetic (contract A1..A9) and its ring-buffer / monotonic min-max deque helpers |
+| `host/simdisk/` | `ambre_simdisk.c` | simulated disk that logs every write, flush and mark in order; cut variants (`ambre_cut_variant_t`: torn, dropped unflushed writes, bit flip, table wipe) |
+| `host/explore/` | `ambre_explore.c`, `ambre_explore_gen.c`, `ambre_explore_run.c`, `ambre_explore_worker.c`, `ambre_invariants.c`, `ambre_memdisk.c`, `ambre_scenario.c`, `main.c` | exhaustive exploration of cut states (parallel workers), invariant checker I1..I8, in-memory disk with dirty tracking, scenario loader |
+| `host/mcap/` | `export_mcap.py`, `ambre_journal_reader.py`, `ambre_mcap_writer.py` | journal image → MCAP export |
+| `host/verify/` | `edr_verify.py`, `ambre_trigger.py`, `ambre_trigger_cli.py`, `gen_vectors.py`, `trigger_crosscheck.py` | independent verification of the export; independent Python trigger twin and DEC-12 cross-check |
+| `host/powercut/` | `powercut_campaign.py`, `qemu_vm.py`, `vm_util.py`, `e1_flush_probe.py`, `e3_cycle_timing.py`, `faulty_block_server.py` | QEMU power-cut orchestrator (level 2) — exists and passes its dry-run tests; no real cut run yet (no QNX image) |
+| `target/` | **empty** | QNX processes (`edr-capture`, `edr-journal`, `edr-archive`, `edrctl`, `edr-replay`) — not implemented |
 
 The disk is reached through a small vtable (`ambre_disk_t`: `read`, `write`,
 `flush`, optional `mark`). On the PC it is the simulated disk; on QNX it is the

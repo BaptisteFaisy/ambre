@@ -11,12 +11,11 @@ moment, and still comes back with the data it had already promised to keep.
 every disk state a power cut can leave behind. The claim "no data is ever lost"
 is turned into a finite set of states that a program enumerates and checks.
 
-**Time:** the six steps below are the six pieces of `fmt/` and `host/`, in the
-order you need them. Each step names the file you write and the test that
-proves it.**Where things are:** the binary format contract is `docs/FORMAT.md`, the
-architecture `docs/ARCHITECTURE.md`, the validation plan `docs/VALIDATION.md`;
-the portable core is `fmt/`, the simulated disk `host/simdisk/`, the explorer
-`host/explore/`, the tests `tests/`.
+**Time:** the six steps below are the six pieces of `fmt/` and `host/`, in the order you need
+them. Each step names the file you write and the test that proves it. **Where things are:**
+the binary format contract is `docs/FORMAT.md`, the architecture `docs/ARCHITECTURE.md`, the
+validation plan `docs/VALIDATION.md`; the portable core is `fmt/`, the simulated disk
+`host/simdisk/`, the explorer `host/explore/`, the tests `tests/`.
 
 ---
 
@@ -194,9 +193,9 @@ make all && ./build/test_table
 
 ## Step 3 — The continuous journal
 
-**You write:** `fmt/ambre_journal.c` (engine), `fmt/ambre_fmt_scan.c` (scan)
+**You write:** `fmt/ambre_journal_core.c` + `fmt/ambre_journal_event.c` (engine), `fmt/ambre_fmt_scan.c`, `fmt/ambre_fmt_record.c`
 **You read:** `fmt/ambre_journal.h` (the engine's contract)
-**It proves:** `tests/test_simdisk.c`, `tests/test_scan.c`
+**It proves:** `tests/test_simdisk.c`, `tests/test_scan.c`, `tests/test_journal.c`
 
 ### 3.1 The simulated disk comes first
 
@@ -208,14 +207,14 @@ real medium — `read`, `write`, `flush`, and an optional `mark` — but it keep
 a **log of every operation in order**. That log is the ground truth: it tells
 you, for any cut point, exactly what was durable. On top of it:
 
-- `snapshot(prefix)` — the image of the disk after the first `prefix`
-  operations. This is "the disk as it looked when the power died".
-- `snapshot_torn_write()` — the same, but the last write is torn at a sector
-  boundary.
-- `snapshot_volatile_cache()` — the same, but some of the writes that were
-  never flushed are dropped. This models a volatile cache in front of the
-  medium.
-- `snapshot_corruption_tables()` — both table copies are destroyed.
+- `ambre_simdisk_snapshot(sd, prefix, var, dst, dst_size)` — image of the disk after the first
+  `prefix` operations, with an optional cut variant (`ambre_cut_variant_t`, may be NULL):
+  `torn_last_write`+`torn_bytes` (last write torn at a sector boundary), `drop_unflushed`+
+  `keep_mask` (a volatile cache losing unflushed writes), `corrupt_bit`+`corrupt_off`+
+  `corrupt_bit_index` (one flipped bit, ROB-07), `wipe_table_a`/`wipe_both_tables` (forcing
+  the scan-rebuild path). This is "the disk as it looked when the power died".
+- `ambre_simdisk_apply_prefix(sd, prefix)` — same, in place: the explorer's fast path (one
+  snapshot per prefix, then cheap variants).
 
 The `mark` operation is the journal's way of saying "this milestone is
 reached": `AMBRE_MARK_EMERG_WRITTEN`, `AMBRE_MARK_ACQUIRED`,
@@ -261,9 +260,8 @@ make all && ./build/test_simdisk && ./build/test_scan
 
 ## Step 4 — The critical path of the freeze
 
-**You write:** the trigger path of `fmt/ambre_journal.c`
-**You read:** `fmt/ambre_journal.h` (the durability sequence),
-`docs/ARCHITECTURE.md` §2
+**You write:** the trigger path of `fmt/ambre_journal_event.c` (arithmetic in `fmt/ambre_trigger.c` + `fmt/ambre_trigger_window.c`)
+**You read:** `fmt/ambre_journal.h` (the durability sequence), `docs/ARCHITECTURE.md` §2
 **It proves:** `tests/test_explore.c::explore_acquisition_boundary`,
 invariant I2 and I5 of the exploration, and the latency campaign
 (`TODO(campaign)`)
@@ -403,9 +401,7 @@ make all && ./build/test_explore
 
 ## Step 6 — Exhaustive exploration of the cuts
 
-**You write:** `host/explore/ambre_explore.c`, `ambre_explore_gen.c`,
-`ambre_explore_run.c`, `ambre_explore_worker.c`, `ambre_invariants.c`,
-`host/explore/main.c`
+**You write:** `host/explore/`: `ambre_explore.c`, `ambre_explore_gen.c`, `ambre_explore_run.c`, `ambre_explore_worker.c`, `ambre_invariants.c`, `ambre_memdisk.c`, `ambre_scenario.c`, `main.c`
 **You read:** `docs/VALIDATION.md` §2 (the eight invariants)
 **It proves:** the whole thing. This is the proof machine.
 
@@ -459,7 +455,7 @@ reproduces it is kept and becomes a non-regression test.
 ```sh
 make scenario     # build/scenario.txt, seed 1234
 make explore      # 10 000 states, all variants
-make explore-full # 1 000 000 states, nested cuts included
+make explore-full # every reachable state (64 591 measured), nested included
 
 # or directly:
 build/ambre-explore --scenario build/scenario.txt \
@@ -470,9 +466,13 @@ build/ambre-explore --scenario build/scenario.txt \
 The explorer prints the number of states explored, the rate and the first
 violation, and returns 0 only when no invariant was violated. The JSON report
 carries `states_explored`, `violations`, `states_by_variant` and
-`violations_by_invariant`. A 30-second scenario produces about 2 600 writes;
-with the variants, the exploration covers of the order of 10 000 states at the
-socle level and one million at the complet level, in minutes.
+`violations_by_invariant`. Measured 2026-11-11 on the reference 30-second
+scenario: the trace yields **5 803 prefix states**; with variants and nested
+replay the reachable space is **64 591 states** (prefix 5 803, torn 14 336,
+cache 21 240, bitflip 5 803, table 11 606, nested 5 803) — **0 violations**,
+334 s at 193 states/s with `--jobs 10`; `make explore` (10 000 states) takes
+29 s. `make explore-full`'s `--states 1000000` is an upper bound the reachable
+space never reaches: the guarantee is enumerating *every* state, not a round number.
 
 ### 6.5 Where it stops, and where it continues
 

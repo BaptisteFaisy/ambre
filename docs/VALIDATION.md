@@ -10,10 +10,11 @@ requirement of §5 to the test that covers it.
 Source of truth for the requirements: `docs/cahier-des-charges.md` §5 and §7.
 Binary contract: `docs/FORMAT.md`.
 
-**No measured figure appears in this document.** Every campaign result slot is
-marked `TODO(campaign)` until the campaign has actually been run and its
-result committed. Nothing here may be read as a claim that a measurement
-exists.
+**Every measured figure in this document comes out of a command that was
+actually run**, quoted next to it, on 2026-11-11 on the development machine
+(x86-64, 12 cores, gcc 13.3.0, Python 3.12.3). Slots that have not been
+measured remain marked `TODO(campaign)` — nothing here may be read as a claim
+that a measurement exists where none was taken.
 
 ---
 
@@ -35,12 +36,21 @@ exhaustive exploration runs the very same code that will run on the target.
 All C tests live in `tests/`, use the harness `tests/ambre_test.h`, and return
 the number of failed checks as their exit code (0 = green).
 
+**Measured result (2026-11-11, `make BUILD=build-ci test`, 9.7 s): 9 suites,
+8 070 checks, 0 failures** — crc32c 85, block 118, table 44, scan 68,
+recovery 124, trigger 33, simdisk 3 345, journal 4 195, explore 58.
+Python suites (same day): `tests/test_trigger_py.py` 28 tests OK (7.1 s),
+`tests/test_mcap_py.py` 24 tests OK (2 skipped, 0.4 s),
+`tests/test_powercut_py.py` 18 tests OK (2.9 s).
+
 | Test binary | Covers |
 |---|---|
 | `tests/test_crc32c.c` | CRC-32C check value, empty buffer, incremental vs one-shot, single bit flip |
 | `tests/test_block.c` | pack/unpack round trip, corruption error codes, invalid lengths and chunks, multi-block reassembly and disk I/O, offset ↔ (segment, block) round trip |
 | `tests/test_table.c` | table init and validate, read-best picks the highest generation, commit alternates and survives a corrupt copy, victim selection policy |
 | `tests/test_scan.c` | valid chain and EMERG detection, scan stops on CRC / seq / session mismatch, table rebuild yields exactly the injected events |
+| `tests/test_journal.c` | format and open, capture and flush cadence, event-only mode, the trigger path is write → commit → flush, acquired event reads back identical, continue and seal, segment rotation and recycle, a locked event is never recycled, out-of-memory is refused, stats coherence |
+| `tests/test_recovery.c` | empty partition, acquired event survives, sealed event keeps its complete flag, EMERG found without a table entry, torn EMERG dropped, both tables destroyed, bit flip discards one block, recovery is idempotent, noise partition terminates, locked event kept |
 | `tests/test_simdisk.c` | disk creation, write/read round trip, operation-log exactness, marks and last flush, prefix application and idempotency, torn write snapshot, volatile-cache snapshot, table corruption snapshot, overlapping writes, bounds and overflow, image restore, read logging gate, payload pool |
 | `tests/test_trigger.c` | the DEC-08 boundary cases, lateral axis, DEC-04 locking with and without front restraint, DEC-03 external restraint, DEC-10 VRU, DEC-11 off-profile, DEC-05 T0, DEC-06 end of event, DEC-09 crash grouping, DEC-13 invalid sample, fixed memory size, 200 k samples without overflow, determinism |
 | `tests/test_explore.c` | nominal prefixes, no crash → no event, counter consistency, acquisition boundary, complete-flag on both sides, double recovery, bit-flip detection, table destruction |
@@ -67,7 +77,94 @@ Ground truth is never taken from the recovered data: the checker compares
 against the injected samples and the byte-exact injected class A snapshot
 (`ambre_truth_t`), so a recovery that "invents" state is caught.
 
+**Measured result (2026-11-11).** Command:
+
+```sh
+make BUILD=build-ci scenario   # 30 s scenario, seed 1234, crash at 25 000 ms
+./build-ci/ambre-explore --scenario build-ci/scenario.txt \
+  --jobs 10 --variants all --nested --report build-ci/explore-exhaustive.json
+```
+
+(same state space as `make explore-full`, whose `--states 1000000` is an upper
+bound that the reachable space never reaches). Result: **64 591 states
+explored, 64 591 recoveries run, 46 390 event acquisitions observed, 0 phantom
+events, 0 violations of I1..I8**, in 334.3 s (193 states/s; wall 5 min 37 s including build, `make BUILD=build-ci explore-full`). Distribution by
+variant: prefix 5 803, torn 14 336, cache 21 240, bitflip 5 803, table 11 606,
+nested 5 803. The socle threshold (§7.7: 10 000 states) is exceeded ×6.5; the
+exploration is *exhaustive* — every state reachable from the operation trace,
+not a sample.
+
+#### Variant semantics, and why two expectations are relaxed
+
+The explorer materialises each state **from the operation trace**: the simdisk
+logs every write, flush and mark in order, and `ambre_simdisk_snapshot()`
+replays the first `prefix` operations into a fresh image, then applies the
+variant (`ambre_cut_variant_t`). What each variant means, and what is demanded
+of recovery in each case (`host/explore/ambre_invariants.c`):
+
+- **prefix** — the plain cut after operation *k*. Full battery I1..I8.
+- **torn** — the last write is truncated at a sector boundary. The torn record
+  must be detected and dropped; full battery (a torn record was never
+  acknowledged, so no acquired data may depend on it).
+- **cache** — a subset of the *not-yet-flushed* writes is dropped, modelling a
+  volatile disk cache losing power. Relaxed expectation on **I7**: a SEAL
+  record that was *written* but *not flushed* may legitimately disappear, so
+  `file_complete = 0` is a correct outcome for that event even though the seal
+  write precedes the cut (`check_i7`: when the seal is written but not flushed,
+  both outcomes are accepted). Everything durable — everything flushed — is
+  still demanded in full: I1..I6 and I8 apply without relaxation, because the
+  flush acknowledgement is exactly the durability promise (GEL-02).
+- **bitflip** — one bit is flipped in the image after the cut. This is a media
+  error, not a power cut: the journal has **no redundancy** to repair the
+  record it hit. What is demanded is detection and isolation only — recovery
+  terminates (I1), never surfaces an event that was not triggered (I3), never
+  returns the corrupted block as valid data (ROB-07), and stays idempotent
+  (I8). When the flip lands inside an acquired event or its seal, the
+  data-survival invariants **I2, I4, I5, I6 cannot hold by design and are not
+  applicable to this state** (`media_fault` gate in
+  `ambre_check_invariants`). I7 keeps its relaxed written-but-not-flushed
+  semantics. Expecting bit-error correction here would be expecting a code the
+  format does not claim to implement.
+- **table** — one or both allocation-table copies are wiped. Recovery must
+  rebuild the table by scanning (REP-02); full battery.
+- **nested** — the exploration is replayed on the *recovery's own trace*: a
+  cut during recovery, then a new recovery (I8). Full battery.
+
+One further relaxation is variant-independent and stated here for exactness:
+**I5** (recency of the last restored sample) is only testable when the
+reference DATA block — the newest one written before the cut — survived the
+cut. If the cut itself destroyed that block (torn, dropped cache line, flipped
+bit), recency is untestable on that state and `check_i4_i5` returns without
+flagging; the recovery's behaviour is still covered by I2/I3/I4/I8.
+
+#### Two explorer bugs found by the exploration itself
+
+The exhaustive campaign is also a test of the explorer. Two bugs were found
+and fixed thanks to it, and their non-regression cases live in
+`tests/test_explore.c`:
+
+1. **Working image not resynchronised with new prefix writes.** The explorer
+   keeps a working image and applies prefixes incrementally; when the prefix
+   grew, writes appended since the previous state were not resynchronised into
+   the working image, so some states were checked against a stale disk. Fix:
+   resync the working image from the snapshot of the new prefix before
+   applying cheap variants.
+2. **I7 ground truth keyed on the durability mark instead of the SEAL record
+   write.** The checker compared `file_complete` against `MARK_SEALED` (which
+   is logged *after* the flush) rather than against the SEAL record *write*
+   operation; a cut between the write and the flush was expected to give
+   `file_complete = 1` while the record could legitimately still be in the
+   volatile cache. Fix: ground truth now distinguishes `sealed_op` (record
+   written) from `sealed_flush_op` (durability mark), which is also what makes
+   the relaxed cache semantics above precise.
+
 ### Level 2 — real cuts under QEMU
+
+**Status (2026-11-11): 0 real QEMU cut run — not started.** The orchestrator
+and its harnesses exist in `host/powercut/` and their logic is tested
+(18 tests, dry-run backend, `python3 tests/test_powercut_py.py`), but there is
+no QNX SDP and no QNX image on the machine, so no virtual machine has been cut
+yet. The socle threshold (200 cuts) is `TODO(campaign)`.
 
 The orchestrator (`host/powercut/`) starts QEMU, runs the scenario, kills the
 QEMU process at a chosen instant, restarts it, exports the events and compares
@@ -131,19 +228,25 @@ From the specification §7.7. "Socle" = level S, "Complet" = level C,
 | Real electrical cuts | — | — | 500 |
 | **Invariant violations tolerated** | **0** | **0** | **0** |
 
-Current status of each threshold:
+Current status of each threshold (measured 2026-11-11 where a figure appears;
+`TODO(campaign)` elsewhere — nothing is invented):
 
 | Threshold | Result | Where |
 |---|---|---|
-| 10 000 cut states | `TODO(campaign)` | `build/explore.json` |
-| 1 000 000 cut states, nested | `TODO(campaign)` | `build/explore-full.json` |
-| 200 QEMU cuts | `TODO(campaign)` | campaign report JSON |
-| 2 000 QEMU cuts, swept | `TODO(campaign)` | campaign report JSON |
-| 10 000 triggers measured | `TODO(campaign)` | latency report |
-| 500 forced process stops | `TODO(campaign)` | fault-injection report |
-| 5 000 forced process stops | `TODO(campaign)` | fault-injection report |
-| 500 real electrical cuts | `TODO(campaign)` | hardware report |
-| Invariant violations | `TODO(campaign)` (target: 0) | `violations_by_invariant` in the report JSON |
+| 10 000 cut states | **reached** — 10 000 states, 0 violations, 29 s (`make BUILD=build-ci explore`) | `build/explore.json` |
+| 1 000 000 cut states, nested | **exhaustive instead** — 64 591 states = *every reachable state* of the reference 30 s scenario, nested included, 0 violations, 334.3 s. The 1 000 000 figure is an upper bound the reachable space never reaches; exhaustiveness, not the round number, is the guarantee (`make explore-full`) | `build/explore-full.json` |
+| 200 QEMU cuts | **0/200 — not started**: no QNX SDP or QNX image on the machine | campaign report JSON (does not exist yet) |
+| 2 000 QEMU cuts, swept | **not started** (same reason) | campaign report JSON |
+| 10 000 triggers measured | **not started** — needs the QNX target | latency report |
+| 500 forced process stops | **not started** — needs the QNX target | fault-injection report |
+| 5 000 forced process stops | **not started** — needs the QNX target | fault-injection report |
+| 500 real electrical cuts | **not started** — no Raspberry Pi 5 bench | hardware report |
+| Invariant violations | **0** over 64 591 explored states (I1..I8 each 0) | `violations_by_invariant` in the report JSON |
+
+Cross-check DEC-12, measured the same day (`make BUILD=build-ci crosscheck`,
+2 min 32 s): 10 000 random scenarios, **2 744 840 decision lines**, the C
+trigger and the independent Python twin produce **byte-identical** `.dec`
+files, 0 divergences.
 
 The latency figures of PERF-01..PERF-05 follow the same rule: the target
 (20 ms from trigger to acquired, 2 ms from the threshold-crossing sample,
@@ -162,14 +265,18 @@ Makefile.
 
 ```sh
 ./scripts/verify-all.sh          # everything that must be green
-./scripts/verify-all.sh --quick  # skips the 1 000 000-state exploration
+./scripts/verify-all.sh --quick  # skips the exhaustive exploration and the
+                                 # 10 000-scenario trigger cross-check
+AMBRE_BUILD_DIR=build-mine ./scripts/verify-all.sh   # isolated build tree
 ```
 
 `scripts/verify-all.sh` runs, in order: `make sizecheck`, `make all`,
 `make test`, the Python test suites, the scenario generator, the 10 000-state
-exploration, the trigger cross-check, the 1 000 000-state exploration, and
-`make mcap && make verify`. It prints a summary and exits 0 only when every
-step is green.
+exploration and the MCAP round-trip (`make mcap && make verify`); without
+`--quick` it also runs the trigger cross-check and the exhaustive exploration
+(`make explore-full`). It prints a summary and exits 0 only when every step is
+green — a failing step is listed `FAIL`, never hidden. Measured 2026-11-11:
+`--quick` reports **7/7 steps green** with `AMBRE_BUILD_DIR=build-docs`.
 
 ### 4.2 Level 0 — unit tests
 
@@ -200,7 +307,10 @@ Each binary returns the number of failed checks: 0 means green.
 ```sh
 make scenario                  # generates build/scenario.txt (seed 1234)
 make explore                   # 10 000 states, all variants
-make explore-full              # 1 000 000 states, nested cuts included
+make explore-full              # every reachable state, nested cuts included
+                               # (--states 1000000 is an upper bound that the
+                               # reachable space never reaches: 64 591 states
+                               # measured 2026-11-11 on the reference scenario)
 
 # underlying commands:
 build/ambre-explore --scenario build/scenario.txt \

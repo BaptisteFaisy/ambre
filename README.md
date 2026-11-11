@@ -135,19 +135,23 @@ ambre/
 │   ├── mcap/            journal image → MCAP exporter
 │   ├── verify/          independent Python trigger twin, cross-check, edr-verify
 │   └── scenarios/       scenario generator and reference scenarios
-├── target/              QNX 8.0 processes (capture, journal, archive, ctl, replay)
-├── image/               mkqnximage fragments and security policy
+├── target/              QNX 8.0 processes — EMPTY: not implemented yet
+├── image/               mkqnximage fragments and security policy — EMPTY: not
+│                        implemented yet (no QNX SDP on the dev machine)
 ├── tests/               unit, integration and cross-check tests
-├── scripts/             verify-all.sh (full gate), demo.sh (end-to-end demo)
+├── scripts/             verify-all.sh (full gate), demo.sh (end-to-end demo),
+│                        sizecheck.py (house-rule guard)
 ├── foxglove/            Foxglove layout for the exported MCAP
 ├── codelab/             step-by-step tutorial
-└── docs/                spec, journal format, agent brief
+└── docs/                spec, journal format, validation plan, agent brief
 ```
 
-Status: the portable core (`fmt/`), the PC tools (`host/`) and the tests are in
-the tree and build today. `target/` (QNX processes) and `image/` land in week 2
-of the five-week plan; `host/scenarios/`, `scripts/demo.sh`, `codelab/` and
-`docs/ARCHITECTURE.md` are being written in parallel.
+Status: the portable core (`fmt/`), the PC tools (`host/`), the test suites and
+the scripts are in the tree, build and run green today (measured results in §8).
+`target/` and `image/` are **empty**: no QNX 8.0 code exists yet — the five
+processes, the resource manager, `edrctl`, the security policy and the kernel
+trace are scheduled for weeks 2–3 of the plan, and no QNX SDP is installed on
+the development machine.
 
 ---
 
@@ -185,23 +189,31 @@ the tools are not built.
 
 ```sh
 make demo               # end-to-end: scenario → journal → MCAP → verify report
-./scripts/verify-all.sh # the whole gate before any push (add --quick to skip the
-                        # 1 000 000-state exploration)
+./scripts/verify-all.sh # the whole gate before any push (add --quick to skip
+                        # the exhaustive exploration and the cross-check;
+                        # AMBRE_BUILD_DIR=build-mine for an isolated build)
 ```
 
 `make demo` generates a crash scenario, drives it through the journal, exports
 an MCAP file and verifies it against the scenario; the result opens in Foxglove
-with the layout in `foxglove/`. `verify-all.sh` runs the size check, the build,
-the C and Python test suites, the C-vs-Python trigger cross-check (10 000
-scenarios, outputs compared byte for byte), the state exploration and the MCAP
-round-trip, then prints a single green/red summary.
+with the layout in `foxglove/`. As of 2026-11-11 `scripts/demo.sh` runs green
+end to end (`DEMO OK`: 1 000 cut states explored with 0 violations, edr-verify
+10/10 checks) and `./scripts/verify-all.sh --quick` reports 7/7 steps green.
+`verify-all.sh` runs the size check, the build, the C and Python test suites,
+the scenario generator, the 10 000-state exploration and the MCAP round-trip
+(plus, without `--quick`, the C-vs-Python trigger cross-check and the
+exhaustive exploration), then prints a single green/red summary. A failing step
+is reported `FAIL` — the script never fakes a success.
 
 Useful individual steps:
 
 ```sh
-make explore        # 10 000 power-cut states, all write variants
-make explore-full   # 1 000 000 states, nested cuts during recovery
-make crosscheck     # C trigger vs independent Python twin
+make explore        # 10 000 power-cut states, all write variants (29 s measured)
+make explore-full   # every reachable state, nested cuts during recovery
+                    # (64 591 states measured 2026-11-11, ~5.5 min; the
+                    #  --states 1000000 cap is never reached)
+make crosscheck     # C trigger vs independent Python twin (10 000 scenarios,
+                    #  2 744 840 decision lines, byte-identical — 2 min 32 s)
 make mcap verify    # export one event and check it against its scenario
 ```
 
@@ -209,27 +221,50 @@ make mcap verify    # export one event and check it against its scenario
 
 ## 8. What is measured today
 
-Nothing in this table is filled in yet, on purpose: no number is published
-before it comes out of a campaign. Each row names the requirement it answers
-(`docs/cahier-des-charges.md` §5.7, §7) so the gap is auditable.
+Every figure below comes out of the command quoted next to it, run on
+2026-11-11 on the development machine (x86-64, 12 cores, gcc 13.3.0, Python
+3.12.3). Nothing is extrapolated. Measurements that need the QNX target say
+**not measured**, because `target/` is empty: no number is published before it
+comes out of a campaign. Each row names the requirement it answers
+(`docs/cahier-des-charges.md` §5.7, §7) so the gap stays auditable.
+
+### Validation status
+
+| Area | Status | Evidence (reproduce with) |
+|---|---|---|
+| Format: block codec, CRC-32C, allocation table, scan | **green** | `make test` — 9 C suites, 8 070 checks, 0 failures (9.7 s) |
+| Journal engine and power-cut recovery | **green** | `make test` — incl. `test_journal` (4 195 checks), `test_recovery` (124), `test_simdisk` (3 345) |
+| Trigger arithmetic (UN R160 thresholds) + independent Python twin | **green** | `make crosscheck` — 10 000 random scenarios, 2 744 840 decision lines, `.dec` files byte-identical, 0 divergences (2 min 32 s) |
+| Exhaustive exploration of power-cut states | **green** | `make explore-full` — 64 591 states (every reachable state of the 30 s scenario), 46 390 event acquisitions observed, **0 violations of I1..I8** (334 s, 193 states/s, wall 5 min 37 s via `make explore-full`) |
+| MCAP export + `edr-verify` | **green** | `make verify` — 10/10 checks; `python3 tests/test_mcap_py.py` — 24 tests OK |
+| Power-cut orchestrator (QEMU), dry-run mode | **green** | `python3 tests/test_powercut_py.py` — 18 tests OK against the fake guest (no QNX image needed) |
+| House rule (files < 500 lines, functions < 50) | **green** | `make sizecheck` — 61 files scanned, 0 violations |
+| Class A fidelity of the export | **in progress** | `make verify` failed on `class_a.fidelity` at the start of this campaign; the fix landed 2026-11-11 and the check now passes (`PASS class_a.fidelity 11 point(s)`), consolidation underway |
+| QNX 8.0 target: resource manager `/dev/edr`, the five processes, `edrctl` | **missing** | `target/` and `image/` are empty — nothing is implemented, no QNX SDP on the machine |
+| Feasibility essays E1–E4, real QEMU power cuts | **missing** | 0/200 socle cuts run; the harnesses (`host/powercut/`) exist and pass their dry-run tests, but there is no QNX image to cut |
+| Latency PERF-01..PERF-07, kernel trace, security policy | **missing** | all require the QNX target |
+
+### Measurement table
 
 | Measurement | Requirement | Target | Measured |
 |---|---|---|---|
-| Trigger latency, last threshold sample → pulse | PERF-01 | ≤ 2 ms | `TODO(campaign)` |
-| Trigger → durable ("acquired"), reference hardware | PERF-02 | ≤ 20 ms | `TODO(campaign)` |
-| Software share of that deadline, excluding media time | PERF-03 | ≤ 500 µs | `TODO(campaign)` |
-| Deadline misses over 10 000 triggers under load | PERF-04 | 0 | `TODO(campaign)` |
-| Frame send cost at the producer, p99 | PERF-05 | < 50 µs | `TODO(campaign)` |
-| Capture running after kernel start, recovery included | PERF-06 | < 1 s | `TODO(campaign)` |
-| Power-cut states explored, zero invariant violations | §7.3 | 1 000 000 | `TODO(campaign)` |
-| QEMU power cuts survived, zero data loss | §7.4 | 2 000 | `TODO(campaign)` |
-| Worst cases explained by a kernel trace | PERF-07 | 3 | `TODO(campaign)` |
+| Trigger latency, last threshold sample → pulse | PERF-01 | ≤ 2 ms | not measured — needs the QNX target (`campaign:latency`) |
+| Trigger → durable ("acquired"), reference hardware | PERF-02 | ≤ 20 ms | not measured — needs the QNX target (`campaign:latency`) |
+| Software share of that deadline, excluding media time | PERF-03 | ≤ 500 µs | not measured — needs the QNX target (`campaign:latency`) |
+| Deadline misses over 10 000 triggers under load | PERF-04 | 0 | not measured — needs the QNX target (`campaign:latency`) |
+| Frame send cost at the producer, p99 | PERF-05 | < 50 µs | not measured — input path not implemented (essay E4) |
+| Capture running after kernel start, recovery included | PERF-06 | < 1 s | not measured — needs the QNX target |
+| Power-cut states explored, zero invariant violations | §7.3 | 1 000 000 | **64 591 states, 0 violations** — the whole reachable space of the reference scenario (the 1 000 000 cap is never reached); `make explore-full` |
+| QEMU power cuts survived, zero data loss | §7.4 | 2 000 | **0 — not started**: no QNX SDP or image on this machine |
+| Worst cases explained by a kernel trace | PERF-07 | 3 | not started — needs the QNX target |
 
 What is verified **today** is functional, not temporal: the unit and
-integration suites pass on PC, the recovery code is exercised on simulated
-disk images, and the C trigger arithmetic and its independent Python twin
-produce byte-identical decision files over generated scenario vectors. Those
-are correctness results, not performance results.
+integration suites pass on PC (8 070 C checks, 70 Python tests), the recovery
+code is exercised on every reachable simulated disk image (64 591 states, zero
+invariant violations), and the C trigger arithmetic and its independent Python
+twin produce byte-identical decision files over 10 000 generated scenarios
+(2 744 840 compared lines). Those are correctness results, not performance
+results; every latency figure still requires the QNX target.
 
 ---
 

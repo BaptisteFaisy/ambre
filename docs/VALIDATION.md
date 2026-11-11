@@ -36,12 +36,16 @@ exhaustive exploration runs the very same code that will run on the target.
 All C tests live in `tests/`, use the harness `tests/ambre_test.h`, and return
 the number of failed checks as their exit code (0 = green).
 
-**Measured result (2026-11-11, `make BUILD=build-ci test`, 9.7 s): 9 suites,
-8 070 checks, 0 failures** — crc32c 85, block 118, table 44, scan 68,
-recovery 124, trigger 33, simdisk 3 345, journal 4 195, explore 58.
-Python suites (same day): `tests/test_trigger_py.py` 28 tests OK (7.1 s),
-`tests/test_mcap_py.py` 24 tests OK (2 skipped, 0.4 s),
-`tests/test_powercut_py.py` 18 tests OK (2.9 s).
+**Measured result (2026-11-11, `make BUILD=build-doc test` +
+`make BUILD=build-doc test_archive_cpp`): 19 suites (18 C + 1 C++),
+41 672 checks, 0 failures.** Per suite: block 118, capture 43,
+coverage_gaps 82, coverage_gaps_journal 118, coverage_gaps_scan 24 692,
+coverage_gaps_trigger 33, crc32c 85, edrctl 97, explore 58, ipc 102,
+journal 4 195, journal_svc 8 277, port_posix 87, recovery 124, scan 68,
+simdisk 3 345, table 44, trigger 33, archive_cpp (C++17) 71.
+Python suites (same day): `tests/test_trigger_py.py` Ran 28 tests OK (14.1 s),
+`tests/test_mcap_py.py` Ran 24 tests OK (2 skipped, 0.8 s),
+`tests/test_powercut_py.py` Ran 18 tests OK (3.5 s).
 
 | Test binary | Covers |
 |---|---|
@@ -54,6 +58,13 @@ Python suites (same day): `tests/test_trigger_py.py` 28 tests OK (7.1 s),
 | `tests/test_simdisk.c` | disk creation, write/read round trip, operation-log exactness, marks and last flush, prefix application and idempotency, torn write snapshot, volatile-cache snapshot, table corruption snapshot, overlapping writes, bounds and overflow, image restore, read logging gate, payload pool |
 | `tests/test_trigger.c` | the DEC-08 boundary cases, lateral axis, DEC-04 locking with and without front restraint, DEC-03 external restraint, DEC-10 VRU, DEC-11 off-profile, DEC-05 T0, DEC-06 end of event, DEC-09 crash grouping, DEC-13 invalid sample, fixed memory size, 200 k samples without overflow, determinism |
 | `tests/test_explore.c` | nominal prefixes, no crash → no event, counter consistency, acquisition boundary, complete-flag on both sides, double recovery, bit-flip detection, table destruction |
+| `tests/test_ipc.c` | IPC header round trip and exact 16-byte size, every message type, rejection of bad magic / unknown version / oversized body / NULL header / incoherent length, FRAME build, max sample batch, a 4 096-byte message passes exactly (ACQ-01, SEC-05) |
+| `tests/test_port_posix.c` | backend identity, monotonic clock, sleep bound, disk write/read round trip, data survives the flush, zeroes past the written area, out-of-bounds refusal, bad parameters, honest flush probe, transport round trip with ACK, closed-connection detection, client and idle timeouts, SEC-01 access-control matrix |
+| `tests/test_capture.c` | valid frame, oversized frame, whitelist and forbidden signals rejected and counted (ACQ-04, VIE-01), GAP after an interruption longer than 3 periods (ACQ-06), quality and time handling, crash trigger and class A points, overload is non-blocking |
+| `tests/test_journal_svc.c` | virgin open and self-test, recovery before capture (REP-01), trigger → status → list → export → verify, access control and no-stop (SEC-01, SEC-02), a locked event cannot be erased (SEC-03) |
+| `tests/test_edrctl.c` | scenario load, whitelist, row-to-samples, frame-builder budget, histogram and CLI, container round trip, mocked status/list NAK, mocked export and verify, replay against a fake capture, `--kill-after-ms`, access control |
+| `tests/test_coverage_gaps*.c` | branch coverage of `fmt/` beyond the functional suites (spec §12.10): block/record/table codec (`test_coverage_gaps.c`), journal engine incl. GEL-06 refusals and STO-08 memory-full (`_journal`), scanner and recovery rebuild fallbacks (`_scan`, 24 692 checks), trigger engine branches DEC-04/05/09 and GEL-05 (`_trigger`) |
+| `tests/test_archive_cpp.cpp` | the C++17 MCAP archive: SHA-256 known vectors, standalone export cross-checked by the Python reader, GEL-06 (no write while an event is open, unit + IPC level), multi-chunk export and corruption rejection, retention (16 events, locked kept) — run via `make test_archive_cpp` |
 | `tests/test_mcap_py.py` | CRC check value and known vectors, layout sizes, table copy selection, multi-chunk reassembly, EMERG/CONT/SEAL fields, open event is not sealed, corrupt block dropped, torn multi-chunk record dropped, bad table CRC falls back to the other copy, export counts, MCAP structure, T0 at 60 s, verify passes, verify detects a wrong scenario, multi-chunk export stays valid, verify rejects an absolute timestamp in metadata, verify rejects a truncated file, Foxglove layout matches the exported topics, event listing, default event is the first sealed one, message count matches |
 | `tests/test_trigger_py.py` | the Python twin of the trigger: division truncation, threshold conversion, int64 wrap, the three DEC-08 cases, long and lateral axes, restraint and VRU locking, T0 onset, event end, crash grouping, off-profile reasons, invalid sample exclusion, determinism, 200 k samples, dt clamping, non-monotonic timestamps, event close reset |
 | `tests/test_powercut_py.py` | the power-cut orchestrator: start/probe/cut/restart cycle, guest command and cleanup, work dir handling, event parsing, bounded wait, five cuts and a valid report, resume does not replay, unflushed window produces violations, bucket classification, scenario expectations, cycle timing dry run, block-server cache semantics (retained/dropped writes, flush order journal, drop ratio) |
@@ -88,11 +99,15 @@ make BUILD=build-ci scenario   # 30 s scenario, seed 1234, crash at 25 000 ms
 (same state space as `make explore-full`, whose `--states 1000000` is an upper
 bound that the reachable space never reaches). Result: **64 591 states
 explored, 64 591 recoveries run, 46 390 event acquisitions observed, 0 phantom
-events, 0 violations of I1..I8**, in 334.3 s (193 states/s; wall 5 min 37 s including build, `make BUILD=build-ci explore-full`). Distribution by
+events, 0 violations of I1..I8**, in 334.3 s (193 states/s; wall 5 min 37 s including build, `make BUILD=build-ci explore-full`). A re-run the same day
+(`make BUILD=build-doc explore-full`, `--jobs 12`, competing with a concurrent
+coverage build) measured the identical state space in 495.3 s at 130 states/s,
+0 violations. Distribution by
 variant: prefix 5 803, torn 14 336, cache 21 240, bitflip 5 803, table 11 606,
 nested 5 803. The socle threshold (§7.7: 10 000 states) is exceeded ×6.5; the
 exploration is *exhaustive* — every state reachable from the operation trace,
-not a sample.
+not a sample. `make BUILD=build-doc explore` (the 10 000-state socle form)
+measured 10 000 states, 0 violations, 29.3 s (342 states/s).
 
 #### Variant semantics, and why two expectations are relaxed
 
@@ -158,11 +173,31 @@ and fixed thanks to it, and their non-regression cases live in
    written) from `sealed_flush_op` (durability mark), which is also what makes
    the relaxed cache semantics above precise.
 
-### Level 2 — real cuts under QEMU
+### Level 2 — real cuts under QEMU, and the POSIX process-cut bench
 
-**Status (2026-11-11): 0 real QEMU cut run — not started.** The orchestrator
-and its harnesses exist in `host/powercut/` and their logic is tested
-(18 tests, dry-run backend, `python3 tests/test_powercut_py.py`), but there is
+**Process cuts on the POSIX bench (`host/e2e/`) — harness present, campaign
+`TODO(campaign)`.** `host/e2e/e2e_run.py` drives the real chain
+(replay → capture → journal) with real processes, `SIGKILL`s the journal at a
+chosen instant (`pre`, `acquired`, `sealed`), restarts it on the same disk
+file so the recovery runs (REP-01), then exports and verifies:
+
+```sh
+python3 host/e2e/e2e_run.py --bins build --scenario build/scenario.txt \
+        --cut-at acquired --out report.json
+```
+
+The bench is still being finished by its owning agent (`tests/test_e2e_posix.c`
+and `host/e2e/README.md` are not in the tree on 2026-11-11), so **no cut count
+is published** — the 500 forced process stops of §7.7 remain `TODO(campaign)`.
+Carried by the bench itself: `class_a.fidelity` cannot pass on the real
+process chain (the journal stamps monotonic time, the replay does not emit
+wheel speeds); `host/e2e/e2e_fidelity.py` substitutes a field-level check of
+what the chain really carries.
+
+**QEMU cuts — status (2026-11-11): 0 real QEMU cut run — not started.** The
+orchestrator and its harnesses exist in `host/powercut/` and their logic is
+tested (18 tests, dry-run backend, `python3 tests/test_powercut_py.py`,
+re-measured OK on 2026-11-11), but there is
 no QNX SDP and no QNX image on the machine, so no virtual machine has been cut
 yet. The socle threshold (200 cuts) is `TODO(campaign)`.
 
@@ -238,14 +273,15 @@ Current status of each threshold (measured 2026-11-11 where a figure appears;
 | 200 QEMU cuts | **0/200 — not started**: no QNX SDP or QNX image on the machine | campaign report JSON (does not exist yet) |
 | 2 000 QEMU cuts, swept | **not started** (same reason) | campaign report JSON |
 | 10 000 triggers measured | **not started** — needs the QNX target | latency report |
-| 500 forced process stops | **not started** — needs the QNX target | fault-injection report |
+| 500 forced process stops | **TODO(campaign)** — the POSIX bench exists (`host/e2e/e2e_run.py`, real `SIGKILL` + recovery), the campaign is being finished by its owning agent; on the QNX target it stays not started | e2e report JSON (does not exist yet) |
 | 5 000 forced process stops | **not started** — needs the QNX target | fault-injection report |
 | 500 real electrical cuts | **not started** — no Raspberry Pi 5 bench | hardware report |
 | Invariant violations | **0** over 64 591 explored states (I1..I8 each 0) | `violations_by_invariant` in the report JSON |
 
 Cross-check DEC-12, measured the same day (`make BUILD=build-ci crosscheck`,
-2 min 32 s): 10 000 random scenarios, **2 744 840 decision lines**, the C
-trigger and the independent Python twin produce **byte-identical** `.dec`
+2 min 32 s; re-run verified via `make BUILD=build-doc crosscheck`): 10 000
+random scenarios (5 068 of them trigger, 50.7 %), **2 744 840 decision lines**,
+the C trigger and the independent Python twin produce **byte-identical** `.dec`
 files, 0 divergences.
 
 The latency figures of PERF-01..PERF-05 follow the same rule: the target
@@ -277,6 +313,11 @@ exploration and the MCAP round-trip (`make mcap && make verify`); without
 (`make explore-full`). It prints a summary and exits 0 only when every step is
 green — a failing step is listed `FAIL`, never hidden. Measured 2026-11-11:
 `--quick` reports **7/7 steps green** with `AMBRE_BUILD_DIR=build-docs`.
+Caveat of the same day: `make sizecheck` currently reports **4 violations** in
+`host/energy/energy_model.py` and `host/latency/measure.py` — work-in-progress
+files of two other agents — so a full `verify-all.sh` run is red on that first
+step until they land; `fmt/`, `target/` and `tests/` have 0 violations
+(172 files scanned).
 
 ### 4.2 Level 0 — unit tests
 
@@ -295,6 +336,16 @@ Individually:
 ./build/test_simdisk
 ./build/test_trigger
 ./build/test_explore
+./build/test_recovery
+./build/test_journal
+./build/test_ipc
+./build/test_port_posix
+./build/test_capture
+./build/test_journal_svc
+./build/test_edrctl
+./build/test_coverage_gaps ./build/test_coverage_gaps_journal \
+  ./build/test_coverage_gaps_scan ./build/test_coverage_gaps_trigger
+make test_archive_cpp            # the C++17 archive suite
 python3 tests/test_mcap_py.py
 python3 tests/test_trigger_py.py
 python3 tests/test_powercut_py.py
@@ -346,7 +397,17 @@ python3 host/verify/trigger_crosscheck.py \
 
 The two implementations must produce byte-identical `.dec` files (`diff`).
 
-### 4.5 Level 2 — real cuts under QEMU
+### 4.5 Level 2 — process cuts (POSIX bench) and real cuts under QEMU
+
+The POSIX process-cut bench (real processes, real `SIGKILL`, real recovery —
+campaign `TODO(campaign)`, see §1 Level 2):
+
+```sh
+python3 host/e2e/e2e_run.py --bins build --scenario build/scenario.txt \
+        --cut-at acquired --out build/e2e-report.json
+```
+
+The QEMU orchestrator:
 
 ```sh
 # feasibility essay E1: does a write + flush on a raw partition reach the
@@ -401,8 +462,12 @@ the latency histogram on real hardware are `TODO(campaign)`.
 The latency campaign reuses the kernel trace events of OBS-03: the trigger,
 the submission of the emergency write, the acknowledgement of the flush and the
 sealing. The published result is a histogram with median, 99th percentile,
-99.9th percentile, maximum, and the three worst cases explained. Not started:
-`TODO(campaign)`.
+99.9th percentile, maximum, and the three worst cases explained. The PC bench
+(`host/latency/`: `measure.py`, `campaign.py`, `load_gen.py`, `multi_shock.py`)
+is still being written by its owning agent and `docs/CAMPAIGN-LATENCY.md` does
+not exist yet: **`TODO(campaign)`** for the software share
+(`backend=posix`), and not measurable at all for PERF-01..PERF-05 on the
+target without the QNX SDP.
 
 ### 4.8 Export and verification
 

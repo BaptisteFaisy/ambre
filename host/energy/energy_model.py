@@ -69,43 +69,61 @@ def rk4_step(u, dt, cap, power, resistance):
 
 
 def integrate(cap, v0, power, resistance, duration_s, samples=200):
-    """Return (times, load voltages, capacitor voltages, energy balance)."""
+    """Return (times, load voltages, capacitor voltages, energy balance).
+
+    The load voltage at t=0 is v0; the capacitor therefore starts at
+    V_C(0) = v0 + P*R/v0 (the load current already flows through R).
+    Integration stops early if the constant-power load collapses, i.e. when
+    u reaches sqrt(P*R): below that point no steady state exists.
+    """
     steps = max(1, int(duration_s / DT))
     step_dt = duration_s / steps
     every = max(1, steps // samples)
-    times, loads, caps = [0.0], [v0], [v0]
+    times, loads, caps = [0.0], [v0], [v0 + power * resistance / v0]
     u = v0
     loss = 0.0
+    collapsed = False
+    floor_v = math.sqrt(power * resistance)
     prev_i = power / v0 if v0 > 0.0 else 0.0
     for index in range(1, steps + 1):
         u_next = rk4_step(u, step_dt, cap, power, resistance)
-        if u_next < 0.0:
-            u_next = 0.0
-        curr_i = power / u if u > 0.0 else 1e9
+        if u_next <= floor_v or u_next != u_next:   # collapse or NaN
+            u_next = floor_v
+            collapsed = True
+        curr_i = power / u if u > 0.0 else prev_i
         loss += 0.5 * (prev_i * prev_i + curr_i * curr_i) * resistance * step_dt
         prev_i = curr_i
         u = u_next
-        if index % every == 0 or index == steps:
+        if index % every == 0 or index == steps or collapsed:
             v_cap = u + (power * resistance / u) if u > 0.0 else 0.0
             times.append(index * step_dt)
             loads.append(u)
             caps.append(v_cap)
-    e0 = 0.5 * cap * v0 * v0
+        if collapsed:
+            break
+    v_c0 = v0 + power * resistance / v0
+    e0 = 0.5 * cap * v_c0 * v_c0
     e_end = 0.5 * cap * caps[-1] * caps[-1]
-    e_load = power * duration_s
+    e_load = power * times[-1]
     balance = e0 - e_load - loss - e_end
     return times, loads, caps, {"e0": e0, "e_load": e_load, "e_r": loss,
-                                 "e_end": e_end, "balance": balance}
+                                 "e_end": e_end, "balance": balance,
+                                 "collapsed": collapsed,
+                                 "duration_s": times[-1]}
 
 
 def voltage_at(cap, v0, power, resistance, duration_s):
-    """Load voltage at the end of the freeze (no curve kept)."""
+    """Load voltage at the end of the freeze (no curve kept).
+
+    Returns 0.0 when the constant-power load collapses (u <= sqrt(P*R)).
+    """
     steps = max(1, int(duration_s / DT))
     step_dt = duration_s / steps
+    floor_v = math.sqrt(power * resistance)
     u = v0
     for _ in range(steps):
         u = rk4_step(u, step_dt, cap, power, resistance)
-        if u < 0.0:
+        if u <= floor_v or u != u:
             return 0.0
     return u
 
@@ -169,39 +187,50 @@ def margin_at(cap, v0, power, resistance, v_shutdown, delay_ms):
     e_usable = 0.5 * cap * (v0 * v0 - v_shutdown * v_shutdown)
     return {
         "delay_ms": delay_ms,
+        "collapsed": energy["collapsed"],
         "v_end": loads[-1],
         "v_margin": loads[-1] - v_shutdown,
         "v_margin_pct": 100.0 * (loads[-1] - v_shutdown) / v_shutdown,
-        "energy_needed_j": energy["e_load"],
+        "energy_needed_j": power * duration,
         "energy_usable_j": e_usable,
-        "energy_margin_pct": (100.0 * (e_usable - energy["e_load"])
-                              / energy["e_load"] if energy["e_load"] > 0 else 0.0),
+        "energy_margin_pct": (100.0 * (e_usable - power * duration)
+                              / (power * duration) if power > 0 else 0.0),
         "energy_loss_r_j": energy["e_r"],
     }
 
 
 def ascii_plot(series, v_shutdown, width=72, height=18):
-    """Hand-drawn ASCII plot of the voltage curves (no external library)."""
+    """Hand-drawn ASCII plot of the voltage curves (no external library).
+
+    Each series is drawn with its own marker ('1', '2', ...); the shutdown
+    threshold appears as a dashed row.
+    """
     v_max = max(max(vals) for _, vals in series)
-    v_min = v_shutdown
-    t_max = max(len(vals) - 1 for _, vals in series)
-    rows = []
-    for row in range(height):
-        level = v_max - (v_max - v_min) * row / (height - 1)
-        line = []
-        for col in range(width):
-            col_t = col * t_max / (width - 1)
-            ch = " "
-            for _, vals in series:
-                idx = int(round(col_t))
-                if idx < len(vals) and vals[idx] <= level:
-                    ch = "*"
-                    break
-            line.append(ch)
-        rows.append("%6.2f V |%s" % (level, "".join(line)))
+    v_min = v_shutdown * 0.9
+    grid = [[" "] * width for _ in range(height)]
+
+    def put(value, col, ch):
+        row = int(round((v_max - value) / (v_max - v_min) * (height - 1)))
+        c = int(round(col))
+        if 0 <= row < height and 0 <= c < width:
+            grid[row][c] = ch
+
+    row_sd = int(round((v_max - v_shutdown) / (v_max - v_min) * (height - 1)))
+    for col in range(width):
+        if grid[row_sd][col] == " ":
+            grid[row_sd][col] = "-"
+    for index, (_, vals) in enumerate(series):
+        marker = str(index + 1)
+        count = len(vals)
+        for i, value in enumerate(vals):
+            put(value, i * (width - 1) / max(1, count - 1), marker)
+    rows = ["%6.2f V |%s" % (v_max - (v_max - v_min) * r / (height - 1),
+                             "".join(grid[r])) for r in range(height)]
     rows.append("         +" + "-" * width)
-    rows.append("          0 s%s%s end of freeze" % (" " * (width - 22), " " * 0))
-    rows.append("  (shutdown threshold %.2f V, curve end marked by the row)" % v_shutdown)
+    legend = "  ".join("%s=%s" % (str(i + 1), label)
+                       for i, (label, _) in enumerate(series))
+    rows.append("          0 s -> end of freeze   [%s]" % legend)
+    rows.append("          dashed row = shutdown threshold %.2f V" % v_shutdown)
     return "\n".join(rows)
 
 
@@ -250,7 +279,7 @@ def svg_plot(series, v_shutdown, path, width=760, height=420):
         handle.write("\n".join(parts) + "\n")
 
 
-def main(argv):
+def build_parser():
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--v0", type=float, default=12.6,
                         help="capacitor voltage at the cut (V)")
@@ -269,11 +298,10 @@ def main(argv):
     parser.add_argument("--svg", default=None, help="write the SVG curve here")
     parser.add_argument("--no-ascii", action="store_true",
                         help="do not print the ASCII curve")
-    args = parser.parse_args(argv)
+    return parser
 
-    delays = [float(x) for x in args.delays.split(",") if x.strip()]
-    power_grid = [args.power / 2.0, args.power, args.power * 2.0, args.power * 4.0]
 
+def print_assumptions(args, delays):
     print("Ambre hold-up energy model (spec 12.4)")
     print("  assumptions (all overridable):")
     print("    V0 = %.2f V   V_shutdown = %.2f V   R = %.3f Ohm"
@@ -286,15 +314,16 @@ def main(argv):
     print("          => du/dt = -P u / (C (u^2 - P R)), RK4, dt = 1 us")
     print("")
 
-    reference = reference_energy(args.power, REFERENCE_DELAY_MS / 1000.0)
+
+def print_reference(args, reference):
     print("  reference of the specification (12.4): %.1f W x %.0f ms = %.6f J"
           % (args.power, REFERENCE_DELAY_MS, reference))
     print("  -> the cahier's 0.1 J is reproduced by the computation above "
           "(P x t).")
     print("")
 
-    cases = [build_case(args.v0, args.power, args.r, args.v_shutdown, d)
-             for d in delays]
+
+def print_cases(cases):
     print("  %-9s %-22s %10s %10s %10s %8s" %
           ("delay", "status", "E (J)", "C_min (mF)", "C_energy (mF)", "V_end"))
     for case in cases:
@@ -305,51 +334,74 @@ def main(argv):
                "%.3f" % case["v_end_at_c_min"] if case["c_min_mf"] else "n/a"))
     print("")
 
-    c_nom = args.c_nom / 1e3 if args.c_nom else 2.0 * (
-        cases[0]["c_min_mf"] / 1e3 if cases[0]["c_min_mf"] else 1e-3)
-    print("  margin at the nominal hold-up capacitance C = %.3f mF" % (c_nom * 1e3))
-    print("  %-9s %-22s %10s %10s %12s %12s" %
-          ("delay", "status", "V_end (V)", "margin (V)", "margin (%)", "E usable (J)"))
+
+def nominal_capacitance(args, cases):
+    longest = max(cases, key=lambda c: c["delay_ms"])
+    if args.c_nom:
+        return args.c_nom / 1e3
+    if longest["c_min_mf"]:
+        return 2.0 * longest["c_min_mf"] / 1e3
+    return 1e-3
+
+
+def print_margins(args, delays, c_nom):
+    print("  margin at the nominal hold-up capacitance C = %.3f mF"
+          " (default: twice the minimum of the longest delay)" % (c_nom * 1e3))
+    print("  %-9s %-22s %10s %10s %12s %12s %10s" %
+          ("delay", "status", "V_end (V)", "margin (V)", "margin (%)",
+           "E usable (J)", "state"))
     margins = []
     for delay in delays:
-        margin = margin_at(c_nom, args.v0, args.power, args.r, args.v_shutdown, delay)
+        margin = margin_at(c_nom, args.v0, args.power, args.r, args.v_shutdown,
+                           delay)
         margins.append(margin)
-        print("  %-9.0f %-22s %10.3f %10.3f %12.2f %12.4f" %
-              (delay, "target, not measured", margin["v_end"], margin["v_margin"],
-               margin["v_margin_pct"], margin["energy_usable_j"]))
+        print("  %-9.0f %-22s %10.3f %10.3f %12.2f %12.4f %10s" %
+              (delay, "target, not measured", margin["v_end"],
+               margin["v_margin"], margin["v_margin_pct"],
+               margin["energy_usable_j"],
+               "COLLAPSED" if margin["collapsed"] else "ok"))
     print("")
+    return margins
 
+
+def print_power_grid(args, delays, power_grid):
     print("  minimum capacitance per power (mF), delays as columns")
-    header = "  %-8s" % "power (W)" + "".join("%10.0f ms" % d for d in delays)
-    print(header)
+    print("  %-8s" % "power (W)" + "".join("%10.0f ms" % d for d in delays))
     grid = {}
     for power in power_grid:
         row = "  %-8.1f" % power
         for delay in delays:
             cap = min_capacity(args.v0, power, args.r, args.v_shutdown,
-                                delay / 1000.0)
+                               delay / 1000.0)
             grid["%gW/%gms" % (power, delay)] = cap
             row += "%11s" % ("%.3f" % (cap * 1e3) if cap else "n/a")
         print(row)
     print("")
+    return grid
 
+
+def print_energy_balance(args, delays, c_nom):
     series = []
+    collapse_v = math.sqrt(args.power * args.r)
     for delay in delays:
-        times, loads, caps, energy = integrate(c_nom, args.v0, args.power, args.r,
-                                               delay / 1000.0, samples=120)
+        times, loads, _caps, energy = integrate(c_nom, args.v0, args.power,
+                                                args.r, delay / 1000.0,
+                                                samples=120)
         series.append(("%.0f ms" % delay, loads))
+        if energy["collapsed"]:
+            print("  energy balance at %.0f ms: COLLAPSED after %.3f ms "
+                  "(load below sqrt(P*R) = %.2f V, no steady state)"
+                  % (delay, times[-1] * 1e3, collapse_v))
+            continue
         print("  energy balance at %.0f ms (C = %.3f mF): E0 = %.4f J, "
               "load = %.4f J, R = %.6f J, end = %.4f J, residual = %.2e J"
               % (delay, c_nom * 1e3, energy["e0"], energy["e_load"],
                  energy["e_r"], energy["e_end"], energy["balance"]))
-    if not args.no_ascii:
-        print("")
-        print(ascii_plot(series, args.v_shutdown))
-    if args.svg:
-        svg_plot(series, args.v_shutdown, args.svg)
-        print("\n  SVG curve: %s" % args.svg)
+    return series
 
-    report = {
+
+def build_report(args, delays, c_nom, reference, cases, margins, grid):
+    return {
         "tool": "host/energy/energy_model.py",
         "spec_item": "12.4 (modele de reserve d'energie)",
         "measured": MEASURED,
@@ -358,6 +410,8 @@ def main(argv):
             "v0_v": args.v0, "v_shutdown_v": args.v_shutdown,
             "r_ohm": args.r, "power_w": args.power,
             "delays_ms": delays, "c_nom_f": c_nom,
+            "c_nom_basis": "2 x C_min(longest delay)" if args.c_nom is None
+                           else "user supplied",
         },
         "model": {
             "ode": "du/dt = -P*u / (C*(u^2 - P*R))",
@@ -375,6 +429,35 @@ def main(argv):
         "margins": margins,
         "c_min_grid_f": grid,
     }
+
+
+def main(argv):
+    args = build_parser().parse_args(argv)
+    delays = [float(x) for x in args.delays.split(",") if x.strip()]
+    power_grid = [args.power / 2.0, args.power, args.power * 2.0,
+                  args.power * 4.0]
+
+    print_assumptions(args, delays)
+    reference = reference_energy(args.power, REFERENCE_DELAY_MS / 1000.0)
+    print_reference(args, reference)
+
+    cases = [build_case(args.v0, args.power, args.r, args.v_shutdown, d)
+             for d in delays]
+    print_cases(cases)
+
+    c_nom = nominal_capacitance(args, cases)
+    margins = print_margins(args, delays, c_nom)
+    grid = print_power_grid(args, delays, power_grid)
+    series = print_energy_balance(args, delays, c_nom)
+
+    if not args.no_ascii:
+        print("")
+        print(ascii_plot(series, args.v_shutdown))
+    if args.svg:
+        svg_plot(series, args.v_shutdown, args.svg)
+        print("\n  SVG curve: %s" % args.svg)
+
+    report = build_report(args, delays, c_nom, reference, cases, margins, grid)
     if args.json:
         with open(args.json, "w", encoding="utf-8") as handle:
             json.dump(report, handle, indent=2, sort_keys=True)

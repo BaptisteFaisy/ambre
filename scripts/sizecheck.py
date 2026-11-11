@@ -6,6 +6,7 @@ Exit code 0 when every rule holds, 1 otherwise.
 """
 
 import re
+import subprocess
 import sys
 from pathlib import Path
 
@@ -15,7 +16,18 @@ EXTS = {".c", ".h", ".py", ".cpp", ".hpp"}
 SKIP_DIRS = {".git", "build", "__pycache__", ".venv"}
 
 
-def iter_sources(roots):
+def tracked_files():
+    """Files known to git, so work in progress by another agent is not judged."""
+    try:
+        out = subprocess.run(["git", "ls-files", "-z"], capture_output=True,
+                             check=True).stdout.decode("utf-8")
+    except (OSError, subprocess.CalledProcessError):
+        return None
+    return {Path(p) for p in out.split("\0") if p}
+
+
+def iter_sources(roots, tracked_only=False):
+    tracked = tracked_files() if tracked_only else None
     for root in roots:
         path = Path(root)
         if path.is_file():
@@ -25,6 +37,8 @@ def iter_sources(roots):
             if not p.is_file() or p.suffix not in EXTS:
                 continue
             if any(part in SKIP_DIRS for part in p.parts):
+                continue
+            if tracked is not None and p not in tracked:
                 continue
             yield p
 
@@ -89,10 +103,12 @@ def c_functions(text):
 
 
 def main(argv):
-    roots = argv[1:] or ["fmt", "host", "tests", "scripts", "target"]
+    args = [a for a in argv[1:] if a != "--tracked-only"]
+    tracked_only = "--tracked-only" in argv[1:]
+    roots = args or ["fmt", "host", "tests", "scripts", "target", "image"]
     violations = []
     files = 0
-    for path in iter_sources(roots):
+    for path in iter_sources(roots, tracked_only):
         files += 1
         try:
             text = path.read_text(encoding="utf-8", errors="replace")

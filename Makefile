@@ -188,7 +188,7 @@ demo: all
 	./scripts/demo.sh
 
 sizecheck:
-	@$(PYTHON) scripts/sizecheck.py fmt host tests scripts
+	@$(PYTHON) scripts/sizecheck.py --tracked-only
 
 clean:
 	rm -rf $(BUILD)

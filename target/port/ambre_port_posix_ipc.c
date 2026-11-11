@@ -26,6 +26,7 @@
 
 #define AMBRE_PORT_MAX_CONNS 32u
 #define AMBRE_PORT_PATH_MAX  104u
+#define AMBRE_PORT_ACK_MAX   64u   /* smallest reply we accept as an ack */
 
 typedef struct {
     int      fd;
@@ -299,15 +300,21 @@ void ambre_port_conn_close(ambre_port_conn_t *c)
     free(c);
 }
 
-int ambre_port_conn_send(ambre_port_conn_t *c, const void *buf, size_t len,
-                         uint64_t timeout_us, uint64_t *latency_ns)
+/* Send one datagram and wait for the peer's answer. `reply` may be NULL when
+ * only the acknowledgement is wanted. This round trip is what PERF-05 and
+ * feasibility essay E4 measure. */
+static int conn_xfer(ambre_port_conn_t *c, const void *buf, size_t len,
+                     void *reply, size_t reply_cap, uint64_t timeout_us,
+                     uint64_t *latency_ns)
 {
-    uint8_t ack[32];
+    uint8_t ack[AMBRE_PORT_ACK_MAX];
+    uint8_t *dst = (reply != NULL) ? (uint8_t *)reply : ack;
+    size_t room = (reply != NULL) ? reply_cap : sizeof(ack);
     uint64_t t0;
     ssize_t put;
     ssize_t got;
 
-    if (c == NULL || buf == NULL || len == 0u) {
+    if (c == NULL || buf == NULL || len == 0u || dst == NULL || room == 0u) {
         return AMBRE_PORT_ERR_PARAM;
     }
     t0 = ambre_port_now_us();
@@ -315,7 +322,6 @@ int ambre_port_conn_send(ambre_port_conn_t *c, const void *buf, size_t len,
     if (put != (ssize_t)len) {
         return AMBRE_PORT_ERR_IO;
     }
-    /* Wait for the ack: that round trip is what PERF-05 and essay E4 measure. */
     {
         struct pollfd pfd;
 
@@ -325,12 +331,29 @@ int ambre_port_conn_send(ambre_port_conn_t *c, const void *buf, size_t len,
             return AMBRE_PORT_ERR_TIMEOUT;
         }
     }
-    got = recv(c->fd, ack, sizeof(ack), 0);
+    got = recv(c->fd, dst, room, 0);
     if (got <= 0) {
         return AMBRE_PORT_ERR_IO;
     }
     if (latency_ns != NULL) {
         *latency_ns = (ambre_port_now_us() - t0) * 1000u;
     }
-    return AMBRE_PORT_OK;
+    return (int)got;
+}
+
+int ambre_port_conn_request(ambre_port_conn_t *c, const void *req, size_t req_len,
+                            void *reply, size_t reply_cap, uint64_t timeout_us,
+                            uint64_t *latency_ns)
+{
+    return conn_xfer(c, req, req_len, reply, reply_cap, timeout_us, latency_ns);
+}
+
+int ambre_port_conn_send(ambre_port_conn_t *c, const void *buf, size_t len,
+                         uint64_t timeout_us, uint64_t *latency_ns)
+{
+    /* Contract: 0 on success. The ack itself carries no payload the caller
+     * needs; ambre_port_conn_request() is the one that returns a byte count. */
+    int rc = conn_xfer(c, buf, len, NULL, 0u, timeout_us, latency_ns);
+
+    return (rc > 0) ? AMBRE_PORT_OK : rc;
 }

@@ -107,6 +107,22 @@ static int journal_send_sink(void *ctx, uint8_t msg_type,
     return ambre_port_conn_send(app->journal_conn, wire, total, 500000u, &lat_ns);
 }
 
+/* Acknowledge one client message (ACQ-01: the producer never waits on us). */
+static void reply_ack(capture_app_t *app, uint32_t peer)
+{
+    uint8_t ack[sizeof(ambre_ipc_hdr_t)];
+    ambre_ipc_hdr_t *ah = (ambre_ipc_hdr_t *)(void *)ack;
+
+    ah->magic = AMBRE_IPC_MAGIC;
+    ah->version = AMBRE_IPC_VERSION;
+    ah->msg_type = (uint8_t)AMBRE_MSG_ACK;
+    ah->flags = 0;
+    ah->reserved = (uint8_t)AMBRE_PEER_CAPTURE;
+    ah->body_len = 0;
+    ah->reserved2 = 0;
+    (void)ambre_port_chan_reply(app->chan, peer, ack, sizeof(ack));
+}
+
 static void handle_client_message(capture_app_t *app, uint32_t peer,
                                   const uint8_t *msg, size_t len, uint64_t rx_ts)
 {
@@ -117,16 +133,7 @@ static void handle_client_message(capture_app_t *app, uint32_t peer,
     if (h->msg_type == AMBRE_MSG_FRAME) {
         (void)ambre_capture_push_frame(&app->capture, msg, len, rx_ts,
                                        journal_send_sink, app);
-        uint8_t ack[sizeof(ambre_ipc_hdr_t)];
-        ambre_ipc_hdr_t *ah = (ambre_ipc_hdr_t *)ack;
-        ah->magic = AMBRE_IPC_MAGIC;
-        ah->version = AMBRE_IPC_VERSION;
-        ah->msg_type = (uint8_t)AMBRE_MSG_ACK;
-        ah->flags = 0;
-        ah->reserved = (uint8_t)AMBRE_PEER_CAPTURE;
-        ah->body_len = 0;
-        ah->reserved2 = 0;
-        (void)ambre_port_chan_reply(app->chan, peer, ack, sizeof(ack));
+        reply_ack(app, peer);
     } else if (h->msg_type == AMBRE_MSG_EXTERNAL) {
         if (len >= sizeof(ambre_ipc_hdr_t) + sizeof(ambre_ipc_external_body_t)) {
             const ambre_ipc_external_body_t *eb =
@@ -135,6 +142,11 @@ static void handle_client_message(capture_app_t *app, uint32_t peer,
                                               eb->signal_mask, eb->producer_id,
                                               journal_send_sink, app);
         }
+        /* Every message is acknowledged, whatever its type: a producer that
+         * waits for an ack must never time out on a signal it sent legally
+         * (ROB-06). A malformed EXTERNAL is answered the same way, so the
+         * producer is never blocked by our validation. */
+        reply_ack(app, peer);
     }
 }
 

@@ -147,6 +147,25 @@ void ambre_port_conn_close(ambre_port_conn_t *c);
 int ambre_port_conn_send(ambre_port_conn_t *c, const void *buf, size_t len,
                          uint64_t timeout_us, uint64_t *latency_ns);
 
+/* Request/reply: send one message and read the answer into `reply`.
+ * Returns the number of bytes received, or a negative ambre_port_err_t.
+ * On QNX this is a single MsgSend() (the reply is part of the transaction);
+ * on POSIX it is a send followed by a bounded receive on the same
+ * SOCK_SEQPACKET connection, which preserves the message boundary. */
+#define AMBRE_PORT_HAS_CONN_REQUEST 1
+int ambre_port_conn_request(ambre_port_conn_t *c, const void *req, size_t req_len,
+                            void *reply, size_t reply_cap, uint64_t timeout_us,
+                            uint64_t *latency_ns);
+
+/* Request/reply: send one message and read the server's answer into `reply`.
+ * Returns the number of bytes received, or a negative ambre_port_err_t. This
+ * maps onto QNX MsgSend(), where the reply is part of the same transaction;
+ * on POSIX it is a send followed by a bounded receive on the same
+ * connection. */
+int ambre_port_conn_request(ambre_port_conn_t *c, const void *req,
+                            size_t req_len, void *reply, size_t reply_cap,
+                            uint64_t timeout_us, uint64_t *latency_ns);
+
 /* QNX-05: a producer's death is detected by its connection closing, with no
  * polling. Returns the peer id that disconnected, or 0 if none. */
 uint32_t ambre_port_chan_poll_disconnect(ambre_port_chan_t *c);

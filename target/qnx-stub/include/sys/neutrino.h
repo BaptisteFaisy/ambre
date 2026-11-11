@@ -328,5 +328,17 @@ int timer_delete(timer_t timerid);
 
 #endif /* !__USE_POSIX199309 */
 
+/* Bounded blocking: TimerTimeout() arms a kernel timeout for the next
+ * blocking call (MsgSend, MsgReceive, ...). Passing NULL as nsecs cancels it.
+ *
+ * Provenance: QNX SDP 8.0 C Library Reference, TimerTimeout(), and the
+ * Neutrino "timeouts" documentation for the _NTO_TIMEOUT_* flags.
+ *   https://www.qnx.com/developers/docs/8.0/com.qnx.doc.neutrino.lib_ref/topic/t/timertimeout.html
+ */
+#define _NTO_TIMEOUT_NEAREST 1   /* round the timeout to the nearest tick */
+
+int TimerTimeout(clockid_t clock_id, int flags, struct timespec *nto,
+                 const uint64_t *bench, const uint64_t *nsecs);
+
 #endif /* PGW_STUB_SYS_NEUTRINO_H */
 

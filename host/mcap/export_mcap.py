@@ -252,7 +252,11 @@ class EventExporter:
         self.emit(TOPIC_EVENT, self.t0_us, event_summary_payload(self.view))
 
     def _export_gaps(self):
-        for gap in self.view.gaps:
+        # Gap records reach the journal in detection order, and several signals
+        # can raise one at different instants: sort them so the channel's
+        # log_time is non-decreasing, as every other channel is (MCAP readers
+        # and the edr-verify check both rely on it).
+        for gap in sorted(self.view.gaps, key=lambda g: g["start_ts_us"]):
             self.emit(TOPIC_GAPS, gap["start_ts_us"],
                       {"start_ts_us": gap["start_ts_us"],
                        "end_ts_us": gap["end_ts_us"],

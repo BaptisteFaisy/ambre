@@ -19,7 +19,3 @@ __pycache__/
 .idea/
 *.swp
 .DS_Store
-
-# in-flight agent work, re-added when green
-host/e2e/
-host/processcut/

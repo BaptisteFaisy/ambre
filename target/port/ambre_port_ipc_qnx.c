@@ -13,6 +13,8 @@
 
 #define _POSIX_C_SOURCE 200809L
 
+#define AMBRE_PORT_ACK_MAX 64u   /* smallest reply accepted as an ack */
+
 #include "ambre_port.h"
 
 #include <errno.h>
@@ -217,24 +219,55 @@ void ambre_port_conn_close(ambre_port_conn_t *c)
 }
 
 /* QNX-only: verified on target, syntax-checked on PC */
-int ambre_port_conn_send(ambre_port_conn_t *c, const void *buf, size_t len,
-                         uint64_t timeout_us, uint64_t *latency_ns)
+/* One MsgSend() carries the request and brings the reply back: on QNX the
+ * reply is part of the same transaction, and the server runs it at the
+ * caller's priority (priority inheritance, spec 1.3). `timeout_us` is bounded
+ * by the kernel's own blocking rules; the caller's deadline is what matters,
+ * so it is passed to TimerTimeout() before the send. */
+static int conn_xfer_qnx(ambre_port_conn_t *c, const void *req, size_t req_len,
+                         void *reply, size_t reply_cap, uint64_t timeout_us,
+                         uint64_t *latency_ns)
 {
-    uint8_t ack[64];
+    uint8_t ack[AMBRE_PORT_ACK_MAX];
+    uint8_t *dst = (reply != NULL) ? (uint8_t *)reply : ack;
+    size_t room = (reply != NULL) ? reply_cap : sizeof(ack);
     uint64_t t0;
+    uint64_t nsecs;
     int rc;
 
-    (void)timeout_us;
-    if (c == NULL || buf == NULL || len == 0u) {
+    if (c == NULL || req == NULL || req_len == 0u || dst == NULL || room == 0u) {
         return AMBRE_PORT_ERR_PARAM;
     }
+    if (timeout_us > 0u) {
+        nsecs = timeout_us * 1000u;
+        (void)TimerTimeout(CLOCK_MONOTONIC, _NTO_TIMEOUT_NEAREST, NULL,
+                           (uint64_t)0, &nsecs);
+    }
     t0 = ambre_port_now_us();
-    rc = MsgSend(c->coid, buf, len, ack, sizeof(ack));
+    rc = MsgSend(c->coid, req, req_len, dst, room);
+    if (timeout_us > 0u) {
+        (void)TimerTimeout(CLOCK_MONOTONIC, _NTO_TIMEOUT_NEAREST, NULL,
+                           (uint64_t)0, NULL);
+    }
     if (rc < 0) {
         return AMBRE_PORT_ERR_IO;
     }
     if (latency_ns != NULL) {
         *latency_ns = (ambre_port_now_us() - t0) * 1000u;
     }
-    return AMBRE_PORT_OK;
+    return rc;
+}
+
+int ambre_port_conn_request(ambre_port_conn_t *c, const void *req, size_t req_len,
+                            void *reply, size_t reply_cap, uint64_t timeout_us,
+                            uint64_t *latency_ns)
+{
+    return conn_xfer_qnx(c, req, req_len, reply, reply_cap, timeout_us,
+                         latency_ns);
+}
+
+int ambre_port_conn_send(ambre_port_conn_t *c, const void *buf, size_t len,
+                         uint64_t timeout_us, uint64_t *latency_ns)
+{
+    return conn_xfer_qnx(c, buf, len, NULL, 0u, timeout_us, latency_ns);
 }

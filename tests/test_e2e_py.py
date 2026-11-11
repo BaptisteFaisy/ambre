@@ -58,6 +58,16 @@ def find_bins() -> str:
         % ", ".join(candidates))
 
 
+def generate_scenario(path, seed=SEED):
+    """Write the scenario every cut of this test plays."""
+    subprocess.run(
+        [sys.executable, os.path.join("host", "scenarios", "generate.py"),
+         "--seed", str(seed), "--duration-ms", str(DURATION_MS),
+         "--crash-at-ms", str(CRASH_AT_MS), "--out", path],
+        cwd=ROOT, check=True, capture_output=True, text=True)
+    return path
+
+
 class CutCase(unittest.TestCase):
     """One scenario shared by the five cuts; one temporary tree per test."""
 
@@ -65,12 +75,8 @@ class CutCase(unittest.TestCase):
     def setUpClass(cls):
         cls.bins = find_bins()
         cls.hold = tempfile.mkdtemp(prefix="ambre-e2e-test-")
-        cls.scenario = os.path.join(cls.hold, "scenario.txt")
-        subprocess.run(
-            [sys.executable, os.path.join("host", "scenarios", "generate.py"),
-             "--seed", str(SEED), "--duration-ms", str(DURATION_MS),
-             "--crash-at-ms", str(CRASH_AT_MS), "--out", cls.scenario],
-            cwd=ROOT, check=True, capture_output=True, text=True)
+        cls.scenario = generate_scenario(os.path.join(cls.hold,
+                                                      "scenario.txt"))
 
     @classmethod
     def tearDownClass(cls):
@@ -164,6 +170,38 @@ class BenchHygieneCase(unittest.TestCase):
         while time.monotonic() < deadline and _ambre_processes() != before:
             time.sleep(0.05)
         self.assertEqual(before, _ambre_processes())
+
+    def test_bench_killed_by_signal_takes_its_children_and_files(self):
+        """SIGTERM on the bench: no orphan process, no temporary tree left."""
+        before = _ambre_processes()
+        hold = tempfile.mkdtemp(prefix="ambre-e2e-sigterm-")
+        self.addCleanup(shutil.rmtree, hold, True)
+        scenario = generate_scenario(os.path.join(hold, "scenario.txt"))
+        cmd = [sys.executable, os.path.join(ROOT, "host", "e2e", "e2e_run.py"),
+               "--bins", find_bins(), "--scenario", scenario,
+               "--cut-at", "sealed"]
+        proc = subprocess.Popen(cmd, cwd=ROOT, stdout=subprocess.DEVNULL,
+                                stderr=subprocess.DEVNULL)
+        trees = _temp_trees()
+        deadline = time.monotonic() + 20.0
+        while time.monotonic() < deadline and _temp_trees() == trees:
+            time.sleep(0.1)
+        spawned = _temp_trees() - trees
+        self.assertTrue(spawned, "the bench created no working directory")
+        proc.terminate()
+        self.assertEqual(proc.wait(timeout=20) is not None, True)
+        deadline = time.monotonic() + 10.0
+        while time.monotonic() < deadline and (
+                _ambre_processes() != before or _temp_trees() & spawned):
+            time.sleep(0.1)
+        self.assertEqual(before, _ambre_processes(), "orphan process left")
+        self.assertFalse(_temp_trees() & spawned, "temporary tree left")
+
+
+def _temp_trees():
+    """The set of working directories the bench created under /tmp."""
+    import glob
+    return set(glob.glob(os.path.join(tempfile.gettempdir(), "ambre-e2e-*")))
 
 
 def _ambre_processes():

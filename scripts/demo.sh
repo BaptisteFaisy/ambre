@@ -1,29 +1,33 @@
 #!/usr/bin/env bash
 #
-# demo.sh — the Ambre demonstration, one command.
+# demo.sh — the Ambre demonstration, in one command.
 #
-#   ./scripts/demo.sh
+#   ./scripts/demo.sh                       # build in ./build (shared tree)
+#   AMBRE_BUILD_DIR=build-mine ./scripts/demo.sh   # isolated build tree
 #
-# It runs, in order:
-#   1. build            (make all)
-#   2. generate         a scenario file with the fixed generator
-#   3. write the journal (amber-explore --export-image)
-#   4. cut the power    (amber-explore explores every reachable cut state)
-#   5. recover          (the explorer recovers from every one of them)
-#   6. export           the journal image to one MCAP file
-#   7. verify           edr-verify checks the export against the scenario
-#   8. summary          a readable recap
+# It runs the level-2 chain of the specification (cahier section 8) with the
+# REAL processes: a drive is replayed, the impact triggers, the event is
+# acquired and frozen, edr-journal is killed with SIGKILL, it is restarted on
+# the same disk file, the recovery runs, the service list shows the event, the
+# event is exported to MCAP and verified against the injected scenario.
 #
-# Only the CLIs frozen in docs/AGENT-BRIEF.md are used:
-#   make
-#   build/ambre-explore
-#   python3 host/scenarios/generate.py
-#   python3 host/mcap/export_mcap.py
-#   python3 host/verify/edr_verify.py
+#   1. build      the five processes (make tools)
+#   2. scenario   a frontal impact with restraint deployment (locked event)
+#   3. chain      replay -> capture -> journal: "acquired in N ms"
+#   4. the cut    SIGKILL on edr-journal, right after the acquisition
+#   5. restart    the same disk file: the recovery must run (REP-01)
+#   6. list       the event, locked, with "complete file = no"
+#   7. export     the recovered journal image -> one MCAP file
+#   8. verify     the official verifier + the class A comparison
+#   9. summary    the story of the run, and what it does not prove
 #
-# Exit code: 0 when the whole chain succeeded, non-zero otherwise. Nothing is
-# faked: if a binary is missing or a step fails, the script stops with an
-# explicit message.
+# Only documented CLIs are used (docs/AGENT-BRIEF.md, docs/W2-PLAN.md):
+#   make, host/scenarios/generate.py, host/e2e/e2e_run.py,
+#   host/mcap/export_mcap.py, host/verify/edr_verify.py
+#
+# Exit code: 0 when every stage succeeded, non-zero otherwise. Nothing is
+# faked: a missing binary, a stage that fails, or a run whose verdict is not
+# "ok" all stop the script with an explicit message.
 
 set -euo pipefail
 
@@ -31,33 +35,36 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT"
 
 BUILD_DIR="${AMBRE_BUILD_DIR:-build}"
-SCENARIO="${BUILD_DIR}/demo-scenario.txt"
-IMAGE="${BUILD_DIR}/demo-journal.img"
-MCAP="${BUILD_DIR}/demo-event.mcap"
-EXPLORE_REPORT="${BUILD_DIR}/demo-explore.json"
-STATES="${AMBRE_DEMO_STATES:-1000}"
+WORK="${AMBRE_DEMO_WORK:-${BUILD_DIR}/demo}"
+SCENARIO="${WORK}/scenario.txt"
+REPORT="${WORK}/report.json"
+RUNDIR="${WORK}/run"
 
-SEED=1234
-DURATION_MS=30000
-CRASH_AT_MS=25000
+# A locked event needs the restraint deployment of this preset (DEC-03): the
+# dv25 lock is disabled while the vehicle declares a front restraint.
+SEED="${AMBRE_DEMO_SEED:-1234}"
+DURATION_MS="${AMBRE_DEMO_DURATION_MS:-9000}"
+CRASH_AT_MS="${AMBRE_DEMO_CRASH_MS:-6000}"
+CUT_AT="${AMBRE_DEMO_CUT:-acquired}"
+CAMPAIGN_REPORT="${AMBRE_DEMO_CAMPAIGN:-${BUILD_DIR}/processcut/report-200.json}"
 
 step()  { printf '\n\033[1m==> %s\033[0m\n' "$*"; }
 info()  { printf '    %s\n' "$*"; }
 die()   { printf '\n\033[1;31mERROR: %s\033[0m\n' "$*" >&2; exit 1; }
 
+need_cmd() {
+    command -v "$1" >/dev/null 2>&1 || die "missing required command: $1"
+}
+
 need_file() {
     [ -f "$1" ] || die "missing required file: $1
-       This tool is not present in this tree. Run 'make all' first, then
-       re-run ./scripts/demo.sh."
+       Run 'make all' first, then re-run ./scripts/demo.sh."
 }
 
 need_exec() {
     [ -x "$1" ] || die "missing required binary: $1
-       Run 'make all' to build it, then re-run ./scripts/demo.sh."
-}
-
-need_cmd() {
-    command -v "$1" >/dev/null 2>&1 || die "missing required command: $1"
+       Run 'make BUILD=${BUILD_DIR} tools' to build it, then re-run
+       ./scripts/demo.sh."
 }
 
 # ---------------------------------------------------------------- 0. checks --
@@ -66,135 +73,94 @@ step "Checking the tools"
 
 need_cmd make
 need_cmd python3
-info "make       : $(command -v make)"
-info "python3    : $(command -v python3)"
+info "make        : $(command -v make)"
+info "python3     : $(command -v python3)"
 
-need_file host/scenarios/generate.py
-need_file host/mcap/export_mcap.py
-need_file host/verify/edr_verify.py
-info "generator  : host/scenarios/generate.py"
-info "exporter   : host/mcap/export_mcap.py"
-info "verifier   : host/verify/edr_verify.py"
+for tool in host/scenarios/generate.py host/mcap/export_mcap.py \
+            host/verify/edr_verify.py host/e2e/e2e_run.py \
+            host/e2e/demo_summary.py; do
+    need_file "$tool"
+    info "tool        : $tool"
+done
 
-# ------------------------------------------------------------------ 1. build --
+# ---------------------------------------------------------------- 1. build ---
 
-step "Building the library, the tests and the tools"
+step "Building the five processes"
 
-BUILD_OK=1
-if ! make BUILD="${BUILD_DIR}" all; then
-    BUILD_OK=0
-    info "the full build reported errors (see above)"
+if ! make BUILD="${BUILD_DIR}" tools; then
+    die "the build reported errors (see above); the demo does not continue"
 fi
-
-if [ ! -x "${BUILD_DIR}/ambre-explore" ]; then
-    die "the build did not produce ${BUILD_DIR}/ambre-explore.
-       This demo needs the explorer binary; run 'make all' and fix the errors
-       reported above."
-fi
-if [ "${BUILD_OK}" -eq 1 ]; then
-    info "build OK"
+for binary in edr-journal edr-capture edr-replay edr-archive; do
+    need_exec "${BUILD_DIR}/${binary}"
+    info "binary      : ${BUILD_DIR}/${binary}"
+done
+# The service tool is named edrctl by the Makefile and edr-ctl in the plan.
+if [ -x "${BUILD_DIR}/edrctl" ]; then
+    info "binary      : ${BUILD_DIR}/edrctl"
+elif [ -x "${BUILD_DIR}/edr-ctl" ]; then
+    info "binary      : ${BUILD_DIR}/edr-ctl"
 else
-    info "build reported errors, but the explorer is present"
+    die "missing service tool: ${BUILD_DIR}/edrctl (or edr-ctl)"
 fi
-need_exec "${BUILD_DIR}/ambre-explore"
 
-# -------------------------------------------------------------- 2. scenario --
+# ------------------------------------------------------------- 2. scenario --
 
-step "Generating the scenario"
+step "Generating the scenario (frontal impact, restraint deployed)"
 
-mkdir -p "${BUILD_DIR}"
-
+mkdir -p "${WORK}"
+# A run always starts on a virgin partition: a leftover image would be
+# recovered and the demonstration would report somebody else's event.
+rm -rf "${RUNDIR}"
 python3 host/scenarios/generate.py \
-    --seed "${SEED}" \
-    --duration-ms "${DURATION_MS}" \
-    --crash-at-ms "${CRASH_AT_MS}" \
+    --preset urban-frontal --seed "${SEED}" \
+    --duration-ms "${DURATION_MS}" --crash-at-ms "${CRASH_AT_MS}" \
     --out "${SCENARIO}"
-
 [ -s "${SCENARIO}" ] || die "the generator produced an empty scenario file"
-info "scenario   : ${SCENARIO} (seed ${SEED}, crash at ${CRASH_AT_MS} ms)"
+info "scenario    : ${SCENARIO}"
+info "impact      : at ${CRASH_AT_MS} ms, 12 km/h, restraint fires -> locked event"
 
-# ------------------------------------------------- 3. write the journal ------
+# --------------------------------------------------- 3..8. the cut cycle ----
 
-step "Writing the journal (capture, trigger, EMERG, seal)"
+step "Replaying the drive, cutting the journal, recovering, exporting"
 
-if ! "${BUILD_DIR}/ambre-explore" \
-        --scenario "${SCENARIO}" \
-        --states 1 \
-        --export-image "${IMAGE}"; then
-    die "the journal write failed"
+info "chain       : edr-replay -> edr-capture -> edr-journal -> ${RUNDIR}/journal.img"
+info "cut         : SIGKILL on edr-journal, window '${CUT_AT}'"
+info ""
+if ! python3 host/e2e/e2e_run.py \
+        --bins "${BUILD_DIR}" --scenario "${SCENARIO}" \
+        --cut-at "${CUT_AT}" --workdir "${RUNDIR}" \
+        --out "${REPORT}"; then
+    die "the end-to-end bench did not reach the expected state;
+       see the output above and ${REPORT}"
+fi
+[ -s "${REPORT}" ] || die "the bench produced no report"
+
+# --------------------------------------------------------------- 9. summary --
+
+step "Summary of the demonstration"
+
+python3 host/e2e/demo_summary.py "${REPORT}" || die "the run is not green"
+
+if [ -f "${CAMPAIGN_REPORT}" ]; then
+    step "Cut campaign on this backend (already run, read from its report)"
+    python3 - "$CAMPAIGN_REPORT" <<'PY'
+import json, sys
+with open(sys.argv[1]) as handle:
+    report = json.load(handle)
+summary = report.get("summary", {})
+print("    cuts executed      : %s" % summary.get("cuts"))
+print("    verdicts           : %s" % json.dumps(summary.get("verdicts"),
+                                                 sort_keys=True))
+print("    invariant violations: %s" % summary.get("violations"))
+print("    cut windows        : %s" % json.dumps(summary.get("windows"),
+                                                 sort_keys=True))
+print("    backend            : %s (%s)" % (report.get("backend"),
+                                            report.get("cut_kind")))
+PY
+else
+    info "no campaign report at ${CAMPAIGN_REPORT}"
+    info "run it with: python3 host/processcut/campaign.py --bins ${BUILD_DIR} \\"
+    info "             --scenario <file> --cycles 200 --jobs 4 --report <out.json>"
 fi
 
-[ -s "${IMAGE}" ] || die "the journal image was not produced"
-info "journal    : ${IMAGE}"
-
-# ---------------------------------------------------- 4/5. cut and recover --
-
-step "Cutting the power and recovering (${STATES} reachable states)"
-
-if ! "${BUILD_DIR}/ambre-explore" \
-        --scenario "${SCENARIO}" \
-        --states "${STATES}" \
-        --variants all \
-        --report "${EXPLORE_REPORT}"; then
-    die "the exploration found an invariant violation, see ${EXPLORE_REPORT}"
-fi
-info "exploration: ${EXPLORE_REPORT}"
-
-# --------------------------------------------------------------- 6. export --
-
-step "Exporting the event to MCAP"
-
-if ! python3 host/mcap/export_mcap.py \
-        --image "${IMAGE}" \
-        --out "${MCAP}"; then
-    die "the MCAP export failed"
-fi
-
-[ -s "${MCAP}" ] || die "the MCAP file was not produced"
-info "mcap       : ${MCAP}"
-
-# --------------------------------------------------------------- 7. verify --
-
-step "Verifying the export against the injected scenario"
-
-if ! python3 host/verify/edr_verify.py \
-        --mcap "${MCAP}" \
-        --scenario "${SCENARIO}"; then
-    die "edr-verify reported a mismatch between the export and the scenario"
-fi
-
-# --------------------------------------------------------------- 8. summary --
-
-json_int() {
-    # json_int <file> <key> -> the integer value of "<key>: <n>" in the report
-    local file="$1" key="$2"
-    grep -o "\"${key}\": *[0-9][0-9]*" "${file}" 2>/dev/null \
-        | head -n 1 | grep -o '[0-9][0-9]*$' || printf '0'
-}
-
-step "Summary"
-
-STATES_EXPLORED="$(json_int "${EXPLORE_REPORT}" states_explored)"
-VIOLATIONS="$(json_int "${EXPLORE_REPORT}" violations)"
-RECOVERIES="$(json_int "${EXPLORE_REPORT}" recoveries_run)"
-ACQUIRED="$(json_int "${EXPLORE_REPORT}" events_acquired)"
-PHANTOM="$(json_int "${EXPLORE_REPORT}" events_phantom)"
-
-printf '    %-34s %s\n' "scenario"                 "${SCENARIO}"
-printf '    %-34s %s\n' "journal image"            "${IMAGE}"
-printf '    %-34s %s\n' "MCAP export"              "${MCAP}"
-printf '    %-34s %s\n' "exploration report"       "${EXPLORE_REPORT}"
 printf '\n'
-printf '    %-34s %s\n' "cut states explored"      "${STATES_EXPLORED}"
-printf '    %-34s %s\n' "recoveries run"           "${RECOVERIES}"
-printf '    %-34s %s\n' "events acquired"          "${ACQUIRED}"
-printf '    %-34s %s\n' "phantom events"           "${PHANTOM}"
-printf '    %-34s %s\n' "invariant violations"     "${VIOLATIONS}"
-printf '\n'
-
-if [ "${VIOLATIONS}" -ne 0 ]; then
-    die "the exploration reported ${VIOLATIONS} invariant violation(s)"
-fi
-
-printf '\033[1;32mDEMO OK\033[0m — the journal survived every explored cut, '
-printf 'the export verified against the injected scenario.\n'

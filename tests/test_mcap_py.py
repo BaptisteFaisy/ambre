@@ -168,19 +168,26 @@ def build_image_bytes():
                                 [truth_point(T0_US) for _ in range(4)]),
             T0_US + step * 10_000)
     put(REC_DATA, pack_samples(data_samples()), T0_US - 200_000)
+    # Two gap records, deliberately out of chronological order: gaps reach the
+    # journal in detection order, so the export must sort them to keep the
+    # channel's log_time non-decreasing (regression test for the ordering
+    # defect the process-cut campaign caught).
+    put(REC_GAP, pack_gap(T0_US + 12_000, T0_US + 15_000, 2), T0_US + 12_000)
     put(REC_GAP, pack_gap(T0_US + 5_000, T0_US + 8_000, 1), T0_US + 5_000)
     put(REC_SEAL, pack_seal(1, 1, 0, 1, 1200), T0_US + 21_000)
     put(REC_EMERG, pack_emerg(2, 1, 0, T0_US + 60_000, points), T0_US + 60_000)
 
+    # Block layout: EMERG 0 | CONT 1-3 | DATA 4-7 | GAP 8 | GAP 9 | SEAL 10,
+    # then the second event's EMERG at 11. Sequence numbers: 1..9.
     events = [
         {"event_id": 1, "order": 1, "state": EV_SEALED, "locked": 1,
          "file_complete": 1, "trig_reason": 3, "start_seg": 0, "start_block": 0,
-         "end_seg": 0, "end_block": 9, "trig_ts_us": T0_US, "seq_emerg": 1,
-         "seq_last": 7},
+         "end_seg": 0, "end_block": 10, "trig_ts_us": T0_US, "seq_emerg": 1,
+         "seq_last": 8},
         {"event_id": 2, "order": 2, "state": EV_OPEN, "locked": 0,
-         "file_complete": 0, "trig_reason": 1, "start_seg": 0, "start_block": 10,
-         "end_seg": 0, "end_block": 10, "trig_ts_us": T0_US + 60_000,
-         "seq_emerg": 8, "seq_last": 0},
+         "file_complete": 0, "trig_reason": 1, "start_seg": 0, "start_block": 11,
+         "end_seg": 0, "end_block": 11, "trig_ts_us": T0_US + 60_000,
+         "seq_emerg": 9, "seq_last": 0},
     ]
     image[0:512] = pack_table(7, events, blk)              # copy A, newest
     image[512:1024] = pack_table(6, events, blk)           # copy B, older
@@ -274,8 +281,8 @@ class TestJournalReader(unittest.TestCase):
         self.assertIsNotNone(view.seal)
         self.assertEqual(view.seal["file_complete"], 1)
         self.assertEqual(view.seal["max_dv_long_mm_s"], 1200)
-        self.assertEqual(len(view.gaps), 1)
-        self.assertEqual(view.gaps[0]["reason"], 1)
+        self.assertEqual(len(view.gaps), 2)
+        self.assertEqual({g["reason"] for g in view.gaps}, {1, 2})
         self.assertTrue(view.locked)
         self.assertTrue(view.file_complete)
 
@@ -301,7 +308,7 @@ class TestJournalReader(unittest.TestCase):
         torn[start:start + 512] = b"\x00" * 512
         reader = JournalReader(data=bytes(torn))
         self.assertEqual(reader.read_event(1).sample_count(), 0)
-        self.assertEqual(len(reader.records()), 7)     # 8 records minus the DATA
+        self.assertEqual(len(reader.records()), 8)     # 9 records minus the DATA
 
     def test_bad_table_crc_falls_back_to_other_copy(self):
         broken = bytearray(self.image)
@@ -330,8 +337,16 @@ class TestMcapExport(unittest.TestCase):
         self.assertEqual(counts[export_mcap.TOPIC_PRECRASH], 11)
         self.assertEqual(counts[export_mcap.TOPIC_DELTA_V], 3)
         self.assertEqual(counts[export_mcap.TOPIC_EVENT], 1)
-        self.assertEqual(counts[export_mcap.TOPIC_GAPS], 1)
+        self.assertEqual(counts[export_mcap.TOPIC_GAPS], 2)
         self.assertGreater(counts[export_mcap.TOPIC_ACCEL], 0)
+
+    def test_gaps_channel_is_time_ordered(self):
+        """Two gap records are stored out of chronological order in the image;
+        the exported channel must still be non-decreasing."""
+        by_topic = mcap_writer.McapReader(self.mcap_path).messages_by_topic()
+        times = [m["log_time"] for m in by_topic[export_mcap.TOPIC_GAPS]]
+        self.assertEqual(len(times), 2)
+        self.assertEqual(times, sorted(times), "gaps channel is not monotonic")
 
     def test_mcap_structure(self):
         reader = mcap_writer.McapReader(self.mcap_path)

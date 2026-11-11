@@ -17,15 +17,22 @@ BUILD    := build
 JOBS     ?= $(shell nproc 2>/dev/null || echo 4)
 
 WARN     := -Wall -Wextra -Wshadow -Wpedantic
-CFLAGS   ?= -std=c11 -O2 -g $(WARN) -Werror -Ifmt -I. -Itests -Ihost/simdisk -Ihost/explore
+CFLAGS   ?= -std=c11 -O2 -g $(WARN) -Werror -Ifmt -I. -Itests -Ihost/simdisk \
+            -Ihost/explore -Itarget -Itarget/port -Itarget/ipc
 LDFLAGS  ?=
 
 FMT_SRC  := $(sort $(wildcard fmt/*.c))
+# Portable half of the five target processes + the portability layer.
+# *_qnx.c files are NOT part of the PC library: they are syntax-checked only
+# (target `qnx-syntax`), because they include real QNX headers.
+PORT_SRC := $(sort $(wildcard target/port/*.c))
+PROC_SRC := $(sort $(filter-out %_qnx.c %/main.c %/main.cpp,$(wildcard target/*/*.c)))
+IPC_SRC  := $(sort $(wildcard target/ipc/*.c))
 # host tools linked into the PC library: the crash explorer and its support.
 # host/explore/main.c stays out (it holds main()); it is linked by the CLI.
 HOST_SRC := $(sort $(wildcard host/simdisk/*.c)) \
             $(sort $(filter-out %/main.c,$(wildcard host/explore/*.c)))
-LIB_SRC  := $(FMT_SRC) $(HOST_SRC)
+LIB_SRC  := $(FMT_SRC) $(HOST_SRC) $(PORT_SRC) $(PROC_SRC) $(IPC_SRC)
 LIB_OBJ  := $(patsubst %.c,$(BUILD)/%.o,$(LIB_SRC))
 LIB      := $(BUILD)/libambre.a
 
@@ -33,10 +40,12 @@ TEST_SRC := $(sort $(wildcard tests/test_*.c))
 TEST_BIN := $(patsubst tests/%.c,$(BUILD)/%,$(TEST_SRC))
 
 EXPLORE_MAIN := host/explore/main.c
-TOOLS        := $(BUILD)/ambre-explore $(BUILD)/ambre-dump-truth
+# One binary per process, linked from its main plus the portable library.
+PROCESS_BIN  := $(patsubst target/%/main.c,$(BUILD)/%,$(wildcard target/*/main.c))
+TOOLS        := $(BUILD)/ambre-explore $(BUILD)/ambre-dump-truth $(PROCESS_BIN)
 
 .PHONY: all test explore explore-full crosscheck demo sizecheck clean tools \
-        scenario mcap verify help
+        scenario mcap verify help qnx-syntax processes
 
 all: $(LIB) $(TEST_BIN) tools
 
@@ -56,6 +65,29 @@ $(BUILD)/test_%: tests/test_%.c tests/ambre_test_util.c $(LIB)
 	$(CC) $(CFLAGS) $< tests/ambre_test_util.c $(LIB) -o $@ $(LDFLAGS)
 
 tools: $(TOOLS)
+
+processes: $(PROCESS_BIN)
+
+$(BUILD)/edr-%: target/%/main.c $(LIB)
+	@mkdir -p $(BUILD)
+	$(CC) $(CFLAGS) $< $(LIB) -o $@ $(LDFLAGS) -lpthread
+
+# Syntax check of the QNX glue against the stub headers: objects only, never
+# linked, so a missing QNX symbol can never break the PC build (docs/QNX-PORT.md).
+QNX_GLUE := $(sort $(wildcard target/*/*_qnx.c))
+qnx-syntax:
+	@mkdir -p $(BUILD)/qnx-syntax
+	@for f in $(QNX_GLUE); do \
+	  printf '  qnx-syntax %-46s' "$$f"; \
+	  if $(CC) -std=c11 -O0 $(WARN) -Werror -fsyntax-only \
+	       -Itarget/qnx-stub/include -Ifmt -Itarget -Itarget/port -Itarget/ipc \
+	       -I. "$$f" 2>$(BUILD)/qnx-syntax/$$(basename $$f).log; then \
+	    echo OK; \
+	  else \
+	    echo FAIL; cat $(BUILD)/qnx-syntax/$$(basename $$f).log; exit 1; \
+	  fi; \
+	done
+	@echo "qnx-syntax: $$(echo $(QNX_GLUE) | wc -w) glue file(s) compile against the stubs"
 
 $(BUILD)/ambre-explore: $(EXPLORE_MAIN) $(LIB)
 	@mkdir -p $(BUILD)

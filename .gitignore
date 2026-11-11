@@ -24,3 +24,8 @@ __pycache__/
 host/fuzz/
 host/latency/
 host/e2e/
+
+# in-flight agent work (e2e/quality), re-added when their own tests pass
+host/processcut/campaign.py
+host/processcut/campaign_report.py
+host/report/

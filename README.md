@@ -7,7 +7,7 @@ state instead of running a handful of lucky reboots.
 
 QNX Global Hackathon 2026 — Automotive & Mobility.
 
-**Website (public):** <https://baptistefaisy.github.io/ambre/> — the pitch, the
+**Website (public):** <https://tradoooo.github.io/ambre/> — the pitch, the
 validation results, the tutorial, a real generated expert report, and a **live
 emulator**: the explorer of this repository (`fmt/` + `host/explore/` +
 `host/simdisk/`) compiled to WebAssembly by [`scripts/build-web.sh`](scripts/build-web.sh),

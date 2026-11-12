@@ -1,6 +1,6 @@
 # The Ambre website
 
-Public address: **<https://baptistefaisy.github.io/ambre/>**
+Public address: **<https://tradoooo.github.io/ambre/>**
 
 Published straight from this directory by GitHub Pages. There is **no build
 step and no dependency**: the pages are hand-written HTML and one stylesheet,
@@ -114,5 +114,5 @@ Check a deployment with:
 
 ```sh
 gh run list --workflow pages.yml --limit 1
-curl -sI https://baptistefaisy.github.io/ambre/ | head -1
+curl -sI https://tradoooo.github.io/ambre/ | head -1
 ```

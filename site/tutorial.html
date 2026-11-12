@@ -34,7 +34,7 @@
         <li><a href="validation.html">Validation</a></li>
         <li><a href="tutorial.html" aria-current="page">Tutorial</a></li>
         <li><a href="report/index.html">Sample report</a></li>
-        <li><a href="https://github.com/BaptisteFaisy/ambre">Code</a></li>
+        <li><a href="https://github.com/Tradoooo/ambre">Code</a></li>
       </ul>
     </nav>
   </div>
@@ -55,7 +55,7 @@
       <div class="hero-actions">
         <a class="btn btn-primary" href="#start">Start in three commands</a>
         <a class="btn" href="#chapters">The six chapters</a>
-        <a class="btn" href="https://github.com/BaptisteFaisy/ambre/tree/main/codelab">Chapters on GitHub</a>
+        <a class="btn" href="https://github.com/Tradoooo/ambre/tree/main/codelab">Chapters on GitHub</a>
       </div>
     </div>
   </section>
@@ -66,7 +66,7 @@
       <p class="section-lede">Nothing to install beyond a C compiler: no QNX SDP, no external library, no container,
         no network. The QNX-specific code is <em>syntax-checked</em> against stub headers — what that proves, and
         what it does not, is written down in
-        <a href="https://github.com/BaptisteFaisy/ambre/blob/main/docs/QNX-PORT.md">docs/QNX-PORT.md</a> and
+        <a href="https://github.com/Tradoooo/ambre/blob/main/docs/QNX-PORT.md">docs/QNX-PORT.md</a> and
         repeated at the bottom of this page.</p>
 
       <div class="cards">
@@ -110,7 +110,7 @@
       <h2 class="section-title">Start in three commands</h2>
       <p class="section-lede">Clone, build, run the tests. That is the whole installation.</p>
 
-      <pre class="code"><code>git clone https://github.com/BaptisteFaisy/ambre.git &amp;&amp; cd ambre
+      <pre class="code"><code>git clone https://github.com/Tradoooo/ambre.git &amp;&amp; cd ambre
 make
 make test</code></pre>
 
@@ -132,7 +132,7 @@ PASSED: 71 checks, 0 failures</code></pre>
 
       <p><strong>What to observe.</strong> The last line of <code>make test</code> is <code>ALL TESTS PASSED</code>.
       Measured on this repository on 2026-11-11 (development machine, x86-64, gcc 13.3.0, Python 3.12.3) —
-      <a href="https://github.com/BaptisteFaisy/ambre/blob/main/docs/CAMPAIGN.md">docs/CAMPAIGN.md</a> §1–2:</p>
+      <a href="https://github.com/Tradoooo/ambre/blob/main/docs/CAMPAIGN.md">docs/CAMPAIGN.md</a> §1–2:</p>
 
       <table class="data">
         <caption>Level 0, measured on 2026-11-11 — 23 suites, 48 936 checks, 0 failures.</caption>
@@ -150,7 +150,7 @@ PASSED: 71 checks, 0 failures</code></pre>
         <p><strong>Not required: a QNX SDP.</strong> Nothing in this codelab needs one. Everything runs on the PC
         against the POSIX backend, and the QNX-specific code is only syntax-checked against stub headers
         (<code>make qnx-syntax</code>). Be suspicious of any tutorial that hides that distinction; this one does
-        not — see <a href="https://github.com/BaptisteFaisy/ambre/blob/main/docs/QNX-PORT.md">docs/QNX-PORT.md</a>.</p>
+        not — see <a href="https://github.com/Tradoooo/ambre/blob/main/docs/QNX-PORT.md">docs/QNX-PORT.md</a>.</p>
       </div>
     </div>
   </section>
@@ -210,7 +210,7 @@ PASSED: 71 checks, 0 failures</code></pre>
       <code>block_corruption_error_codes</code> return a <em>different</em> error for a bad magic, a bad version and
       a bad CRC.</p>
       <p><strong>Requirement covered.</strong> <span class="ok">STO-02</span> <span class="ok">REP-05</span>
-      — <a href="https://github.com/BaptisteFaisy/ambre/blob/main/codelab/01-block-and-crc.md">Read the chapter
+      — <a href="https://github.com/Tradoooo/ambre/blob/main/codelab/01-block-and-crc.md">Read the chapter
       (01-block-and-crc.md)</a></p>
 
       <h3 id="ch2">2 · The table in two copies</h3>
@@ -235,7 +235,7 @@ PASSED: 71 checks, 0 failures</code></pre>
       <code>scan_rebuild_table_exact_events</code> (with the table gone, the rebuild finds exactly the injected
       events and nothing else).</p>
       <p><strong>Requirement covered.</strong> <span class="ok">STO-03</span> <span class="ok">STO-04</span>
-      <span class="ok">REP-02</span> — <a href="https://github.com/BaptisteFaisy/ambre/blob/main/codelab/02-table-two-copies.md">Read
+      <span class="ok">REP-02</span> — <a href="https://github.com/Tradoooo/ambre/blob/main/codelab/02-table-two-copies.md">Read
       the chapter (02-table-two-copies.md)</a></p>
 
       <h3 id="ch3">3 · The continuous journal</h3>
@@ -260,7 +260,7 @@ PASSED: 71 checks, 0 failures</code></pre>
       <code>logging_exactness</code> (the log records exactly the calls made, in order) and
       <code>locked_event_is_never_recycled</code> (a locked event is never a victim).</p>
       <p><strong>Requirement covered.</strong> <span class="ok">ACQ-06</span> <span class="ok">STO-01</span>
-      <span class="ok">STO-03</span> — <a href="https://github.com/BaptisteFaisy/ambre/blob/main/codelab/03-continuous-journal.md">Read
+      <span class="ok">STO-03</span> — <a href="https://github.com/Tradoooo/ambre/blob/main/codelab/03-continuous-journal.md">Read
       the chapter (03-continuous-journal.md)</a></p>
 
       <h3 id="ch4">4 · The critical path of the freeze</h3>
@@ -285,7 +285,7 @@ PASSED: 71 checks, 0 failures</code></pre>
       trigger must be exactly one EMERG write, one table commit, one flush — in that order. If a refactor ever
       adds a fourth operation, this test says so.</p>
       <p><strong>Requirement covered.</strong> <span class="ok">GEL-01</span> <span class="ok">GEL-02</span>
-      <span class="ok">GEL-03</span> — <a href="https://github.com/BaptisteFaisy/ambre/blob/main/codelab/04-freeze-critical-path.md">Read
+      <span class="ok">GEL-03</span> — <a href="https://github.com/Tradoooo/ambre/blob/main/codelab/04-freeze-critical-path.md">Read
       the chapter (04-freeze-critical-path.md)</a></p>
 
       <h3 id="ch5">5 · Idempotent recovery</h3>
@@ -312,7 +312,7 @@ PASSED: 71 checks, 0 failures</code></pre>
       <code>both_tables_destroyed</code> (rebuild by scanning) and <code>recovery_is_idempotent</code> (run
       twice, same state).</p>
       <p><strong>Requirement covered.</strong> <span class="ok">REP-01..REP-05</span>
-      <span class="ok">I1/I3/I7/I8</span> — <a href="https://github.com/BaptisteFaisy/ambre/blob/main/codelab/05-idempotent-recovery.md">Read
+      <span class="ok">I1/I3/I7/I8</span> — <a href="https://github.com/Tradoooo/ambre/blob/main/codelab/05-idempotent-recovery.md">Read
       the chapter (05-idempotent-recovery.md)</a></p>
 
       <h3 id="ch6">6 · Exhaustive exploration of the cuts</h3>
@@ -339,7 +339,7 @@ PASSED: 71 checks, 0 failures</code></pre>
       violations</code> (measured on 2026-11-11). 64 591 is not a cap that was hit: it is the whole reachable space
       of the reference scenario, and <code>violations_by_invariant</code> is zero for each of I1..I8.</p>
       <p><strong>Requirement covered.</strong> <span class="ok">ROB-01</span> <span class="ok">spec §7.3</span>
-      — <a href="https://github.com/BaptisteFaisy/ambre/blob/main/codelab/06-exhaustive-exploration.md">Read the
+      — <a href="https://github.com/Tradoooo/ambre/blob/main/codelab/06-exhaustive-exploration.md">Read the
       chapter (06-exhaustive-exploration.md)</a></p>
     </div>
   </section>
@@ -370,13 +370,13 @@ PASSED: 71 checks, 0 failures</code></pre>
       <pre class="code"><code>    DEMO OK — the event survived a brutal process death, the recovery sealed it,
     the export verified and its class A data equals the injected scenario.</code></pre>
 
-      <p>Measured on 2026-11-11 (<a href="https://github.com/BaptisteFaisy/ambre/blob/main/docs/CAMPAIGN.md">docs/CAMPAIGN.md</a>
+      <p>Measured on 2026-11-11 (<a href="https://github.com/Tradoooo/ambre/blob/main/docs/CAMPAIGN.md">docs/CAMPAIGN.md</a>
       §1 and §4): the run took 7.1 s, the <code>SIGKILL</code> landed in the <code>acquired</code> window at
       +6 033 ms, the recovery returned 1 event <code>sealed locked=yes complete_file=no</code>, the MCAP export
       exited with rc=0, the official checks were green and the Class A data matched the injected rows 11/11
       (alignment 29 ms, worst row slop 4 ms). The demo also prints its own one-shot "acquired in 4.428 ms" under
       load — that is a single sample, not a campaign figure; the medians are in
-      <a href="https://github.com/BaptisteFaisy/ambre/blob/main/docs/CAMPAIGN-LATENCY.md">docs/CAMPAIGN-LATENCY.md</a>.</p>
+      <a href="https://github.com/Tradoooo/ambre/blob/main/docs/CAMPAIGN-LATENCY.md">docs/CAMPAIGN-LATENCY.md</a>.</p>
     </div>
   </section>
 
@@ -385,7 +385,7 @@ PASSED: 71 checks, 0 failures</code></pre>
       <h2 class="section-title">Going further</h2>
       <p class="section-lede">The codelab is the short path; these are the campaigns the project is built on. All
       the figures below were produced by the command quoted next to them, on 2026-11-11, and are published in
-      <a href="https://github.com/BaptisteFaisy/ambre/blob/main/docs/CAMPAIGN.md">docs/CAMPAIGN.md</a>.</p>
+      <a href="https://github.com/Tradoooo/ambre/blob/main/docs/CAMPAIGN.md">docs/CAMPAIGN.md</a>.</p>
 
       <table class="data">
         <caption>Campaigns beyond the codelab — command, what it proves, measured result.</caption>
@@ -454,7 +454,7 @@ PASSED: 71 checks, 0 failures</code></pre>
         could be obtained: no image was built, nothing was booted, no kernel trace was taken, no target latency
         was measured. Every figure on this page carries <code>backend=posix</code>. The full statement — what each
         build proves and what it does not — is in
-        <a href="https://github.com/BaptisteFaisy/ambre/blob/main/docs/QNX-PORT.md">docs/QNX-PORT.md</a>.</p>
+        <a href="https://github.com/Tradoooo/ambre/blob/main/docs/QNX-PORT.md">docs/QNX-PORT.md</a>.</p>
         <p><strong>Killing a process is not a power cut.</strong> A <code>SIGKILL</code> does not lose the writes
         already handed to the host kernel, so the POSIX bench exercises the order and the interruption of writes
         and the whole recovery path, but not the loss of a volatile cache. That case is covered at level 1 (the
@@ -463,13 +463,13 @@ PASSED: 71 checks, 0 failures</code></pre>
         <p><strong>The latency budget is not met by these numbers.</strong> PERF-02 (≤ 20 ms trigger → acquired) is
         not proven: 99.7 % of the measured freeze is NVMe media time on a PC file. PERF-03 (the software share) is
         met at the median — 10 µs against a 500 µs budget — but PERF-01 is exceeded at the tail (p99 up to 203 ms
-        under disk load). Read <a href="https://github.com/BaptisteFaisy/ambre/blob/main/docs/CAMPAIGN.md">docs/CAMPAIGN.md</a>
+        under disk load). Read <a href="https://github.com/Tradoooo/ambre/blob/main/docs/CAMPAIGN.md">docs/CAMPAIGN.md</a>
         §7 before quoting any of it.</p>
       </div>
 
       <p>Two pages of this site carry the full picture: the <a href="validation.html">Validation</a> page for the
       requirement-by-requirement traceability matrix, and
-      <a href="https://github.com/BaptisteFaisy/ambre/blob/main/docs/QNX-PORT.md">docs/QNX-PORT.md</a> for the
+      <a href="https://github.com/Tradoooo/ambre/blob/main/docs/QNX-PORT.md">docs/QNX-PORT.md</a> for the
       exact procedure to build and boot the QNX target once an SDP exists — every step of it says what must be
       observed for it to count as passing, and none of them has been executed here.</p>
     </div>
@@ -483,9 +483,9 @@ PASSED: 71 checks, 0 failures</code></pre>
        Aligned with UN Regulation No.&nbsp;160 — not compliant, not certified.</p>
     <nav aria-label="Footer">
       <ul>
-        <li><a href="https://github.com/BaptisteFaisy/ambre">Repository</a></li>
-        <li><a href="https://github.com/BaptisteFaisy/ambre/blob/main/NOTICE">Notice</a></li>
-        <li><a href="https://github.com/BaptisteFaisy/ambre/blob/main/docs/CAMPAIGN.md">Campaign</a></li>
+        <li><a href="https://github.com/Tradoooo/ambre">Repository</a></li>
+        <li><a href="https://github.com/Tradoooo/ambre/blob/main/NOTICE">Notice</a></li>
+        <li><a href="https://github.com/Tradoooo/ambre/blob/main/docs/CAMPAIGN.md">Campaign</a></li>
       </ul>
     </nav>
   </div>

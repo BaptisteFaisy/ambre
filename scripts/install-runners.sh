@@ -23,12 +23,12 @@
 #
 # Le jeton d'enregistrement est lu sur stdin (jamais en argument, donc jamais
 # visible dans la liste des processus) :
-#   gh api -X POST repos/BaptisteFaisy/ambre/actions/runners/registration-token \
+#   gh api -X POST repos/Tradoooo/ambre/actions/runners/registration-token \
 #     --jq .token | ssh r630 'RUNNER_NAMES="02 03" bash -s' < scripts/install-runners.sh
 
 set -euo pipefail
 
-REPO="${REPO:-BaptisteFaisy/ambre}"
+REPO="${REPO:-Tradoooo/ambre}"
 LABELS="${LABELS:-self-hosted,Linux,X64,ambre-worker,ci-node}"
 BASE="${BASE:-$HOME/ci-runners}"
 PREFIX="${PREFIX:-ambre}"

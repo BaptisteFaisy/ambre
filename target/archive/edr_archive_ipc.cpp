@@ -96,11 +96,18 @@ class ServiceLink {
         const int got = ambre_port_conn_request(
             conn_, buffer, static_cast<size_t>(total), reply, capacity,
             static_cast<uint64_t>(kTimeoutMs) * 1000u, nullptr);
-        if (got <= 0) {
+        if (got < 0) {
             *error = transport_error(got);
             return -1;
         }
-        return check_reply(reply, got, expected, error);
+        /* The transport returns a status (0 = EOK), never a byte count: the
+         * reply is self-describing, so read its length from the header. */
+        const size_t len = ambre_ipc_frame_len(reply);
+        if (len == 0u) {
+            *error = "malformed reply from edr-journal";
+            return -1;
+        }
+        return check_reply(reply, static_cast<int>(len), expected, error);
     }
 
  private:

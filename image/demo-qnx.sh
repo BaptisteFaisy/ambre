@@ -11,18 +11,19 @@
 # holds the pre-crash class A data.
 #
 # The power cut is NOT in this script: it is a SIGKILL on QEMU, sent by the
-# host (scripts/qnx-vm.sh powercut). After the machine comes back up, this
+# host (scripts/qnx-demo.sh powercut). After the machine comes back up, this
 # same script runs again, the journal recovers the partition (REP-01) and
 # edrctl list shows what survived.
 #
-# The demo image has no file system and no coreutils: only the shell builtins
-# (echo) and the five Ambre binaries are available. The wait is a poll on the
-# journal's own answer — every edrctl call is a round trip, so the loop costs
-# real time.
+# The demo image has no file system and no shell utility beyond the builtins:
+# no sleep, no cat, and NO pipes (the shell reports "can't create pipe"), so
+# the wait is a poll loop and every captured output is staged through a RAM
+# file under /dev/shmem.
 
 JOURNAL=/dev/edr/journal
 DISK=/dev/hd0t177
 CTL=/proc/boot/edrctl
+LST=/dev/shmem/ambre_lst
 
 banner() {
     echo ''
@@ -31,24 +32,30 @@ banner() {
     echo '=============================================================='
 }
 
-# Wait until the journal answers (or give up after a bounded number of
-# round trips).
+# First line of "edrctl list", staged through a RAM file: the result lands in
+# LIST_LINE, because the shell has no pipes here.
+list_first() {
+    $CTL --journal $JOURNAL list --json > "$LST" 2>/dev/null
+    read LIST_LINE < "$LST"
+}
+
+# Wait until the journal answers, or give up after bounded round trips.
 wait_ready() {
     i=0
-    while [ "$i" -lt 400 ]; do
-        if $CTL --journal $JOURNAL status > /dev/null 2>&1; then
-            return 0
-        fi
+    while [ "$i" -lt 500 ]; do
+        $CTL --journal $JOURNAL status > /dev/null 2>&1
+        [ "$?" -eq 0 ] && return 0
         i=$((i + 1))
     done
     return 1
 }
 
-# Wait until the journal lists an event.
+# Wait until the journal lists at least one event.
 wait_event() {
     i=0
-    while [ "$i" -lt 800 ]; do
-        if [ -n "$($CTL --journal $JOURNAL list 2>/dev/null)" ]; then
+    while [ "$i" -lt 1200 ]; do
+        list_first
+        if [ -n "$LIST_LINE" ]; then
             return 0
         fi
         i=$((i + 1))
@@ -66,16 +73,14 @@ wait_ready
 
 banner "2. edrctl status — the service answers"
 $CTL --journal $JOURNAL status
-echo "-- what the journal logged (slogger2 buffer):"
-slog2info
 
-BEFORE=$($CTL --journal $JOURNAL list 2>/dev/null)
-if [ -z "$BEFORE" ]; then
+list_first
+if [ -z "$LIST_LINE" ]; then
     banner "3. first boot: the partition is empty, so we drive the crash"
     echo '-- edr-capture starts (priority 61) and listens for the frames'
     /proc/boot/edr-capture --journal $JOURNAL --listen /dev/edr/in --profile eu &
     i=0
-    while [ "$i" -lt 200 ]; do
+    while [ "$i" -lt 300 ]; do
         i=$((i + 1))
     done
     echo '-- edr-replay: 4 s of driving, frontal impact at 2.5 s'

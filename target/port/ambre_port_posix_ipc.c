@@ -345,7 +345,12 @@ int ambre_port_conn_request(ambre_port_conn_t *c, const void *req, size_t req_le
                             void *reply, size_t reply_cap, uint64_t timeout_us,
                             uint64_t *latency_ns)
 {
-    return conn_xfer(c, req, req_len, reply, reply_cap, timeout_us, latency_ns);
+    int got = conn_xfer(c, req, req_len, reply, reply_cap, timeout_us,
+                        latency_ns);
+
+    /* Same contract as the QNX backend: a status, not a byte count (the
+     * caller reads the reply's length from its own header). */
+    return (got >= 0) ? AMBRE_PORT_OK : got;
 }
 
 int ambre_port_conn_send(ambre_port_conn_t *c, const void *buf, size_t len,

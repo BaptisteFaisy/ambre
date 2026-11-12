@@ -33,6 +33,10 @@ int ambre_ipc_build(void *buf, size_t cap, ambre_ipc_msg_t type,
 
 /* Total wire size announced by a header: header + body (0 if h is NULL). */
 size_t ambre_ipc_frame_total(const ambre_ipc_hdr_t *h);
+/* The wire size a reply buffer announces: AMBRE_IPC_HDR_SIZE + body_len.
+ * Returns 0 when the header is malformed. Used by the channel clients instead
+ * of the transport's return value, which is a status on QNX (MsgSend). */
+size_t ambre_ipc_frame_len(const void *buf);
 
 /* Check a received datagram: the header must be valid AND the number of
  * bytes received must match the announced total.

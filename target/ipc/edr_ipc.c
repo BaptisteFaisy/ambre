@@ -87,6 +87,20 @@ int ambre_ipc_build(void *buf, size_t cap, ambre_ipc_msg_t type,
     return (int)total;
 }
 
+size_t ambre_ipc_frame_len(const void *buf)
+{
+    ambre_ipc_hdr_t hdr;
+
+    if (buf == NULL) {
+        return 0u;
+    }
+    memcpy(&hdr, buf, sizeof(hdr));
+    if (ambre_ipc_header_validate(&hdr) != AMBRE_OK) {
+        return 0u;
+    }
+    return ambre_ipc_frame_total(&hdr);
+}
+
 int ambre_ipc_frame_check(const void *buf, size_t received)
 {
     ambre_ipc_hdr_t hdr;

@@ -147,11 +147,11 @@ void ambre_port_conn_close(ambre_port_conn_t *c);
 int ambre_port_conn_send(ambre_port_conn_t *c, const void *buf, size_t len,
                          uint64_t timeout_us, uint64_t *latency_ns);
 
-/* Request/reply: send one message and read the answer into `reply`.
- * Returns the number of bytes received, or a negative ambre_port_err_t.
- * On QNX this is a single MsgSend() (the reply is part of the transaction);
- * on POSIX it is a send followed by a bounded receive on the same
- * SOCK_SEQPACKET connection, which preserves the message boundary. */
+/* Request/reply: send one message and read the answer into `reply` (which
+ * must be at least AMBRE_IPC_FRAME_MAX bytes). Returns AMBRE_PORT_OK (0) on
+ * success, or a negative ambre_port_err_t. The caller reads the reply's LENGTH
+ * from its own header (ambre_ipc_frame_total): on QNX MsgSend returns the
+ * MsgReply status, not a byte count, so the transport cannot report the size. */
 #define AMBRE_PORT_HAS_CONN_REQUEST 1
 int ambre_port_conn_request(ambre_port_conn_t *c, const void *req, size_t req_len,
                             void *reply, size_t reply_cap, uint64_t timeout_us,

@@ -61,8 +61,9 @@ static void qnx_service_name(const char *path, char *out, size_t cap)
 }
 
 typedef struct {
-    rcvid_t  rcvid;
-    uint32_t peer;
+    rcvid_t  rcvid;   /* the message being answered                          */
+    uint32_t scoid;   /* the connection: stable for the whole connection     */
+    uint32_t peer;    /* the peer id announced by the server for that frame  */
     bool     active;
 } qnx_peer_slot_t;
 
@@ -144,22 +145,43 @@ void ambre_port_chan_close(ambre_port_chan_t *c)
 }
 
 /* QNX-only: verified on target, syntax-checked on PC */
-static uint32_t map_qnx_rcvid(ambre_port_chan_t *c, rcvid_t rcvid)
+/* Map a received message to its peer id.
+ *
+ * The slot is keyed by the CONNECTION (scoid), not by the message (rcvid):
+ * the rcvid changes with every message, and a connection that dies takes its
+ * slot with it. Keying by rcvid and never freeing the slot on disconnect
+ * filled the table with stale entries - after AMBRE_QNX_MAX_CONNS connections
+ * the table was full and every reply went to the wrong transaction, so the
+ * client got an empty answer. */
+static uint32_t map_qnx_rcvid(ambre_port_chan_t *c, rcvid_t rcvid, uint32_t scoid)
 {
     for (uint32_t i = 0u; i < AMBRE_QNX_MAX_CONNS; i++) {
-        if (c->slots[i].active && c->slots[i].rcvid == rcvid) {
+        if (c->slots[i].active && c->slots[i].scoid == scoid) {
+            c->slots[i].rcvid = rcvid;
             return c->slots[i].peer;
         }
     }
     for (uint32_t i = 0u; i < AMBRE_QNX_MAX_CONNS; i++) {
         if (!c->slots[i].active) {
             c->slots[i].rcvid = rcvid;
+            c->slots[i].scoid = scoid;
             c->slots[i].peer = c->next_peer++;
             c->slots[i].active = true;
             return c->slots[i].peer;
         }
     }
     return 1u;
+}
+
+/* A connection died: its slot goes back to the pool (QNX-05). */
+static void free_qnx_scoid(ambre_port_chan_t *c, uint32_t scoid)
+{
+    for (uint32_t i = 0u; i < AMBRE_QNX_MAX_CONNS; i++) {
+        if (c->slots[i].active && c->slots[i].scoid == scoid) {
+            c->slots[i].active = false;
+            return;
+        }
+    }
 }
 
 /* QNX-only: verified on target, syntax-checked on PC */
@@ -184,12 +206,13 @@ int ambre_port_chan_recv(ambre_port_chan_t *c, void *buf, size_t cap,
         if (rcvid == 0) {
             struct _pulse *p = (struct _pulse *)buf;
             if (p->code == _PULSE_CODE_DISCONNECT) {
+                free_qnx_scoid(c, (uint32_t)p->scoid);
                 c->disconnected_peer = (uint32_t)p->value.sival_int;
             }
             continue;
         }
         if (peer != NULL) {
-            *peer = map_qnx_rcvid(c, rcvid);
+            *peer = map_qnx_rcvid(c, rcvid, (uint32_t)info.scoid);
         }
         return (int)info.msglen;
     }
@@ -335,7 +358,11 @@ static int conn_xfer_qnx(ambre_port_conn_t *c, const void *req, size_t req_len,
     if (latency_ns != NULL) {
         *latency_ns = (ambre_port_now_us() - t0) * 1000u;
     }
-    return rc;
+    /* MsgSend does NOT return the reply byte count: "any other return value is
+     * the status from MsgReply()" (QNX Library Reference, MsgSend). A reply is
+     * fully in the buffer iff the call returned EOK, so success is 0 here; the
+     * caller reads the reply's length from its own header. */
+    return AMBRE_PORT_OK;
 }
 
 int ambre_port_conn_request(ambre_port_conn_t *c, const void *req, size_t req_len,

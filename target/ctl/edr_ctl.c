@@ -49,7 +49,12 @@ static int port_xfer(void *ctx, const void *req, size_t req_len, void *reply,
     if (got < 0) {
         return got;
     }
-    *reply_len = (size_t)got;
+    /* The transport returns a status (0 = EOK), never a byte count: the reply
+     * is self-describing, so read its length from the header. */
+    *reply_len = ambre_ipc_frame_len(reply);
+    if (*reply_len == 0u) {
+        return AMBRE_ERR_TORN;
+    }
     return AMBRE_PORT_OK;
 }
 #else

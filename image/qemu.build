@@ -68,6 +68,11 @@
     devc-ser8250 -e
     waitfor /dev/ser2 10
 
+    # The pipe module: without it the shell cannot create a pipe, and every
+    # command substitution fails ("can't create pipe").
+    pipe
+    waitfor /dev/pipe 10
+
     # The random daemon must run before the filesystem event manager.
     random
     waitfor /dev/random 10
@@ -172,3 +177,4 @@ edr-archive
 demo-qnx.sh
 diagnose.sh
 scenario.txt
+name_probe

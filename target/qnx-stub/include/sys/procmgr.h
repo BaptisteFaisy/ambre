@@ -59,6 +59,8 @@ int procmgr_daemon(int status, unsigned flags);
 #define PROCMGR_AID_INTERRUPT      2u   /* InterruptAttachThread/Event (VIO-04) */
 #define PROCMGR_AID_PATHSPACE      3u   /* resmgr_attach() (QNX-01) */
 #define PROCMGR_AID_PUBLIC_CHANNEL 4u   /* ChannelCreate() without PRIVATE */
+/* End-of-list marker of a procmgr_ability() request (real header: PROCMGR_AID_MASK). */
+#define PROCMGR_AID_EOL        0x7fffffffu
 #define PROCMGR_AID_IO             5u   /* ThreadCtl(_NTO_TCTL_IO) */
 #define PROCMGR_AID_RLIMIT         6u   /* setrlimit() above the soft limit */
 #define PROCMGR_AID_TRACE          7u   /* kernel trace control (QNX-09) */

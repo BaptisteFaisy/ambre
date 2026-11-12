@@ -70,6 +70,24 @@ typedef struct _thread_pool_attr {
 
 dispatch_t *dispatch_create(void);
 dispatch_t *dispatch_create_channel(int chid, unsigned flags);
+
+/* name_attach()/name_open(): QNX's "basic pathname-to-server-connection
+ * mapping, without having to become a full resource manager" (Library
+ * Reference). Added 2026-11-12, copied from the real sys/dispatch.h
+ * (SDP 8.0, lines 129-142). A name is published under /dev/name/local/. */
+#define NAME_FLAG_DETACH_SAVEDPP 0x00000001u
+
+typedef struct _name_attach {
+    dispatch_t *dpp;
+    int         chid;
+    int         mnt_id;
+    int         zero[2];
+} name_attach_t;
+
+name_attach_t *name_attach(dispatch_t *dpp, const char *path, unsigned flags);
+int name_detach(name_attach_t *attach, unsigned flags);
+int name_open(const char *name, int flags);
+int name_close(int fd);
 int dispatch_destroy(dispatch_t *dpp);
 
 dispatch_context_t *dispatch_context_alloc(dispatch_t *dpp);

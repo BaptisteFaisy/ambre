@@ -3,7 +3,8 @@
  *
  * Implements the client/server transport for QNX:
  *   - ChannelCreate(_NTO_CHF_UNBLOCK | _NTO_CHF_DISCONNECT) (QNX-03, QNX-05)
- *   - ConnectAttach / ConnectDetach for connections
+ *   - name_attach / name_open so a client finds the server by its service path
+ *   - name_close / name_detach to release the connection and the name
  *   - MsgReceive for request frames + pulses
  *   - MsgReply for answers (preserves message boundaries)
  *   - _PULSE_CODE_DISCONNECT detection of dead clients (QNX-05) without polling
@@ -18,16 +19,46 @@
 #include "ambre_port.h"
 
 #include <errno.h>
-#include <fcntl.h>
 #include <stdbool.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/dispatch.h>     /* name_attach / name_open */
 #include <sys/neutrino.h>
+#include <sys/procmgr.h>      /* PROCMGR_AID_PUBLIC_CHANNEL */
 #include <unistd.h>
 
 #define AMBRE_QNX_PATH_MAX 104u
 #define AMBRE_QNX_MAX_CONNS 32u
+
+/* name_attach() publishes a server under /dev/name/local/ and the registered
+ * name cannot hold a leading slash, so a service path is flattened:
+ * "/dev/edr/journal" -> "dev-edr-journal". BOTH sides of the transport use this
+ * mapping, which is why the command lines (--listen /dev/edr/journal,
+ * --journal /dev/edr/journal) are unchanged between the PC and the target.
+ *
+ * Why a name and not a resource manager: the frozen frame protocol is one raw
+ * message per MsgSend with its reply in the same transaction (ACQ-01, QNX-03).
+ * name_attach()/name_open() is exactly QNX's "pathname-to-server-connection
+ * mapping, without having to become a full resource manager" (Library
+ * Reference). The channel is created here with _NTO_CHF_DISCONNECT so a dead
+ * producer is reported by the kernel (QNX-05) instead of being polled. */
+#define AMBRE_QNX_NAME_ROOT "/dev/name/local/"
+
+static void qnx_service_name(const char *path, char *out, size_t cap)
+{
+    const char *p = path;
+    size_t n = 0u;
+
+    while (*p == '/') {
+        p++;
+    }
+    for (; *p != '\0' && n + 1u < cap; p++) {
+        out[n++] = (*p == '/') ? '-' : *p;
+    }
+    out[n] = '\0';
+}
 
 typedef struct {
     rcvid_t  rcvid;
@@ -36,8 +67,9 @@ typedef struct {
 } qnx_peer_slot_t;
 
 struct ambre_port_chan {
-    int             chid;
-    char            path[AMBRE_QNX_PATH_MAX];
+    int              chid;
+    name_attach_t   *attach;
+    char             path[AMBRE_QNX_PATH_MAX];
     qnx_peer_slot_t slots[AMBRE_QNX_MAX_CONNS];
     uint32_t        next_peer;
     uint32_t        disconnected_peer;
@@ -52,21 +84,37 @@ struct ambre_port_conn {
 int ambre_port_chan_open(const char *path, ambre_port_chan_t **out)
 {
     ambre_port_chan_t *c;
+    char name[AMBRE_QNX_PATH_MAX];
+    name_attach_t *attach;
+    dispatch_t *dpp;
     int chid;
 
     if (path == NULL || out == NULL) {
         return AMBRE_PORT_ERR_PARAM;
     }
+    qnx_service_name(path, name, sizeof(name));
     chid = ChannelCreate(_NTO_CHF_UNBLOCK | _NTO_CHF_DISCONNECT);
     if (chid < 0) {
         return AMBRE_PORT_ERR_IO;
     }
+    /* Publishing a name needs the public-channel ability on a secured system
+     * (image/ambre.sec grants it); root already holds it. */
+    (void)procmgr_ability(0, PROCMGR_AID_PUBLIC_CHANNEL | PROCMGR_AOP_ALLOW,
+                          PROCMGR_AID_EOL, 0);
+    dpp = dispatch_create_channel(chid, 0u);
+    attach = (dpp != NULL) ? name_attach(dpp, name, 0u) : NULL;
+    if (attach == NULL) {
+        ChannelDestroy(chid);
+        return AMBRE_PORT_ERR_IO;
+    }
     c = (ambre_port_chan_t *)calloc(1, sizeof(*c));
     if (c == NULL) {
+        (void)name_detach(attach, 0u);
         ChannelDestroy(chid);
         return AMBRE_PORT_ERR_IO;
     }
     c->chid = chid;
+    c->attach = attach;
     strncpy(c->path, path, AMBRE_QNX_PATH_MAX - 1u);
     c->next_peer = 1u;
     *out = c;
@@ -79,7 +127,11 @@ void ambre_port_chan_close(ambre_port_chan_t *c)
     if (c == NULL) {
         return;
     }
-    if (c->chid >= 0) {
+    if (c->attach != NULL) {
+        /* name_detach() removes the name and destroys the dispatch, which owns
+         * the channel created above. */
+        (void)name_detach(c->attach, 0u);
+    } else if (c->chid >= 0) {
         ChannelDestroy(c->chid);
     }
     free(c);
@@ -180,24 +232,22 @@ uint32_t ambre_port_chan_poll_disconnect(ambre_port_chan_t *c)
 int ambre_port_conn_open(const char *path, ambre_port_conn_t **out)
 {
     ambre_port_conn_t *c;
-    int fd;
+    char name[AMBRE_QNX_PATH_MAX];
+    char full[AMBRE_QNX_PATH_MAX + 32u];
     int coid;
 
     if (path == NULL || out == NULL) {
         return AMBRE_PORT_ERR_PARAM;
     }
-    fd = open(path, O_RDWR);
-    if (fd < 0) {
-        return AMBRE_PORT_ERR_NOENT;
-    }
-    coid = ConnectAttach(0, 0, fd, 0, 0);
-    close(fd);
+    qnx_service_name(path, name, sizeof(name));
+    snprintf(full, sizeof(full), "%s%s", AMBRE_QNX_NAME_ROOT, name);
+    coid = name_open(full, 0);
     if (coid < 0) {
-        return AMBRE_PORT_ERR_IO;
+        return AMBRE_PORT_ERR_NOENT;
     }
     c = (ambre_port_conn_t *)calloc(1, sizeof(*c));
     if (c == NULL) {
-        ConnectDetach(coid);
+        (void)name_close(coid);
         return AMBRE_PORT_ERR_IO;
     }
     c->coid = coid;
@@ -213,7 +263,7 @@ void ambre_port_conn_close(ambre_port_conn_t *c)
         return;
     }
     if (c->coid >= 0) {
-        ConnectDetach(c->coid);
+        (void)name_close(c->coid);
     }
     free(c);
 }

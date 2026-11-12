@@ -1,0 +1,144 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# image/qemu.build - a MINIMAL QNX 8.0 boot image (IFS) for the live demo.
+#
+# Unlike image/ambre.build (the product image: five processes, a raw journal
+# partition, a Power-Safe archive partition, a security policy), this one
+# carries only what a demo needs and NOTHING else: the five Ambre binaries, a
+# shell, the block driver and the demo script. There is no file system at all
+# on the journal disk - the recorder owns the raw device, which is the whole
+# point of the format (STO-01).
+#
+# Built with:
+#   source ~/qnx800/qnxsdp-env.sh
+#   mkifs -v image/qemu.build build/qnx-vm/ifs.bin
+# The search path below is filled in by scripts/qnx-vm.sh (it points at the
+# local SDP and at the binaries `make qnx` produced).
+
+[search=@SEARCH@]
+
+# Same preamble as the SDP quickstart image: the permissions of the whole
+# image, and the two switches that let mkifs drop what it cannot find.
+[+dupignore]
+[+optional]
+[uid=0 gid=0 dperms=0555 perms=0555]
+
+[image=24m]
+[virtual=x86_64,multiboot] boot = {
+    startup-x86 -D8250..115200 -zz -f 0,0,1000M
+    PATH=/proc/boot
+    LD_LIBRARY_PATH=/proc/boot
+    [+keeplinked uid=0 gid=0 perms=0700] procnto-smp-instr -mr -d 022 -u 066 -F 2000
+}
+
+[+script] startup-script = {
+    procmgr_symlink /proc/boot/ksh /bin/ksh
+    procmgr_symlink /proc/boot/ksh /bin/sh
+    # The dynamic loader: every binary in this image is dynamically linked.
+    procmgr_symlink /proc/boot/ldqnx-64.so.2 /usr/lib/ldqnx-64.so.2
+    procmgr_symlink /proc/boot/edr-journal /usr/bin/edr-journal
+    procmgr_symlink /proc/boot/edr-capture /usr/bin/edr-capture
+    procmgr_symlink /proc/boot/edr-replay /usr/bin/edr-replay
+    procmgr_symlink /proc/boot/edrctl /usr/bin/edrctl
+    procmgr_symlink /proc/boot/edr-archive /usr/bin/edr-archive
+
+    # PCI services: on x86_64 the IDE controller is a PCI device, and the
+    # block driver reaches it through the PCI server (same order as the SDP
+    # quickstart image, which is the configuration known to work on QNX 8.0).
+    PCI_HW_MODULE=pci_hw-Intel_x86.so
+    PCI_BKWD_COMPAT_MODULE=pci_bkwd_compat.so
+    PCI_SLOG_MODULE=pci_slog2.so
+    PCI_CAP_MODULE_DIR=/proc/boot
+    PCI_BASE_VERBOSITY=3
+    pci-server --aspace-enable --config=/proc/boot/pci_server.cfg
+    waitfor /dev/pci/server_id_1 10
+
+    # The console: the kernel owns the first serial port (0x3f8), so the
+    # operator's terminal is the second one (0x2f8 = /dev/ser2).
+    devc-ser8250 -e
+    waitfor /dev/ser2 10
+
+
+    # The QNX 8.0 block stack: io-blk.so hosts the virtio-blk driver
+    # (devr-virtio.so) and exposes the raw device as /dev/hd0.
+    # The system logger: without it the processes' diagnostics are lost.
+    slogger2
+
+    # The block driver: devb-eide carries the QNX 8.0 block layer itself.
+    # The block driver: devb-ahci is the QNX 8.0 AHCI stack; the journal disk
+    # is the WHOLE raw device (no partition table, no file system).
+    devb-ahci
+    waitfor /dev/hd0 10
+
+    # A shell on the console, WITHOUT a login (the demo image has no
+    # /etc/passwd: there is no file system to hold one).
+    on -d -t /dev/ser2 /proc/boot/demo-qnx.sh
+}
+
+# --- the kernel and the shell ----------------------------------------------
+bin/ksh
+bin/on
+bin/pidin
+bin/slogger2
+bin/slog2info
+
+# --- the block driver and its modules ---------------------------------------
+sbin/devb-eide
+sbin/devc-ser8250
+lib/dll/io-blk.so
+lib/dll/cam-disk.so
+lib/dll/devr-virtio.so
+lib/dll/pci/pci_hw-Intel_x86.so
+lib/dll/pci/pci_slog2.so
+lib/dll/pci/pci_cap-0x01.so
+lib/dll/pci/pci_cap-0x05.so
+lib/dll/pci/pci_cap-0x10.so
+lib/dll/pci/pci_cap-0x11.so
+lib/dll/pci/pci_strings.so
+lib/dll/pci/pci_bkwd_compat.so
+lib/dll/pci/pci_debug2.so
+lib/libpci_hw_common.so.3.0
+sbin/pci-server
+
+# --- the C library the Ambre binaries are linked against --------------------
+ldqnx-64.so.2
+lib/libc.so.6
+lib/libm.so.3
+lib/libgcc_s.so.1
+lib/libslog2.so.1
+lib/libcam.so.2
+lib/libpci.so.3.0
+lib/libsecpol.so.1
+
+# --- the PCI configuration the block driver needs ---------------------------
+[perms=0444] pci_server.cfg = {
+[buscfg]
+DO_BUS_CONFIG=no
+
+[envars]
+PCI_DEBUG_MODULE=pci_debug2.so
+PCI_HW_MODULE=pci_hw-Intel_x86.so
+PCI_HW_CONFIG_FILE=/proc/boot/pci_hw.cfg
+}
+
+[perms=0444] pci_hw.cfg = {
+[interrupts]
+B0:D17:F0    A    18
+B0:D17:F0    B    19
+B0:D17:F0    C    16
+B0:D17:F0    D    17
+B3:D0:F0     A    18
+B3:D0:F0     B    19
+B3:D0:F0     C    16
+B3:D0:F0     D    17
+}
+
+# --- the five Ambre processes and the demo ----------------------------------
+edr-journal
+edr-capture
+edr-replay
+edrctl
+edr-archive
+demo-qnx.sh
+diagnose.sh
+scenario.txt

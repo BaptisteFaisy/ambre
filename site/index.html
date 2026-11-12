@@ -453,6 +453,73 @@ make crosscheck       # C trigger vs the independent Python twin (DEC-12)</code>
   </div>
 </section>
 
+<section class="glane-qnx">
+
+<style>
+.glane-qnx{margin:2rem 0;font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+.glane-qnx h3{margin:.2rem 0 .6rem;font-size:1.05rem}
+.glane-qnx .badges{display:flex;flex-wrap:wrap;gap:.4rem;margin-bottom:.8rem}
+.glane-qnx .badge{border:1px solid #2a2f3a;border-radius:999px;padding:.25rem .7rem;font-size:.82rem}
+.glane-qnx .term{background:#05070a;border:1px solid #2a2f3a;border-radius:8px;overflow:hidden}
+.glane-qnx .bar{background:#12151c;border-bottom:1px solid #2a2f3a;color:#9aa3b2;
+ font:12px ui-monospace,Menlo,Consolas,monospace;padding:.35rem .8rem}
+.glane-qnx pre{margin:0;padding:.7rem .9rem;color:#b9f6ca;background:transparent;
+ font:12px/1.45 ui-monospace,Menlo,Consolas,monospace;max-height:420px;overflow:auto;white-space:pre}
+.glane-qnx .cmd{background:#12151c;border:1px solid #2a2f3a;border-radius:8px;padding:.6rem .8rem;
+ font:12.5px ui-monospace,Menlo,Consolas,monospace;overflow:auto}
+</style>
+<h3>Exécution réelle sur QNX 8.0</h3>
+<div class="badges">
+<span class="badge">QNX <b>sysname=QNX release=8.0.0 version=2026/06/05-16:26:03EDT machine=x86pc node=localhost</b></span>
+<span class="badge">émulateur <b>qemu-system-x86_64</b></span>
+<span class="badge">uname réel, pidin, shell ksh</span>
+</div>
+<p>Le binaire ci-dessus a été compilé pour QNX 8.0 avec <code>qcc</code>, puis exécuté
+dans un émulateur QNX 8.0 (image minimale amorcée par <code>-kernel</code>, sans disque
+ni réseau). La console ci-dessous est la capture réelle de la session&nbsp;: <code>uname</code>
+de l'invité, la liste de ses processus QNX, puis l'exécution du programme.</p>
+<div class="term"><div class="bar">console QNX 8.0 (capture réelle)</div><pre>[QNX-PROOF] sysname=QNX release=8.0.0 version=2026/06/05-16:26:03EDT machine=x86pc node=localhost
+[MARK] ambre sur QNX 8.0 - emulateur qemu-system-x86_64 (-kernel, IFS ~4 Mo, sans disque, sans port)
+--- uname de l&#x27;invite ---
+QNX localhost 8.0.0 2026/06/05-16:26:03EDT x86pc x86_64
+--- processus QNX vivants (pidin) ---
+name                                                                                  pid
+/proc/boot/procnto-smp-instr                                                            1
+proc/boot/pidin                                                                     16386
+--- execution de edrctl ---
+Usage: edrctl --journal &lt;sock&gt; {status|list|export &lt;id&gt; --out &lt;f.mcap&gt;|verify [id]} [--json]
+Commands:
+  status             state of the journal service (EXP-01, OBS-02)
+  list               one event per line: state, lock, complete file,
+                     trigger reason, relative instant
+  export &lt;id&gt;        raw records of one event into a container file
+                     (--out); MCAP itself is built by edr-archive
+  verify [id]        integrity of an event: fingerprints, record chain.
+                     With --out &lt;container&gt;, the exported file is
+                     checked locally and cross-checked with the journal
+Options:
+  --journal &lt;sock&gt;   service socket of edr-journal (required)
+  --out &lt;file&gt;       export container, or container to verify
+  --json             machine readable output, one object per line
+Exit codes: 0 ok, 1 functional failure, 2 usage error.
+slog2_api: cannot connect to slogger2 server...errno=No such file or directory
+slog2_api: cannot connect to slogger2 server...errno=No such file or directory
+Unable to access &quot;/dev/name/local/dev-edr-journal&quot; (2)
+edrctl: cannot reach the journal service on /dev/edr/journal (-3)
+edrctl: cannot reach the journal service on /dev/edr/journal (-3)
+slog2_api: cannot connect to slogger2 server...errno=No such file or directory
+slog2_api: cannot connect to slogger2 server...errno=No such file or directory
+slog2_api: cannot connect to slogger2 server...errno=No such file or directory
+Unable to access &quot;/dev/name/local/dev-edr-j2&quot; (2)
+edrctl: cannot reach the journal service on /dev/edr/j2 (-3)
+edrctl: cannot reach the journal service on /dev/edr/j2 (-3)
+[QNX-PROOF] sysname=QNX release=8.0.0 version=2026/06/05-16:26:03EDT machine=x86pc node=localhost
+[MARK] FIN ambre
+--- shell ksh interactif (systeme QNX reel) ---</pre></div>
+<h3>Rejouer</h3>
+<div class="cmd">bash ~/Bureau/.scratch/qnx-coord/qnx-proof.sh ambre &lt;binaire-qnx&gt; [args...]</div>
+</section>
+
 </main>
 
 <footer class="site-footer">

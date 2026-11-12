@@ -99,8 +99,8 @@ echo ""
 cycle=0
 while true; do
   cycle=$((cycle + 1))
-  mark "cycle $cycle — boot, crash, cut, recovery"
   boot
+  mark "cycle $cycle — boot, crash, power cut, recovery"
   if wait_for "READY" 70; then
     sleep 4
     power_cut

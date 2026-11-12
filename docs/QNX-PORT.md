@@ -1,8 +1,47 @@
-# Building the QNX target without a QNX SDP — what is proven, what is not
+# Building the QNX target — what is proven, what is not
 
-Status: 2026-11-11. No QNX SDP 8.0 is installed on the development machine or
-on the build server, and none could be obtained during the project. Rather than
-ship unverifiable QNX code, the target layer is built the way the sibling
+> **Update 2026-11-12: the QNX SDP 8.0 is installed on the development machine**
+> (`~/qnx800`, qcc 12.2.0, `gcc_ntox86_64`), licensed by the project owner. The
+> five target processes now **really compile and link** with it:
+>
+> ```sh
+> source ~/qnx800/qnxsdp-env.sh && make qnx      # -> build/qnx/edr-* (ELF, x86-64, nto)
+> ```
+>
+> What that proves: every line of `fmt/`, `target/ipc/`, the QNX half of
+> `target/port/`, the four C processes and the C++17 archive compile against the
+> **real** `$QNX_TARGET` headers with `-Wall -Wextra -Wshadow -Wpedantic
+> -Werror`, and link into five QNX binaries (no stub header is involved any
+> more). What it does not prove: that they run correctly — nothing has booted
+> yet, and the journal's resource-manager service wiring is still the
+> `TODO(target)` of `target/journal/edr_journal_qnx.c` (the resmgr attaches and
+ * serves read/devctl, but `io_write` does not yet hand the frame to
+ * `ambre_edr_service_handle()`).
+>
+> **Eight real API mismatches the stubs had hidden**, all fixed and now compiled
+> by the real toolchain:
+>
+> | # | The stub said | QNX 8.0 says |
+> |---|---|---|
+> | 1 | `ClockTime(id, NULL)` returns the time | `int ClockTime(clockid_t, const _Uint64t *new, _Uint64t *old)` — the time comes back in `old` |
+> | 2 | `slog2_buffer_set_config_t.buffer[].num_lines/buffer_size` | `.buffer_config[].num_pages` (4K pages), and `slog2f(buffer, code, severity, fmt, ...)`; there is no `SLOG2_NO_FLAGS` |
+> | 3 | a `coid_t` type | there is none: `ConnectAttach()` returns an `int` (scoid) |
+> | 4 | `_PULSE_DISCONNECT` | `_PULSE_CODE_DISCONNECT` (-33) |
+> | 5 | `devctl(fd, DCMD_FLUSH_CACHE, ...)` | no such devctl in 8.0 (`dcmd_blk.h` exposes PGCACHE DISCARD/RESIZE only): the flush of a raw partition is `fsync(fd)`, which io-blk turns into a cache flush + SYNCHRONIZE CACHE. Essay E1 now measures that |
+> | 6 | `TimerTimeout(..., _NTO_TIMEOUT_NEAREST, NULL, 0, &nsecs)` as a relative timeout | `TimerTimeout(clockid_t, flags, notify, const _Uint64t *absolute_deadline, remain)` with `_NTO_TIMEOUT_SEND \| _NTO_TIMEOUT_REPLY` for a request/reply |
+> | 7 | a resmgr thread pool on `dispatch_context_alloc/free`, `dispatch_block`, `dispatch_handler` | `resmgr_context_alloc/free`, `resmgr_block`, `resmgr_handler`; and the `iofunc_*` helpers take `iofunc_ocb_t *`, so the custom OCB (which embeds it first) is cast |
+> | 8 | `edr-archive` talking AF_UNIX sockets itself | it now calls `ambre_port_conn_request()` — one MsgSend on QNX, so **no libsocket is linked** and VIE-03 (closed loop, no network) holds on target |
+>
+> `make qnx-syntax` (the PC build against the stub headers) stays: it is what CI
+> can run without an SDP. The stubs are now known to be *approximations* of the
+> real headers in the eight ways above.
+
+
+## History: how the target layer was built before the SDP arrived
+
+Status: 2026-11-11. No QNX SDP 8.0 was installed on the development machine or
+on the build server at that time. Rather than
+ship unverifiable QNX code, the target layer was built the way the sibling
 project `passerelle` (same author, Apache-2.0) already proved works:
 
 1. **All logic is portable C11/C++17** and runs, is tested and is measured on

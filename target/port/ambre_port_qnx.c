@@ -52,13 +52,18 @@ ambre_port_backend_t ambre_port_backend(void)
 
 /* -------------------------------------------------------------------- time - */
 
-/* QNX-only: verified on target, syntax-checked on PC */
+/* QNX-only: verified on target with the real SDP (qcc 12.2.0, nto x86_64) */
 uint64_t ambre_port_now_us(void)
 {
-    /* ClockTime(CLOCK_MONOTONIC, NULL) returns the current clock time in
-     * nanoseconds (QNX C Library Reference, ClockTime()). Monotonic, no
+    /* ClockTime(CLOCK_MONOTONIC, NULL, &now) fills `now` with the monotonic
+     * clock in nanoseconds and returns EOK (QNX C Library Reference). No
      * absolute epoch is ever exposed (ACQ-02, VIE-02). */
-    return ClockTime(CLOCK_MONOTONIC, NULL) / 1000u;
+    _Uint64t now = 0u;
+
+    if (ClockTime(CLOCK_MONOTONIC, NULL, &now) != EOK) {
+        return 0u;
+    }
+    return (uint64_t)now / 1000u;
 }
 
 /* QNX-only: verified on target, syntax-checked on PC */
@@ -83,23 +88,23 @@ uint64_t ambre_port_sleep_us(uint64_t us)
 static slog2_buffer_t slog_buffers[1];
 static bool slog_ready;
 
-/* QNX-only: verified on target, syntax-checked on PC */
+/* QNX-only: verified with the real SDP (slog2_buffer_set_config_t carries a
+ * buffer_config[] array sized in 4K pages, not num_lines/buffer_size). */
 static void slog_init_once(const char *tag)
 {
     slog2_buffer_set_config_t cfg;
 
     memset(&cfg, 0, sizeof(cfg));
-    cfg.num_buffers = 1u;
+    cfg.num_buffers = 1;
     cfg.verbosity_level = SLOG2_INFO;
     cfg.buffer_set_name = "ambre";
-    cfg.buffer[0].buffer_name = (tag != NULL) ? tag : "edr";
-    cfg.buffer[0].num_lines = 128u;
-    cfg.buffer[0].buffer_size = 4096u;
-    slog_ready = (slog2_register(&cfg, slog_buffers, SLOG2_NO_FLAGS) == 0);
+    cfg.buffer_config[0].buffer_name = (tag != NULL) ? tag : "edr";
+    cfg.buffer_config[0].num_pages = 1;      /* one 4K page of log */
+    slog_ready = (slog2_register(&cfg, slog_buffers, 0) == 0);
 }
 
 /* QNX-only: verified on target, syntax-checked on PC */
-static uint16_t slog_severity(ambre_log_level_t lvl)
+static uint8_t slog_severity(ambre_log_level_t lvl)
 {
     switch (lvl) {
     case AMBRE_LOG_ERROR: return SLOG2_ERROR;
@@ -124,8 +129,10 @@ void ambre_port_log(ambre_log_level_t lvl, const char *tag, const char *fmt, ...
     va_start(ap, fmt);
     vsnprintf(text, sizeof(text), fmt, ap);
     va_end(ap);
-    slog2f(&slog_buffers[0], slog_severity(lvl), (tag != NULL) ? tag : "edr",
-           "ambre", 0u, "%s", text);
+    /* slog2f(buffer, code, severity, fmt, ...): one buffer set per process
+     * (OBS-01), the tag goes into the text so slogger2 shows who spoke. */
+    slog2f(slog_buffers[0], 0u, slog_severity(lvl), "%s: %s",
+           (tag != NULL) ? tag : "edr", text);
 }
 
 /* ------------------------------------------------------------------- trace - */

@@ -2,17 +2,17 @@
  * ambre_port_disk_qnx.c — QNX 8.0 disk backend of the portability layer.
  *
  * Opens the dedicated raw journal partition (e.g. /dev/hd0t177 exposed by
- * io-blk, STO-01), performs pread/pwrite sector I/O, and issues explicit
- * cache-flush requests with devctl(fd, DCMD_FLUSH_CACHE, ...) (sys/dcmd_blk.h).
+ * io-blk, STO-01), performs pread/pwrite sector I/O, and forces the media with
+ * fsync(fd) — QNX 8.0 has no DCMD_FLUSH_CACHE, see qnx_disk_flush() below.
  *
  * Essay E1 (docs/cahier-des-charges.md §10): the caller writes one block
- * through the vtable, then ambre_port_disk_flush_probe() orders a cache flush
- * with devctl(DCMD_FLUSH_CACHE) and reports whether io-blk ACCEPTED the order
- * and what it cost. Whether the order physically reached the medium is only
- * observable on target (QEMU host block trace or the faulty block server) —
- * this file reports acceptance, never claims propagation.
+ * through the vtable, then ambre_port_disk_flush_probe() orders that flush and
+ * reports whether io-blk ACCEPTED the order and what it cost. Whether the
+ * order physically reached the medium is only observable on target (QEMU host
+ * block trace or the faulty block server) — this file reports acceptance,
+ * never claims propagation.
  *
- * Syntax-checked on PC against target/qnx-stub/include; verified on QNX 8.0.
+ * Compiled with the real QNX SDP 8.0 (qcc 12.2.0, gcc_ntox86_64).
  */
 
 #define _POSIX_C_SOURCE 200809L   /* pread/pwrite/fdatasync on the PC host */
@@ -69,19 +69,22 @@ static int qnx_disk_write(void *ctx, uint64_t off, const void *buf, size_t len)
     return (put == (ssize_t)len) ? 0 : -1;
 }
 
-/* QNX-only: verified on target, syntax-checked on PC */
+/* QNX-only: verified with the real SDP (qcc 12.2.0, nto x86_64).
+ *
+ * QNX 8.0's <sys/dcmd_blk.h> has NO DCMD_FLUSH_CACHE: the block layer exposes
+ * DCMD_FSYS_PGCACHE_CTL with DISCARD/RESIZE only. The supported way to force
+ * the media on a raw partition served by io-blk is fsync(fd), which io-blk
+ * turns into a cache flush and a SYNCHRONIZE CACHE for the device. That is
+ * what this backend does, and what essay E1 measures. */
 static int qnx_disk_flush(void *ctx)
 {
     ambre_port_disk_t *d = (ambre_port_disk_t *)ctx;
-    int info = 0;
-    int err;
 
     if (d == NULL) {
         return -1;
     }
-    /* STO-01 / GEL-01: explicit io-blk cache flush order. */
-    err = devctl(d->fd, DCMD_FLUSH_CACHE, NULL, 0u, &info);
-    if (err == EOK) {
+    /* STO-01 / GEL-01: the durability point of the write path. */
+    if (fsync(d->fd) == 0) {
         return 0;
     }
     return (fdatasync(d->fd) == 0) ? 0 : -1;
@@ -138,29 +141,30 @@ const ambre_disk_t *ambre_port_disk_vtable(ambre_port_disk_t *d)
     return (d != NULL) ? &d->vtable : NULL;
 }
 
-/* QNX-only: verified on target, syntax-checked on PC */
+/* QNX-only: verified with the real SDP. */
 int ambre_port_disk_flush_probe(ambre_port_disk_t *d, bool *flush_seen,
                                 uint64_t *flush_ns)
 {
-    uint64_t c0;
-    uint64_t c1;
-    int info = 0;
-    int err;
+    _Uint64t c0 = 0u;
+    _Uint64t c1 = 0u;
+    int rc;
 
     if (d == NULL || flush_seen == NULL || flush_ns == NULL) {
         return AMBRE_PORT_ERR_PARAM;
     }
-    /* Feasibility essay E1: issue DCMD_FLUSH_CACHE directly to io-blk and
-     * log whether the device driver accepted the flush command (EOK) and its
-     * duration. Physical platter arrival is confirmed on QEMU by the host
-     * block trace / faulty block server. */
-    c0 = ClockTime(CLOCK_MONOTONIC, NULL);
-    err = devctl(d->fd, DCMD_FLUSH_CACHE, NULL, 0u, &info);
-    c1 = ClockTime(CLOCK_MONOTONIC, NULL);
-    *flush_ns = (c1 >= c0) ? (c1 - c0) : 0u;
-    *flush_seen = (err == EOK);
+    /* Feasibility essay E1: order the flush the write path really uses
+     * (fsync on the raw partition, see qnx_disk_flush) and log whether io-blk
+     * ACCEPTED it and what it cost. Physical arrival on the medium is only
+     * observable from the host (QEMU block trace or the faulty block server) —
+     * this probe reports acceptance and duration, never propagation. */
+    (void)ClockTime(CLOCK_MONOTONIC, NULL, &c0);
+    rc = fsync(d->fd);
+    (void)ClockTime(CLOCK_MONOTONIC, NULL, &c1);
+    *flush_ns = (uint64_t)((c1 >= c0) ? (c1 - c0) : 0u);
+    *flush_seen = (rc == 0);
     ambre_port_log(AMBRE_LOG_INFO, "e1-probe",
-                   "DCMD_FLUSH_CACHE %s (err=%d, info=%d, %" PRIu64 " ns)",
-                   *flush_seen ? "accepted" : "rejected", err, info, *flush_ns);
+                   "fsync on the raw partition %s (rc=%d errno=%d, %" PRIu64 " ns)",
+                   *flush_seen ? "accepted" : "rejected", rc, *flush_seen ? 0 : errno,
+                   *flush_ns);
     return (*flush_seen) ? AMBRE_PORT_OK : AMBRE_PORT_ERR_IO;
 }

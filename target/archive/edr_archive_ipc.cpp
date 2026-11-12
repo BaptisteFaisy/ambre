@@ -5,15 +5,14 @@
  * the journal format: it asks edr-journal for the raw blocks of a sealed event
  * (AMBRE_MSG_EXPORT, paginated) and reassembles them with fmt/.
  *
- * TRANSPORT NOTE. target/port/ambre_port.h is frozen and its client side
- * (ambre_port_conn_send) sends a request and discards the reply: there is no
- * way to receive a STATUS/LIST/EXPORT answer through it. This file therefore
- * carries the minimal request/response client the archive needs, over the same
- * AF_UNIX SOCK_SEQPACKET transport the POSIX backend uses (one send is one
- * receive, so message boundaries are preserved exactly like a QNX message).
- * When the portability layer grows ambre_port_conn_request(), this file
- * collapses to that call; nothing else changes. The QNX glue belongs to the
- * *_qnx.c file of the archive, which is owned by the qnx-glue agent.
+ * TRANSPORT. Every request goes through the portability layer
+ * (target/port/ambre_port.h): ambre_port_conn_request() is one MsgSend() on
+ * QNX 8.0 — the reply is part of the transaction and the journal serves it at
+ * the caller's priority (QNX-03) — and one send plus one bounded receive on an
+ * AF_UNIX SOCK_SEQPACKET connection on the PC, which preserves message
+ * boundaries exactly like a QNX message. This file used to carry its own
+ * socket client because the frozen port API had no request/reply; that API
+ * exists now, so the sockets are gone and the same code builds for the target.
  *
  * Peer identity (SEC-01): the archive announces AMBRE_PEER_ARCHIVE in the
  * header's `reserved` byte, which is what makes edr-journal send it
@@ -29,6 +28,7 @@
 extern "C" {
 #include "../ipc/edr_ipc_ext.h"
 #include "../journal/edr_journal_svc.h"
+#include "../port/ambre_port.h"
 }
 
 #include <cerrno>
@@ -36,10 +36,6 @@ extern "C" {
 #include <string>
 #include <vector>
 
-#include <poll.h>
-#include <sys/socket.h>
-#include <sys/un.h>
-#include <unistd.h>
 
 namespace ambre {
 namespace archive {
@@ -50,7 +46,7 @@ const char* kLogTag = "edr-archive";
 const int kTimeoutMs = 2000;
 const size_t kPathMax = 104u;
 
-/* One connection to edr-journal. */
+/* One connection to edr-journal, through the portability layer. */
 class ServiceLink {
  public:
     ServiceLink() = default;
@@ -61,22 +57,12 @@ class ServiceLink {
     bool open(const std::string& path, std::string* error)
     {
         if (path.size() >= kPathMax) {
-            *error = "socket path too long: " + path;
+            *error = "service path too long: " + path;
             return false;
         }
-        fd_ = ::socket(AF_UNIX, SOCK_SEQPACKET, 0);
-        if (fd_ < 0) {
-            *error = "cannot create the socket";
-            return false;
-        }
-        struct sockaddr_un addr;
-        std::memset(&addr, 0, sizeof(addr));
-        addr.sun_family = AF_UNIX;
-        std::strncpy(addr.sun_path, path.c_str(), sizeof(addr.sun_path) - 1u);
-        if (::connect(fd_, reinterpret_cast<struct sockaddr*>(&addr),
-                      sizeof(addr)) != 0) {
+        if (ambre_port_conn_open(path.c_str(), &conn_) != AMBRE_PORT_OK) {
             *error = "cannot connect to " + path;
-            close();
+            conn_ = nullptr;
             return false;
         }
         return true;
@@ -84,68 +70,50 @@ class ServiceLink {
 
     void close()
     {
-        if (fd_ >= 0) {
-            ::close(fd_);
-            fd_ = -1;
+        if (conn_ != nullptr) {
+            ambre_port_conn_close(conn_);
+            conn_ = nullptr;
         }
     }
 
-    bool connected() const { return fd_ >= 0; }
+    bool connected() const { return conn_ != nullptr; }
 
-    /* Send one request announcing the archive peer type (SEC-01). */
-    bool send_request(ambre_ipc_msg_t type, const void* body, uint32_t body_len,
-                      std::string* error)
+    /* One round trip; the answer must carry the expected type. */
+    int request(ambre_ipc_msg_t type, const void* body, uint32_t body_len,
+                uint8_t expected, uint8_t* reply, size_t capacity,
+                std::string* error)
     {
         uint8_t buffer[AMBRE_IPC_FRAME_MAX];
         const int total = ambre_ipc_build(buffer, sizeof(buffer), type, body,
                                           body_len);
         if (total <= 0) {
             *error = "request does not fit the frame ceiling";
-            return false;
+            return -1;
         }
-        /* The peer type travels in the spare header byte (PC harness). */
+        /* The peer type travels in the spare header byte (PC harness); on QNX
+         * the kernel-provided credentials win (SEC-01). */
         buffer[7] = static_cast<uint8_t>(AMBRE_PEER_ARCHIVE);
-        if (::send(fd_, buffer, static_cast<size_t>(total), MSG_NOSIGNAL) !=
-            static_cast<ssize_t>(total)) {
-            *error = "cannot send the request";
-            return false;
-        }
-        return true;
-    }
-
-    /* Receive one reply, bounded wait. Returns the byte count or -1. */
-    int receive(uint8_t* buffer, size_t capacity, std::string* error)
-    {
-        struct pollfd pfd;
-        pfd.fd = fd_;
-        pfd.events = POLLIN;
-        pfd.revents = 0;
-        const int ready = ::poll(&pfd, 1, kTimeoutMs);
-        if (ready <= 0) {
-            *error = (ready == 0) ? "timeout waiting for edr-journal"
-                                  : "poll failed";
-            return -1;
-        }
-        const ssize_t got = ::recv(fd_, buffer, capacity, 0);
+        const int got = ambre_port_conn_request(
+            conn_, buffer, static_cast<size_t>(total), reply, capacity,
+            static_cast<uint64_t>(kTimeoutMs) * 1000u, nullptr);
         if (got <= 0) {
-            *error = "connection closed by edr-journal";
+            *error = transport_error(got);
             return -1;
         }
-        return static_cast<int>(got);
+        return check_reply(reply, got, expected, error);
     }
 
-    /* Full round trip: request, then the answer, which must be a known type. */
-    int request(ambre_ipc_msg_t type, const void* body, uint32_t body_len,
-                uint8_t expected, uint8_t* reply, size_t capacity,
-                std::string* error)
+ private:
+    static const char* transport_error(int rc)
     {
-        if (!send_request(type, body, body_len, error)) {
-            return -1;
-        }
-        const int got = receive(reply, capacity, error);
-        if (got < 0) {
-            return -1;
-        }
+        if (rc == AMBRE_PORT_ERR_TIMEOUT) return "timeout waiting for edr-journal";
+        if (rc == 0) return "connection closed by edr-journal";
+        return "transport error talking to edr-journal";
+    }
+
+    int check_reply(uint8_t* reply, int got, uint8_t expected,
+                    std::string* error)
+    {
         if (ambre_ipc_frame_check(reply, static_cast<size_t>(got)) != AMBRE_OK) {
             *error = "malformed reply from edr-journal";
             return -1;
@@ -154,8 +122,7 @@ class ServiceLink {
         if (reply_type == static_cast<uint8_t>(AMBRE_MSG_NAK)) {
             ambre_edr_nak_body_t nak{};
             std::memcpy(&nak, reply + AMBRE_IPC_HDR_SIZE, sizeof(nak));
-            *error = "refused by edr-journal (code " +
-                     std::to_string(nak.code) + ")";
+            *error = "refused by edr-journal (code " + std::to_string(nak.code) + ")";
             return -1;
         }
         if (reply_type != expected) {
@@ -165,8 +132,7 @@ class ServiceLink {
         return got;
     }
 
- private:
-    int fd_ = -1;
+    ambre_port_conn_t* conn_ = nullptr;
 };
 
 /* Copy a packed struct out of a reply body (never a pointer cast). */

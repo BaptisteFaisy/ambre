@@ -44,8 +44,8 @@ struct ambre_port_chan {
 };
 
 struct ambre_port_conn {
-    coid_t coid;
-    char   path[AMBRE_QNX_PATH_MAX];
+    int  coid;                  /* ConnectAttach() returns an int (scoid) */
+    char path[AMBRE_QNX_PATH_MAX];
 };
 
 /* QNX-only: verified on target, syntax-checked on PC */
@@ -125,7 +125,7 @@ int ambre_port_chan_recv(ambre_port_chan_t *c, void *buf, size_t cap,
         }
         if (rcvid == 0) {
             struct _pulse *p = (struct _pulse *)buf;
-            if (p->code == _PULSE_DISCONNECT) {
+            if (p->code == _PULSE_CODE_DISCONNECT) {
                 c->disconnected_peer = (uint32_t)p->value.sival_int;
             }
             continue;
@@ -181,7 +181,7 @@ int ambre_port_conn_open(const char *path, ambre_port_conn_t **out)
 {
     ambre_port_conn_t *c;
     int fd;
-    coid_t coid;
+    int coid;
 
     if (path == NULL || out == NULL) {
         return AMBRE_PORT_ERR_PARAM;
@@ -218,12 +218,37 @@ void ambre_port_conn_close(ambre_port_conn_t *c)
     free(c);
 }
 
-/* QNX-only: verified on target, syntax-checked on PC */
-/* One MsgSend() carries the request and brings the reply back: on QNX the
+/* Arm a bounded request/reply: TimerTimeout takes an ABSOLUTE monotonic
+ * deadline and applies to the states MsgSend blocks in (SEND then REPLY).
+ * A NULL deadline cancels the timeout. */
+static void arm_request_timeout(uint64_t timeout_us)
+{
+    _Uint64t now = 0u;
+    _Uint64t deadline;
+
+    if (timeout_us == 0u) {
+        return;
+    }
+    (void)ClockTime(CLOCK_MONOTONIC, NULL, &now);
+    deadline = now + (_Uint64t)timeout_us * 1000u;
+    (void)TimerTimeout(CLOCK_MONOTONIC, _NTO_TIMEOUT_SEND | _NTO_TIMEOUT_REPLY,
+                       NULL, &deadline, NULL);
+}
+
+static void disarm_request_timeout(uint64_t timeout_us)
+{
+    if (timeout_us == 0u) {
+        return;
+    }
+    (void)TimerTimeout(CLOCK_MONOTONIC, _NTO_TIMEOUT_SEND | _NTO_TIMEOUT_REPLY,
+                       NULL, NULL, NULL);
+}
+
+/* QNX-only: verified with the real SDP.
+ * One MsgSend() carries the request and brings the reply back: on QNX the
  * reply is part of the same transaction, and the server runs it at the
- * caller's priority (priority inheritance, spec 1.3). `timeout_us` is bounded
- * by the kernel's own blocking rules; the caller's deadline is what matters,
- * so it is passed to TimerTimeout() before the send. */
+ * caller's priority (priority inheritance, spec 1.3). The caller's deadline
+ * is armed with TimerTimeout() just before the send and cancelled after. */
 static int conn_xfer_qnx(ambre_port_conn_t *c, const void *req, size_t req_len,
                          void *reply, size_t reply_cap, uint64_t timeout_us,
                          uint64_t *latency_ns)
@@ -232,25 +257,17 @@ static int conn_xfer_qnx(ambre_port_conn_t *c, const void *req, size_t req_len,
     uint8_t *dst = (reply != NULL) ? (uint8_t *)reply : ack;
     size_t room = (reply != NULL) ? reply_cap : sizeof(ack);
     uint64_t t0;
-    uint64_t nsecs;
     int rc;
 
     if (c == NULL || req == NULL || req_len == 0u || dst == NULL || room == 0u) {
         return AMBRE_PORT_ERR_PARAM;
     }
-    if (timeout_us > 0u) {
-        nsecs = timeout_us * 1000u;
-        (void)TimerTimeout(CLOCK_MONOTONIC, _NTO_TIMEOUT_NEAREST, NULL,
-                           (uint64_t)0, &nsecs);
-    }
+    arm_request_timeout(timeout_us);
     t0 = ambre_port_now_us();
     rc = MsgSend(c->coid, req, req_len, dst, room);
-    if (timeout_us > 0u) {
-        (void)TimerTimeout(CLOCK_MONOTONIC, _NTO_TIMEOUT_NEAREST, NULL,
-                           (uint64_t)0, NULL);
-    }
+    disarm_request_timeout(timeout_us);
     if (rc < 0) {
-        return AMBRE_PORT_ERR_IO;
+        return (errno == ETIMEDOUT) ? AMBRE_PORT_ERR_TIMEOUT : AMBRE_PORT_ERR_IO;
     }
     if (latency_ns != NULL) {
         *latency_ns = (ambre_port_now_us() - t0) * 1000u;

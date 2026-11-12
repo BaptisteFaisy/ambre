@@ -60,7 +60,7 @@ TOOLS        := $(BUILD)/ambre-explore $(BUILD)/ambre-dump-truth \
 
 .PHONY: all test explore explore-full crosscheck demo sizecheck clean tools \
         scenario mcap verify help qnx-syntax processes image-check campaign test_archive_cpp \
-        e2e e2e-scenario processcut web web-conformance
+        e2e e2e-scenario processcut web web-conformance qnx
 
 all: $(LIB) $(TEST_BIN) tools
 
@@ -316,3 +316,67 @@ latency-all: processes $(LATENCY_SCENARIO)
 	    --scenario $(LATENCY_SCENARIO) --triggers $(LATENCY_TRIGGERS) \
 	    --load $$load --report $(BUILD)/latency-$$load.json || exit 1; \
 	done
+
+# --- QNX 8.0 cross build with the real SDP ---------------------------------
+# Source the SDP environment first, then build the five target binaries:
+#   source ~/qnx800/qnxsdp-env.sh && make qnx
+# Output: build/qnx/{edr-journal,edr-capture,edr-replay,edrctl,edr-archive}
+# for nto x86_64 (override with QNX_VARIANT=gcc_ntoaarch64le).
+#
+# The *_qnx.c half of the portability layer REPLACES the POSIX half: no
+# ambre_port_posix*.o is ever linked into a target binary, and no stub header
+# is used here (the real $QNX_TARGET headers are).
+QNX_CC       ?= qcc
+QNX_CXX      ?= q++
+QNX_VARIANT  ?= gcc_ntox86_64
+QBUILD       := build/qnx
+QNX_INC      := -Ifmt -I. -Itarget -Itarget/port -Itarget/ipc -Itarget/archive \
+                -Itarget/capture -Itarget/journal -Itarget/ctl -Itarget/replay
+QNX_CFLAGS   := -D_QNX_SOURCE -std=c11 -O2 -g $(WARN) -Werror -V$(QNX_VARIANT) $(QNX_INC)
+QNX_CXXFLAGS := -D_QNX_SOURCE -std=c++17 -O2 -g -Wall -Wextra -Werror $(QNX_INC)
+# slog2 lives in its own library on QNX 8.0 (libslog2.so); libm for the trigger
+# arithmetic. No libsocket: VIE-03 keeps the recorder closed-loop.
+QNX_LIBS     := -lm -lslog2
+
+QNX_PORT_SRC   := target/port/ambre_port_qnx.c target/port/ambre_port_disk_qnx.c \
+                  target/port/ambre_port_ipc_qnx.c
+QNX_COMMON_SRC := $(FMT_SRC) $(IPC_SRC) $(QNX_PORT_SRC)
+QNX_COMMON_OBJ := $(patsubst %.c,$(QBUILD)/%.o,$(QNX_COMMON_SRC))
+QNX_DIR_OBJ     = $(patsubst %.c,$(QBUILD)/%.o,$(wildcard target/$(1)/*.c))
+QNX_CPP_OBJ     = $(patsubst %.cpp,$(QBUILD)/%.o,$(wildcard target/$(1)/*.cpp))
+
+QNX_BINS := $(QBUILD)/edr-journal $(QBUILD)/edr-capture $(QBUILD)/edr-replay \
+            $(QBUILD)/edrctl $(QBUILD)/edr-archive
+
+$(QBUILD)/%.o: %.c
+	@mkdir -p $(dir $@)
+	$(QNX_CC) $(QNX_CFLAGS) -c $< -o $@
+
+$(QBUILD)/%.o: %.cpp
+	@mkdir -p $(dir $@)
+	$(QNX_CXX) $(QNX_CXXFLAGS) -c $< -o $@
+
+qnx: $(QNX_BINS)
+	@for b in $(QNX_BINS); do \
+	  printf '  qnx %-13s %s\n' "$$(basename $$b)" \
+	    "$$(file -b $$b | cut -d, -f1-2)"; done
+
+$(QBUILD)/edr-journal: $(QNX_COMMON_OBJ) $(call QNX_DIR_OBJ,journal)
+	@mkdir -p $(QBUILD)
+	$(QNX_CC) $(QNX_CFLAGS) $^ -o $@ $(QNX_LIBS)
+
+$(QBUILD)/edr-capture: $(QNX_COMMON_OBJ) $(call QNX_DIR_OBJ,capture)
+	@mkdir -p $(QBUILD)
+	$(QNX_CC) $(QNX_CFLAGS) $^ -o $@ $(QNX_LIBS)
+
+$(QBUILD)/edr-replay: $(QNX_COMMON_OBJ) $(call QNX_DIR_OBJ,replay)
+	@mkdir -p $(QBUILD)
+	$(QNX_CC) $(QNX_CFLAGS) $^ -o $@ $(QNX_LIBS)
+
+$(QBUILD)/edrctl: $(QNX_COMMON_OBJ) $(call QNX_DIR_OBJ,ctl)
+	@mkdir -p $(QBUILD)
+	$(QNX_CC) $(QNX_CFLAGS) $^ -o $@ $(QNX_LIBS)
+
+$(QBUILD)/edr-archive: $(QNX_COMMON_OBJ) $(call QNX_CPP_OBJ,archive)
+	@mkdir -p $(QBUILD)
+	$(QNX_CXX) $(QNX_CXXFLAGS) $^ -o $@ $(QNX_LIBS)

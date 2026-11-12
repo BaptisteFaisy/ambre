@@ -224,7 +224,9 @@ static int devctl_export(resmgr_context_t *ctp, io_devctl_t *msg)
 static int edr_io_devctl(resmgr_context_t *ctp, io_devctl_t *msg,
                          RESMGR_OCB_T *ocb)
 {
-    int status = iofunc_devctl_default(ctp, msg, ocb);
+    /* struct edr_qnx_ocb keeps iofunc_ocb_t as its first member, so the cast
+     * is the one the iofunc layer itself performs. */
+    int status = iofunc_devctl_default(ctp, msg, (iofunc_ocb_t *)ocb);
 
     if (status != _RESMGR_DEFAULT) {
         return status;
@@ -283,7 +285,7 @@ static int edr_io_read(resmgr_context_t *ctp, io_read_t *msg, RESMGR_OCB_T *ocb)
     char text[EDR_TEXT_MAX];
     int len;
     size_t want;
-    int status = iofunc_read_verify(ctp, msg, ocb, NULL);
+    int status = iofunc_read_verify(ctp, msg, (iofunc_ocb_t *)ocb, NULL);
 
     if (status != EOK) {
         return status;
@@ -307,7 +309,7 @@ static int edr_io_read(resmgr_context_t *ctp, io_read_t *msg, RESMGR_OCB_T *ocb)
         want = msg->i.nbytes;
     }
     {
-        const char *from = text + (size_t)ocb->ocb.offset;
+        char *from = text + (size_t)ocb->ocb.offset;
 
         ocb->ocb.offset += (off_t)want;
         _IO_SET_READ_NBYTES(ctp, want);
@@ -320,7 +322,7 @@ static int edr_io_read(resmgr_context_t *ctp, io_read_t *msg, RESMGR_OCB_T *ocb)
 static int edr_io_write(resmgr_context_t *ctp, io_write_t *msg,
                         RESMGR_OCB_T *ocb)
 {
-    int status = iofunc_write_verify(ctp, msg, ocb, NULL);
+    int status = iofunc_write_verify(ctp, msg, (iofunc_ocb_t *)ocb, NULL);
 
     if (status != EOK) {
         return status;
@@ -408,7 +410,7 @@ static int edr_close_ocb(resmgr_context_t *ctp, void *reserved,
     if (ocb != NULL) {
         ocb->in_use = false;
     }
-    return iofunc_close_ocb_default(ctp, reserved, ocb);
+    return iofunc_close_ocb_default(ctp, reserved, (iofunc_ocb_t *)ocb);
 }
 
 /* ---------------------------------------------------------- lifecycle ----- */
@@ -437,9 +439,12 @@ void edr_journal_qnx_set_source(const edr_journal_qnx_src_t *src)
 }
 
 /* QNX-only: verified on target, syntax-checked on PC */
-static dispatch_context_t *pool_alloc(void *handle)
+/* The resource-manager pool uses the resmgr_* context helpers (they return
+ * resmgr_context_t, the type resmgr_attach's handlers expect), not the raw
+ * dispatch_* ones. */
+static resmgr_context_t *pool_alloc(dispatch_t *handle)
 {
-    return dispatch_context_alloc((dispatch_t *)handle);
+    return resmgr_context_alloc(handle);
 }
 
 /* QNX-only: verified on target, syntax-checked on PC */
@@ -466,9 +471,9 @@ int edr_journal_qnx_start(void)
     memset(&pool, 0, sizeof(pool));
     pool.handle = g_jrn.dpp;
     pool.context_alloc = pool_alloc;
-    pool.context_free = dispatch_context_free;
-    pool.block_func = dispatch_block;
-    pool.handler_func = dispatch_handler;
+    pool.context_free = resmgr_context_free;
+    pool.block_func = resmgr_block;
+    pool.handler_func = resmgr_handler;
     pool.lo_water = EDR_POOL_MIN;
     pool.increment = 1;
     pool.hi_water = EDR_POOL_MAX;

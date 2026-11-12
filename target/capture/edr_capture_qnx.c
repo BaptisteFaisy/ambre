@@ -40,7 +40,7 @@
 
 typedef struct {
     int      chid;               /* channel producers send their frames to  */
-    coid_t   journal_coid;       /* connection to edr-journal               */
+    int      journal_coid;       /* connection to edr-journal (scoid)        */
     timer_t  tick_timer;         /* periodic pulse timer (QNX-03)           */
     bool     mem_locked;
     bool     timer_armed;

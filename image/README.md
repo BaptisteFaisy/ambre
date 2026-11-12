@@ -4,13 +4,17 @@ This directory holds the pieces of the QNX 8.0 boot image for the Ambre Event
 Data Recorder (target: QEMU `x86_64`): the IFS buildfile, the QNX buildfile of
 the five processes, the security policy, and the supervision wrapper.
 
-> **Status without a QNX SDP.** No QNX SDP 8.0 is installed on the development
-> machine, so nothing here could be assembled with `mkqnximage`, compiled with
-> `qcc`/`secpolcompile`, or booted under QEMU. The files are reviewed by
-> inspection and checked statically on the PC by `scripts/check-image.sh`
-> (`make image-check`). Everything that needs the SDP is marked
-> `UNVERIFIED (needs QNX SDP 8.0)` in the files themselves, and listed in
-> §5 below.
+> **Status 2026-11-12.** The QNX SDP 8.0 is installed on the development
+> machine, so the five processes really compile and link with `qcc`:
+> `source ~/qnx800/qnxsdp-env.sh && make qnx` writes them to `build/qnx/`
+> (see `docs/QNX-PORT.md` for what that proves and the eight real API
+> mismatches it exposed). `image/buildfile` is **not** what produces them: the
+> top-level Makefile drives `qcc` directly, because the buildfile's
+> `include ../../mkfiles/pre.o` and its `[name=… priority=…]` attributes belong
+> to an in-SDP source tree and are still unverified. Assembling the image with
+> `mkqnximage`, compiling the policy with `secpolcompile` and booting under
+> QEMU are the next steps; `scripts/check-image.sh` (`make image-check`) keeps
+> checking the static coherence of everything below.
 
 ## Files
 

@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ambre — live on QNX 8.0 (QEMU)</title>
+<style>
+  html, body { margin: 0; background: #070a0f; color: #8b97a8;
+               font: 14px ui-monospace, SFMono-Regular, Menlo, monospace; }
+  header { padding: 10px 14px; border-bottom: 1px solid #1c2532; display: flex;
+           justify-content: space-between; align-items: baseline; }
+  header b { color: #e8edf4; font-size: 15px; letter-spacing: .04em; }
+  header span { color: #f2a33c; }
+  img { width: 100%; display: block; image-rendering: pixelated; }
+  .dot { display:inline-block; width:8px; height:8px; border-radius:50%;
+         background:#62d188; margin-right:8px; }
+</style>
+</head>
+<body>
+<header>
+  <b><span class="dot"></span>Ambre — the on-target demo, live</b>
+  <span>an image of the serial console, refreshed every 2 s</span>
+</header>
+<img id="frame" src="live.png" alt="the QNX serial console, live">
+<script>
+  setInterval(function () {
+    document.getElementById('frame').src = 'live.png?t=' + Date.now();
+  }, 2000);
+</script>
+</body>
+</html>

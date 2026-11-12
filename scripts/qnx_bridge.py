@@ -66,7 +66,7 @@ def main() -> int:
     srv.settimeout(0.3)
 
     clients = Clients()
-    with open(log_path, "wb") as log:
+    with open(log_path, "ab") as log:
         while True:
             try:
                 conn, _ = srv.accept()

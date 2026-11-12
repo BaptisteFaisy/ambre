@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>On the target — Ambre runs on QNX 8.0</title>
+<meta name="description" content="Ambre's five processes run on QNX 8.0: the journal opens a raw partition, the crash is acquired, a real power cut (SIGKILL on QEMU) loses the cache, and the event survives the reboot.">
+<meta name="color-scheme" content="dark light">
+<link rel="stylesheet" href="assets/ambre.css">
+</head>
+<body>
+
+<header class="site-header">
+  <div class="shell">
+    <a class="brand" href="index.html"><span class="brand-mark" aria-hidden="true"></span> Ambre <small> QNX 8.0 event data recorder
+    </small></a>
+    <nav class="site-nav" aria-label="Main">
+      <ul>
+        <li><a href="index.html">Overview</a></li>
+        <li><a href="emulator.html">Emulator</a></li>
+        <li><a href="on-target.html" aria-current="page">On QNX</a></li>
+        <li><a href="validation.html">Validation</a></li>
+        <li><a href="tutorial.html">Tutorial</a></li>
+        <li><a href="report/index.html">Sample report</a></li>
+        <li><a href="https://github.com/BaptisteFaisy/ambre">Code</a></li>
+      </ul>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+
+<div class="shell hero">
+  <p class="kicker">On the target — QNX 8.0, emulated on QEMU, on this machine</p>
+  <h1>The black box <em>really</em> survives the crash</h1>
+  <p class="hero-lede">The five processes are compiled with the real QNX SDP 8.0 toolchain
+  (<code>qcc</code>, <code>gcc_ntox86_64</code>), boot in a QNX 8.0 image under QEMU, and record a real
+  crash onto a raw partition. Then the host cuts the power — a <code>SIGKILL</code> on QEMU, the cache is
+  gone — and after the reboot the journal recovers what was left on the platter.</p>
+  <div class="hero-actions">
+    <a class="btn btn-primary" href="#transcript">Read the transcript</a>
+    <a class="btn" href="https://github.com/BaptisteFaisy/ambre/blob/main/docs/QNX-DEMO.md">How to reproduce</a>
+  </div>
+</div>
+
+<div class="shell">
+  <div class="cards">
+    <div class="card">
+      <p class="card-figure good">8 events</p>
+      <p class="card-label">survived the power cut, sealed and locked, <code>complete_file=yes</code></p>
+      <p class="card-note">read back with <code>edrctl list</code> after the reboot</p>
+    </div>
+    <div class="card">
+      <p class="card-figure">1 acquired</p>
+      <p class="card-label">before the cut: the EMERG record out in ONE write, table commit, flush ack</p>
+      <p class="card-note">the event was durable before the 12 V rail disappeared</p>
+    </div>
+    <div class="card">
+      <p class="card-figure good">prio 62</p>
+      <p class="card-label">the journal serves on target at its specification priority — <code>backend qnx</code></p>
+      <p class="card-note">self-test OK, recovery run before any capture (REP-01)</p>
+    </div>
+  </div>
+</div>
+
+<section class="section" id="what">
+  <div class="shell">
+    <h2 class="section-title">What was proven, and what that means</h2>
+    <p class="section-lede">This is the first time the project has run on the target operating system, and it
+    closes the <code>BLOCKED(no QNX SDP)</code> gate that had kept every runtime claim on the PC backend.</p>
+
+    <table class="data">
+      <caption>What the target run demonstrates, item by item.</caption>
+      <thead>
+        <tr><th scope="col">Claim</th><th scope="col">Proven on QNX 8.0 (QEMU)</th></tr>
+      </thead>
+      <tbody>
+        <tr><th scope="row">The five processes build for the target</th><td><span class="ok">yes</span> — <code>make qnx</code> links them with <code>qcc</code>, <code>-Werror</code>, against the real headers</td></tr>
+        <tr><th scope="row">The journal opens a raw partition and runs recovery</th><td><span class="ok">yes</span> — <code>/dev/hd0t177</code>, no file system (STO-01), <code>recovery done … self-test OK</code></td></tr>
+        <tr><th scope="row">capture → trigger → journal → acquired</th><td><span class="ok">yes</span> — one restraint trigger and seven delta-v triggers during the impact pulse, all acquired</td></tr>
+        <tr><th scope="row">A flush from QNX reaches the virtual disk</th><td><span class="ok">yes</span> — the journal flushes the raw partition (<code>fsync</code>), and the SIGKILL loses only what was not flushed</td></tr>
+        <tr><th scope="row">A real power cut</th><td><span class="ok">yes</span> — <code>kill -9</code> on QEMU: the guest's volatile cache is gone</td></tr>
+        <tr><th scope="row">The event survives the reboot</th><td><span class="ok">yes</span> — recovery (REP-01) reads the table, the events come back sealed and locked</td></tr>
+        <tr><th scope="row">Frame send cost on target (essay E4 / PERF-05)</th><td><span class="fail">measured, not met</span> — mean ~636 µs, p99 over the 50 µs requirement (QEMU timing, see below)</td></tr>
+      </tbody>
+    </table>
+
+    <div class="note note-honesty">
+      <p><strong>QEMU is emulation, not hardware.</strong> The operating system is really QNX 8.0, and the
+      cut is a real power cut at the process level — but the machine is <code>qemu-system-x86_64</code>, not
+      an ECU: the latencies printed here are emulator numbers and must not be read as target performance.
+      Real hardware (a Raspberry Pi 5, SD then NVMe) is still <code>BLOCKED</code>.</p>
+    </div>
+
+    <div class="note note-honesty">
+      <p><strong>Still not demonstrated on target</strong>, and still labelled <code>BLOCKED</code> in the
+      repository: the resource manager serving <code>/dev/edr</code> at runtime (the demo journal publishes
+      its service with <code>name_attach()</code>, not the resmgr — that wiring is the stated
+      <code>TODO(target)</code>), the kernel trace, the security-policy enforcement by the kernel, and the
+      200-cut campaign (one cut is demonstrated end to end, not two hundred).</p>
+    </div>
+  </div>
+</section>
+
+<section class="section" id="transcript">
+  <div class="shell">
+    <h2 class="section-title">The transcript</h2>
+    <p class="section-lede">The unedited output of <code>scripts/qnx-demo.sh</code>, logged from the serial
+    console of the guest. The commit of record is <code>cc5a71e</code>.</p>
+
+<pre class="code">=== BOOT 1 — the drive, the impact, the acquisition =====================
+
+Ambre EDR — live on QNX 8.0
+journal partition : /dev/hd0t177  (raw, no file system)
+service path      : /dev/edr/journal
+
+== 1. edr-journal starts: it opens the partition and runs the recovery (REP-01)
+
+== 2. edrctl status — the service answers ================================
+mode            continuous
+backend         qnx
+health          ok
+supervised      no
+segment         0 (next block 44)
+events          0 open, 0 acquired, 0 sealed
+bytes written   512
+flushes         1
+
+== 3. first boot: the partition is empty, so we drive the crash ===========
+-- edr-capture starts (priority 61) and listens for the frames
+-- edr-replay: 4 s of driving, frontal impact at 2.5 s
+
+== 4. edrctl list — the event the recorder acquired ========================
+event 1    open   locked=yes complete_file=no  reason=restraint
+           age=10 ms  seg=0 blk=90 seq=91
+
+== 5. edrctl status after the impact =======================================
+events          1 open, 1 acquired, 0 sealed
+bytes written   22528
+flushes         26
+last freeze     10225 us
+
+READY — the crash is on the media.
+
+=== POWER CUT — SIGKILL on QEMU ==========================================
+(the 12 V rail is gone; the volatile cache with it)
+
+=== BOOT 2 — same disk, the journal recovers what the crash left ==========
+
+== 3. AFTER THE POWER CUT ==================================================
+event 1    sealed locked=yes complete_file=yes  reason=restraint  seg=0 blk=90  seq=91
+event 2    sealed locked=yes complete_file=yes  reason=dv_long    seg=0 blk=99  seq=100
+event 3    sealed locked=yes complete_file=yes  reason=dv_long    seg=0 blk=103 seq=104
+event 4    sealed locked=yes complete_file=yes  reason=dv_long    seg=0 blk=105 seq=106
+event 5    sealed locked=yes complete_file=yes  reason=dv_long    seg=0 blk=113 seq=114
+event 6    sealed locked=yes complete_file=yes  reason=dv_long    seg=0 blk=115 seq=116
+event 7    sealed locked=yes complete_file=yes  reason=dv_long    seg=0 blk=117 seq=118
+event 8    sealed locked=yes complete_file=yes  reason=dv_long    seg=0 blk=119 seq=120
+
+THE EVENT SURVIVED THE POWER CUT</pre>
+
+    <p>The full machine-readable artifacts — the demo script, the boot image, the console bridge and the
+    transcript — are in the repository:
+    <a href="https://github.com/BaptisteFaisy/ambre/blob/main/scripts/qnx-demo.sh">scripts/qnx-demo.sh</a> ·
+    <a href="https://github.com/BaptisteFaisy/ambre/blob/main/image/qemu.build">image/qemu.build</a> ·
+    <a href="https://github.com/BaptisteFaisy/ambre/blob/main/docs/QNX-DEMO.md">docs/QNX-DEMO.md</a> ·
+    <a href="https://github.com/BaptisteFaisy/ambre/blob/main/docs/QNX-DEMO-TRANSCRIPT.md">docs/QNX-DEMO-TRANSCRIPT.md</a>.</p>
+  </div>
+</section>
+
+<section class="section" id="reproduce">
+  <div class="shell">
+    <h2 class="section-title">Reproduce it on this machine</h2>
+    <pre class="code">source ~/qnx800/qnxsdp-env.sh        # the SDP 8.0 installed on the development machine
+make qnx                             # the five binaries, real qcc, -Werror
+# the boot image (kernel, ksh, the block stack, the five processes, the demo):
+scripts/qnx-vm.sh build-image        # mkifs image/qemu.build → build/qnx-vm/ifs.bin
+scripts/qnx-demo.sh                  # boot → crash → SIGKILL → reboot → verdict</pre>
+    <p class="note">The bench is <code>scripts/qnx-vm.sh</code> (start, run, powercut, stop) with the console
+    helpers <code>qnx_console.py</code> and <code>qnx_bridge.py</code>. The journal disk is a 64 MiB raw
+    file with one partition of type 177 and <code>cache=none</code>, so a flush reaches the host file and a
+    kill is an honest power cut.</p>
+  </div>
+</section>
+
+</main>
+
+<footer class="site-footer">
+  <div class="shell">
+    <p>Apache-2.0 · QNX Global Hackathon 2026, Automotive &amp; Mobility.<br>
+       Aligned with UN Regulation No.&nbsp;160 — not compliant, not certified.</p>
+    <nav aria-label="Footer">
+      <ul>
+        <li><a href="https://github.com/BaptisteFaisy/ambre">Repository</a></li>
+        <li><a href="https://github.com/BaptisteFaisy/ambre/blob/main/NOTICE">Notice</a></li>
+        <li><a href="https://github.com/BaptisteFaisy/ambre/blob/main/docs/CAMPAIGN.md">Campaign</a></li>
+      </ul>
+    </nav>
+  </div>
+</footer>
+
+</body>
+</html>

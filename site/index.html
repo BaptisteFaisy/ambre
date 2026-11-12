@@ -18,6 +18,7 @@
       <ul>
         <li><a href="index.html" aria-current="page">Overview</a></li>
         <li><a href="emulator.html">Emulator</a></li>
+        <li><a href="on-target.html">On QNX</a></li>
         <li><a href="validation.html">Validation</a></li>
         <li><a href="tutorial.html">Tutorial</a></li>
         <li><a href="report/index.html">Sample report</a></li>
@@ -38,6 +39,7 @@
   <div class="hero-actions">
     <a class="btn btn-primary" href="https://github.com/BaptisteFaisy/ambre">Read the code</a>
     <a class="btn" href="emulator.html">Cut the power yourself</a>
+    <a class="btn" href="on-target.html">It runs on QNX 8.0 — see the target demo</a>
     <a class="btn" href="validation.html">See the proof</a>
   </div>
 
@@ -358,7 +360,8 @@
           <td>200 cuts of a booted QNX image, and the E1 flush-probe.</td>
           <td>That a flush order issued from QNX reaches the virtual disk, and that a real power cut loses
           nothing.</td>
-          <td><span class="blocked">blocked — no QNX SDP</span></td>
+          <td><span class="ok">1 cut end to end, demonstrated</span> — see the
+          <a href="on-target.html">target demo</a>; the 200-cut campaign is still to run.</td>
         </tr>
         <tr>
           <td>Level 3 — electrical cuts</td>
@@ -388,11 +391,13 @@
     </div>
 
     <div class="note note-honesty">
-      <p><strong>There is no QNX SDP on the development machine.</strong> The five <code>*_qnx.c</code>
-      glue files compile against stub headers (<code>make qnx-syntax</code>, 5/5) — which proves there
-      is no typo, no wrong prototype, no wrong struct field — and proves nothing about runtime. The image
-      has never been built or booted: the documentation carries 46 <code>BLOCKED(no QNX SDP)</code>
-      markers, each naming the command that will produce the number. The target has never started.</p>
+      <p><strong>The target now runs.</strong> The QNX SDP 8.0 was installed on the development machine on
+      2026-11-12, and the five processes compile with the real <code>qcc</code>. They boot in a QNX 8.0
+      image under QEMU, record a real crash onto a raw partition, and the event survives a real
+      <code>SIGKILL</code> power cut and the reboot — see the <a href="on-target.html">target demo page</a>.
+      What remains <code>BLOCKED</code> on target is the resource manager serving <code>/dev/edr</code>, the
+      kernel trace, the security-policy enforcement, and the 200-cut campaign; real hardware stays a
+      separate, still-blocked question.</p>
     </div>
 
     <div class="note note-fail">

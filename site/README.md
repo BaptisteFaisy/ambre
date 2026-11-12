@@ -12,6 +12,8 @@ so what is in `site/` is exactly what is served.
 site/
 ├── index.html            the pitch, the problem, the three ideas, the proof
 ├── emulator.html         the live emulator: cut the power in your browser
+├── on-target.html         the target demo: QNX 8.0 under QEMU, a real SIGKILL
+│                          power cut, and the event surviving the reboot
 ├── validation.html       every measured number, and everything not measured
 ├── tutorial.html         the six-chapter codelab, presented as a page
 ├── 404.html              served by Pages for any unknown path

@@ -20,6 +20,7 @@
       <ul>
         <li><a href="index.html">Overview</a></li>
         <li><a href="emulator.html">Emulator</a></li>
+        <li><a href="on-target.html">On QNX</a></li>
         <li><a href="validation.html" aria-current="page">Validation</a></li>
         <li><a href="tutorial.html">Tutorial</a></li>
         <li><a href="report/index.html">Sample report</a></li>
@@ -322,9 +323,12 @@
   <div class="shell">
     <h2 class="section-title">What is not measured</h2>
     <p class="section-lede">
-      No QNX SDP 8.0 was available on any machine used for this work, so the
-      target never booted. Everything below is blocked on that, and is labelled
-      <code>BLOCKED</code> in the repository rather than estimated.
+      The SDP 8.0 was installed on the development machine on 2026-11-12: the five
+      processes now cross-compile with the real <code>qcc</code> and boot in a QNX 8.0 image under QEMU,
+      and one end-to-end power cut is demonstrated — see the
+      <a href="on-target.html">target demo</a>. What remains below is what the target run did not yet
+      cover: the <code>/dev/edr</code> resource manager, the kernel trace, the security-policy
+      enforcement, the 200-cut campaign, and the real hardware.
     </p>
     <table class="data">
       <caption>Blocked items and what would unblock them.</caption>
@@ -332,13 +336,13 @@
         <tr><th scope="col">Blocked</th><th scope="col">Requirement</th><th scope="col">Needs</th></tr>
       </thead>
       <tbody>
-        <tr><td>Resource manager serving <code>/dev/edr</code> at runtime</td><td>QNX-01, QNX-03, EXP-08</td><td rowspan="6"><code>BLOCKED(no QNX SDP)</code> — install SDP 8.0, then <code>make qnx CC=qcc</code>, <code>mkqnximage -f image/ambre.build</code>, boot under QEMU</td></tr>
+        <tr><td>Resource manager serving <code>/dev/edr</code> at runtime</td><td>QNX-01, QNX-03, EXP-08</td><td rowspan="6"><code>partially demonstrated</code> — the raw journal, the recovery, the capture→trigger→acquired path and one real power cut run on QNX 8.0 under QEMU (<a href="on-target.html">target demo</a>); the <code>/dev/edr</code> resource manager, the kernel trace and secpol enforcement are still to wire</td></tr>
         <tr><td>Flush order reaching a real virtual disk (essay E1)</td><td>§10 E1, GEL-02</td></tr>
         <tr><td>QEMU kill/restart cycle under 10 s (essay E3), 200 → 2 000 real cuts</td><td>§7.4, §13</td></tr>
         <tr><td>Kernel trace showing the disk driver at the journal's priority</td><td>QNX-02, PERF-07</td></tr>
         <tr><td>Security policy enforced by the kernel: an intruder refused</td><td>SEC-01, §13 complet</td></tr>
         <tr><td>Freeze deadline and boot time on target</td><td>PERF-02, PERF-04 (10 000), PERF-06</td></tr>
-        <tr><td>Frame send cost on target (essay E4)</td><td>PERF-05</td><td><code>BLOCKED(no QNX SDP)</code> + the two causes above must be fixed first</td></tr>
+        <tr><td>Frame send cost on target (essay E4)</td><td>PERF-05</td><td><span class="fail">measured on target, not met</span> — mean ~636 µs, p99 over the 50 µs requirement (QEMU timing, <a href="on-target.html">target demo</a>)</td></tr>
         <tr><td>Real media latency, SD card then NVMe</td><td>PERF-08</td><td><code>BLOCKED(no Raspberry Pi 5 bench)</code></td></tr>
         <tr><td>24 h of randomised images</td><td>ROB-08, §12.10</td><td><code>BLOCKED(wall-clock)</code> — the fuzzer runs; <code>--quick</code> is what fits a CI job (53 images, 0 violations)</td></tr>
         <tr><td>Opening the export in Foxglove Studio</td><td>EXP-03</td><td><code>BLOCKED(manual GUI demo)</code> — the layout file is in <code>foxglove/</code>, and the sample MCAP is downloadable from this site</td></tr>

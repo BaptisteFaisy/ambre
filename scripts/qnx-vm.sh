@@ -19,6 +19,7 @@
 # control channel: scripts/qnx_console.py logs in and runs the commands.
 #
 # Usage:
+#   scripts/qnx-vm.sh build-image  everything: make qnx + the journal disk + the IFS
 #   scripts/qnx-vm.sh start        boot the VM and wait for the shell
 #   scripts/qnx-vm.sh push         pack the binaries + scenario onto the payload disk
 #   scripts/qnx-vm.sh run '<cmd>'  run a command in the guest
@@ -120,6 +121,26 @@ cmd_push() {
         | tail -12
 }
 
+cmd_build_image() {
+    command -v qcc >/dev/null 2>&1 || die "source ~/qnx800/qnxsdp-env.sh first (qcc is needed)"
+    command -v mkifs >/dev/null 2>&1 || die "source ~/qnx800/qnxsdp-env.sh first (mkifs is needed)"
+    log "building the five binaries (make qnx)"
+    make qnx
+    mkdir -p build/qnx-vm
+    python3 host/scenarios/generate.py --preset urban-frontal --seed 2026 \
+        --duration-ms 4000 --crash-at-ms 2500 --out build/qnx-vm/scenario.txt >/dev/null
+    log "raw journal disk: 64 MiB, one partition of type 177, no file system"
+    truncate -s 64M build/qnx-vm/journal.raw
+    printf '2048,,B1\n' | sfdisk --no-reread build/qnx-vm/journal.raw >/dev/null 2>&1 || true
+    local T="$QNX_TARGET/x86_64"
+    local SEARCH="$T:$T/boot/sys:$T/bin:$T/usr/bin:$T/sbin:$T/lib:$T/lib/dll:$T/usr/lib:$PWD/build/qnx:$PWD/build/qnx-vm"
+    sed "s|@SEARCH@|$SEARCH|" image/qemu.build > build/qnx-vm/qemu.build
+    cp image/demo-qnx.sh build/qnx-vm/
+    log "boot image (mkifs image/qemu.build)"
+    mkifs -v build/qnx-vm/qemu.build build/qnx-vm/ifs.bin
+    log "wrote build/qnx-vm/ifs.bin ($(du -h build/qnx-vm/ifs.bin | cut -f1))"
+}
+
 cmd_status() {
     if running; then
         log "running (pid $(cat "$PIDFILE")), console port $SERIAL_PORT"
@@ -150,6 +171,7 @@ cmd_stop() {
 }
 
 case "${1:-help}" in
+    build-image) cmd_build_image ;;
     start)    cmd_start ;;
     status)   cmd_status ;;
     push)     shift; cmd_push "$@" ;;

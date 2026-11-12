@@ -1,0 +1,83 @@
+{
+  "verdict": "PASS",
+  "differences": [],
+  "settings": {
+    "scenario": "site/assets/data/scenario-web.txt",
+    "segments": 2,
+    "states": 0,
+    "seed": 1234,
+    "nested": true,
+    "batch": 500,
+    "out": "docs/results/web-emulator-conformance.json"
+  },
+  "wasm": {
+    "states_explored": 27959,
+    "violations": 0,
+    "recoveries_run": 27959,
+    "events_acquired": 72099,
+    "events_phantom": 0,
+    "states_by_variant": {
+      "prefix": 2347,
+      "torn": 7168,
+      "cache": 9056,
+      "bitflip": 2347,
+      "table": 4694,
+      "nested": 2347
+    },
+    "violations_by_invariant": {
+      "I1": 0,
+      "I2": 0,
+      "I3": 0,
+      "I4": 0,
+      "I5": 0,
+      "I6": 0,
+      "I7": 0,
+      "I8": 0
+    },
+    "planned_states": 27959,
+    "ms": 104659,
+    "trace": {
+      "op_count": 2347,
+      "writes": 1788,
+      "flushes": 49,
+      "marks": 510,
+      "longest_write": 4096,
+      "bytes_written": 4585472,
+      "max_ops_capacity": 12000,
+      "max_write_capacity": 8192
+    },
+    "events": 8
+  },
+  "native": {
+    "states_explored": 27959,
+    "violations": 0,
+    "recoveries_run": 27959,
+    "events_acquired": 72099,
+    "events_phantom": 0,
+    "states_by_variant": {
+      "prefix": 2347,
+      "torn": 7168,
+      "cache": 9056,
+      "bitflip": 2347,
+      "table": 4694,
+      "nested": 2347
+    },
+    "violations_by_invariant": {
+      "I1": 0,
+      "I2": 0,
+      "I3": 0,
+      "I4": 0,
+      "I5": 0,
+      "I6": 0,
+      "I7": 0,
+      "I8": 0
+    },
+    "ms": 67712,
+    "stdout": "ambre-explore: 27959 states in 67.691s (413 states/s), 0 violations"
+  },
+  "artefact": {
+    "path": "site/assets/ambre-emu.js",
+    "bytes": 154615,
+    "sha256": "cd5d9cc95a4749c12f07c8c163745081180d3b2dbb56030d4f471dc4b19f37ae"
+  }
+}

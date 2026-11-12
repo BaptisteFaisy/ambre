@@ -26,37 +26,13 @@ static uint32_t resolve_jobs(const ambre_explore_cfg_t *cfg)
 static void merge_stats(ambre_explore_stats_t *dst,
                         const ambre_explore_stats_t *src)
 {
-    dst->states_explored += src->states_explored;
-    dst->violations += src->violations;
-    dst->events_acquired += src->events_acquired;
-    dst->events_phantom += src->events_phantom;
-    dst->recoveries_run += src->recoveries_run;
-    for (uint32_t i = 0; i < 6u; i++) {
-        dst->states_by_variant[i] += src->states_by_variant[i];
-    }
-    for (uint32_t i = 0; i < AMBRE_INVARIANT_COUNT; i++) {
-        dst->per_invariant[i] += src->per_invariant[i];
-    }
-    if (dst->first_violation[0] == '\0' && src->first_violation[0] != '\0') {
-        snprintf(dst->first_violation, sizeof(dst->first_violation), "%s",
-                 src->first_violation);
-    }
+    ambre_explore_merge_stats(dst, src);
 }
 
-/* Events already durable (acquired) before the cut at `prefix`. */
-static uint32_t acquired_before(const ambre_truth_t *truth, uint32_t prefix)
-{
-    uint32_t n = 0u;
-
-    for (uint32_t i = 0u; i < truth->event_count; i++) {
-        const ambre_truth_event_t *te = &truth->events[i];
-
-        if (te->acquired_op >= 0 && (uint32_t)te->acquired_op < prefix) {
-            n++;
-        }
-    }
-    return n;
-}
+/* run_parallel() below splits the state space across workers and merges each
+ * worker's counters with ambre_explore_merge_stats() — the same function the
+ * browser sweep uses, so a browser exploration and a PC campaign are reported
+ * identically. */
 
 static void run_range(const ambre_explore_cfg_t *cfg, const ambre_simdisk_t *sd,
                       const ambre_truth_t *truth, const ambre_state_queue_t *q,
@@ -71,7 +47,7 @@ static void run_range(const ambre_explore_cfg_t *cfg, const ambre_simdisk_t *sd,
         if (rc < 0) continue;
         out->states_explored++;
         out->recoveries_run++;
-        out->events_acquired += acquired_before(truth, st->prefix);
+        out->events_acquired += ambre_explore_acquired_before(truth, st->prefix);
         if (st->variant_type >= 0 && st->variant_type < 6) {
             out->states_by_variant[st->variant_type]++;
         }

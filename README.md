@@ -8,9 +8,16 @@ state instead of running a handful of lucky reboots.
 QNX Global Hackathon 2026 — Automotive & Mobility.
 
 **Website (public):** <https://baptistefaisy.github.io/ambre/> — the pitch, the
-validation results, the tutorial and a real generated expert report. It is
-published from [`site/`](site/) by [`.github/workflows/pages.yml`](.github/workflows/pages.yml)
-on every push to `main`; no build step, no external dependency.
+validation results, the tutorial, a real generated expert report, and a **live
+emulator**: the explorer of this repository (`fmt/` + `host/explore/` +
+`host/simdisk/`) compiled to WebAssembly by [`scripts/build-web.sh`](scripts/build-web.sh),
+so a visitor cuts the power in their own browser and the real recovery answers.
+The equivalence of the browser module and the native binary is machine-checked
+(`make web-conformance`, result committed in
+[`docs/results/web-emulator-conformance.json`](docs/results/web-emulator-conformance.json)).
+The site is published from [`site/`](site/) by
+[`.github/workflows/pages.yml`](.github/workflows/pages.yml) on every push to
+`main`; no build step, no external dependency.
 
 ---
 

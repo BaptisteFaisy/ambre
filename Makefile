@@ -9,6 +9,8 @@
 #   make demo       one-command end-to-end demonstration (level 2, real cuts)
 #   make e2e        one level-2 run: real processes, one SIGKILL, recovery
 #   make processcut the cut campaign (200 cuts, zero loss) on the PC backend
+#   make web        the browser emulator: real sources -> WebAssembly (needs emcc)
+#   make web-conformance  prove the browser module and the PC binary agree
 #   make sizecheck  house rule: files < 500 lines, functions < 50 lines
 #   make clean
 
@@ -33,10 +35,13 @@ FMT_SRC  := $(sort $(wildcard fmt/*.c))
 PORT_SRC := $(sort $(filter-out %_qnx.c,$(wildcard target/port/*.c)))
 PROC_SRC := $(sort $(filter-out %_qnx.c %/main.c %/main.cpp,$(wildcard target/*/*.c)))
 IPC_SRC  := $(sort $(wildcard target/ipc/*.c))
-# host tools linked into the PC library: the crash explorer and its support.
+# host tools linked into the PC library: the crash explorer and its support,
+# plus the browser API (host/web/) that the website's WebAssembly build uses.
 # host/explore/main.c stays out (it holds main()); it is linked by the CLI.
+# host/web/wasm/main_wasm.c stays out too: it is Emscripten-only.
 HOST_SRC := $(sort $(wildcard host/simdisk/*.c)) \
-            $(sort $(filter-out %/main.c,$(wildcard host/explore/*.c)))
+            $(sort $(filter-out %/main.c,$(wildcard host/explore/*.c))) \
+            $(sort $(wildcard host/web/*.c))
 LIB_SRC  := $(FMT_SRC) $(HOST_SRC) $(PORT_SRC) $(PROC_SRC) $(IPC_SRC)
 LIB_OBJ  := $(patsubst %.c,$(BUILD)/%.o,$(LIB_SRC))
 LIB      := $(BUILD)/libambre.a
@@ -55,7 +60,7 @@ TOOLS        := $(BUILD)/ambre-explore $(BUILD)/ambre-dump-truth \
 
 .PHONY: all test explore explore-full crosscheck demo sizecheck clean tools \
         scenario mcap verify help qnx-syntax processes image-check campaign test_archive_cpp \
-        e2e e2e-scenario processcut
+        e2e e2e-scenario processcut web web-conformance
 
 all: $(LIB) $(TEST_BIN) tools
 
@@ -167,6 +172,18 @@ explore: all scenario
 # "complet" level is reached by summing several scenarios. Long: never on a PR.
 campaign: all
 	./scripts/explore-campaign.sh --scenarios 12 --jobs $(JOBS) --out $(BUILD)/campaign
+
+# The browser emulator (site/emulator.html): the same C sources as the PC
+# tools, compiled to WebAssembly by scripts/build-web.sh. Needs Emscripten, so
+# it is never part of `make all` and never part of the 5-minute CI budget; the
+# artefact is committed under site/assets/ and its sha256 next to it.
+web:
+	@bash scripts/build-web.sh
+
+# Proof that what the browser runs is what the PC runs: identical states,
+# identical counters, identical verdicts. Needs node and site/assets/ambre-emu.js.
+web-conformance: all
+	@node scripts/web-conformance.mjs --out $(BUILD)/web-conformance.json
 
 explore-full: all scenario
 	$(BUILD)/ambre-explore --scenario $(BUILD)/scenario.txt \

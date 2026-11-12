@@ -1,0 +1,215 @@
+/*
+ * emulator.css — styles of the live emulator page (site/emulator.html).
+ *
+ * A second sheet, not an extension of ambre.css: the house rule keeps every
+ * file under 500 lines, and ambre.css already carries the whole design system.
+ * This file only adds what the emulator needs (controls, canvases, verdict
+ * grid) and reuses the same custom properties, so dark/light and the palette
+ * stay identical to the rest of the site.
+ */
+
+/* ------------------------------------------------------------- status ---- */
+
+.emu-status {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.6rem 1.2rem;
+    align-items: baseline;
+    padding: 0.9rem 1.1rem;
+    border: 1px solid var(--line);
+    border-left: 3px solid var(--amber);
+    border-radius: var(--radius);
+    background: var(--bg-card);
+    font-size: 0.95rem;
+}
+
+.emu-status[data-state="ok"] { border-left-color: var(--green); }
+.emu-status[data-state="error"] { border-left-color: var(--red); }
+.emu-status[data-state="busy"] { border-left-color: var(--amber); }
+
+.emu-status strong { color: var(--ink); }
+.emu-status .emu-status-detail { color: var(--ink-dim); font-family: var(--mono); font-size: 0.85rem; }
+
+/* ------------------------------------------------------------ controls --- */
+
+.emu-controls {
+    display: grid;
+    gap: 1rem;
+    grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+    margin-block: 1rem;
+}
+
+.emu-field { display: grid; gap: 0.35rem; }
+
+.emu-field > span,
+.emu-legend {
+    font-size: 0.78rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--ink-dim);
+}
+
+.emu-field output {
+    font-family: var(--mono);
+    color: var(--amber);
+    font-size: 0.95rem;
+}
+
+input[type="range"].emu-range { width: 100%; accent-color: var(--amber); }
+
+select.emu-select,
+input.emu-input {
+    background: var(--bg-soft);
+    color: var(--ink);
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    padding: 0.45rem 0.6rem;
+    font-family: var(--mono);
+    font-size: 0.9rem;
+}
+
+.emu-variants {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    list-style: none;
+    padding: 0;
+    margin: 0.5rem 0 0;
+}
+
+.emu-variants label {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 0.3rem 0.8rem;
+    cursor: pointer;
+    font-size: 0.9rem;
+    background: var(--bg-soft);
+}
+
+.emu-variants label:has(input:checked) {
+    border-color: var(--amber);
+    color: var(--amber);
+}
+
+.emu-actions { display: flex; flex-wrap: wrap; gap: 0.6rem; align-items: center; margin-top: 0.5rem; }
+
+.emu-hint { color: var(--ink-dim); font-size: 0.9rem; margin: 0.35rem 0 0; }
+
+/* -------------------------------------------------------------- canvas --- */
+
+.emu-canvas-wrap {
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--bg-soft);
+    padding: 0.6rem;
+    overflow-x: auto;
+}
+
+canvas.emu-canvas { display: block; width: 100%; height: auto; image-rendering: pixelated; }
+
+.emu-key {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem 1rem;
+    margin: 0.6rem 0 0;
+    padding: 0;
+    list-style: none;
+    font-size: 0.82rem;
+    color: var(--ink-soft);
+}
+
+.emu-key span {
+    display: inline-block;
+    width: 0.75rem;
+    height: 0.75rem;
+    border-radius: 2px;
+    margin-right: 0.35rem;
+    vertical-align: -1px;
+}
+
+/* Legend swatches: the site rule forbids inline style= attributes. */
+.emu-key .k-dim { background: var(--ink-dim); }
+.emu-key .k-amber { background: var(--amber); }
+.emu-key .k-red { background: var(--red); }
+.emu-key .k-green { background: var(--green); }
+.emu-key .k-teal { background: var(--teal); }
+
+/* -------------------------------------------------------------- verdict -- */
+
+.emu-verdict {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    padding: 0;
+    margin: 0 0 1rem;
+    list-style: none;
+}
+
+.emu-inv {
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 0.4rem 0.7rem;
+    font-family: var(--mono);
+    font-size: 0.85rem;
+    background: var(--bg-soft);
+    color: var(--ink-dim);
+}
+
+.emu-inv[data-result="pass"] { border-color: var(--green); color: var(--green); }
+.emu-inv[data-result="fail"] { border-color: var(--red); color: var(--red); background: color-mix(in srgb, var(--red) 12%, transparent); }
+.emu-inv[data-result="na"] { border-style: dashed; }
+
+.emu-detail {
+    font-family: var(--mono);
+    font-size: 0.88rem;
+    color: var(--ink-soft);
+    border-left: 3px solid var(--line);
+    padding-left: 0.8rem;
+    margin: 0 0 1rem;
+    white-space: pre-wrap;
+}
+
+.emu-detail[data-bad="1"] { border-left-color: var(--red); color: var(--red); }
+
+/* ---------------------------------------------------------------- sweep -- */
+
+.emu-progress {
+    height: 0.6rem;
+    border-radius: 999px;
+    background: var(--bg-card);
+    border: 1px solid var(--line);
+    overflow: hidden;
+    margin: 0.6rem 0;
+}
+
+.emu-progress > i {
+    display: block;
+    height: 100%;
+    width: 0;
+    background: var(--amber);
+    transition: width 0.15s linear;
+}
+
+/* ------------------------------------------------------------ utilities -- */
+
+/* The variant parameter panels are toggled with the hidden attribute; the
+ * grid display of .emu-field would otherwise win over the UA rule. */
+[hidden] { display: none !important; }
+
+.emu-grid-2 { display: grid; gap: 1.2rem; grid-template-columns: repeat(auto-fit, minmax(20rem, 1fr)); }
+
+.emu-panel {
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    background: var(--bg-card);
+    padding: 1rem 1.1rem;
+}
+
+.emu-panel h3 { margin-top: 0; font-size: 1rem; }
+
+table.data td.num, table.data th.num { font-variant-numeric: tabular-nums; }
+
+.emu-empty { color: var(--ink-dim); font-style: italic; }

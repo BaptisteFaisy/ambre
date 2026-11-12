@@ -3,6 +3,10 @@
  * recovery (optionally cutting inside recovery), check I1..I8, and keep the
  * image when a violation is found (spec 7.7: violations become regression
  * tests). Images are rolled back block by block, never copied wholesale.
+ *
+ * build_image / judge / recovered_disk are the three steps ws_test is made of:
+ * the browser emulator (host/web/) needs the crash image itself, so it drives
+ * the same steps instead of re-implementing them.
  */
 
 #include "ambre_explore_internal.h"
@@ -84,11 +88,12 @@ static int build_cache_image(ambre_explore_ws_t *ws, const ambre_simdisk_t *sd,
 }
 
 /* Materialise the state's disk image into ws->work. */
-static int build_image(ambre_explore_ws_t *ws, const ambre_simdisk_t *sd,
-                       const ambre_explore_state_t *st)
+int ambre_explore_build_image(ambre_explore_ws_t *ws, const ambre_simdisk_t *sd,
+                              const ambre_explore_state_t *st)
 {
     const ambre_cut_variant_t *v = &st->variant;
     advance_plain(ws, sd, st->prefix);
+    ws->nested_used = false;
     if (st->variant_type == AMBRE_VAR_CACHE) return build_cache_image(ws, sd, v);
     if (ambre_memdisk_sync_from(&ws->work, ws->plain) != AMBRE_OK) return -1;
     ambre_disk_t *d = &ws->work.disk;
@@ -114,11 +119,12 @@ static int build_image(ambre_explore_ws_t *ws, const ambre_simdisk_t *sd,
 /* Plain cut: one recovery, then the whole invariant battery (I8 re-runs it). */
 static int run_plain(ambre_explore_ws_t *ws, const ambre_truth_t *truth,
                      const ambre_explore_state_t *st, const ambre_simdisk_t *sd,
-                     ambre_invariant_report_t *rep)
+                     ambre_invariant_report_t *rep, ambre_recovery_result_t *out)
 {
     ambre_recovery_result_t rec;
     memset(&rec, 0, sizeof(rec));
     int rc = ambre_recover(&ws->work.disk, &rec);
+    if (out) *out = rec;
     if (rc != AMBRE_OK) {
         if (!ambre_image_has_journal(&ws->work.disk)) return 0;  /* blank */
         rep->violated_mask |= (1u << AMBRE_I1_TERMINATES);
@@ -136,7 +142,7 @@ static int run_plain(ambre_explore_ws_t *ws, const ambre_truth_t *truth,
  * again, and check the invariants on that state. */
 static int run_nested(ambre_explore_ws_t *ws, const ambre_truth_t *truth,
                       const ambre_explore_state_t *st, const ambre_simdisk_t *sd,
-                      ambre_invariant_report_t *rep)
+                      ambre_invariant_report_t *rep, ambre_recovery_result_t *out)
 {
     ambre_recovery_result_t rec1;
     memset(&rec1, 0, sizeof(rec1));
@@ -145,8 +151,9 @@ static int run_nested(ambre_explore_ws_t *ws, const ambre_truth_t *truth,
     int rc = ambre_recover(&ws->work.disk, &rec1);
     uint32_t half = ws->work.op_count / 2u;
     ws->work.log_ops = false;
-    if (rc != AMBRE_OK) return run_plain(ws, truth, st, sd, rep);
+    if (rc != AMBRE_OK) return run_plain(ws, truth, st, sd, rep, out);
     if (half == 0) {
+        if (out) *out = rec1;
         (void)ambre_check_invariants(truth, &rec1, &ws->work.disk,
                                      st->prefix, sd, st->variant_type, rep);
         return (rep->violated_mask == 0) ? 0 : 1;
@@ -164,9 +171,32 @@ static int run_nested(ambre_explore_ws_t *ws, const ambre_truth_t *truth,
                  "I1: nested recovery failed (prefix %u)", st->prefix);
         return 1;
     }
+    ws->nested_used = true;
+    if (out) *out = rec2;
     (void)ambre_check_invariants(truth, &rec2, &ws->nested.disk,
                                  st->prefix, sd, st->variant_type, rep);
     return (rep->violated_mask == 0) ? 0 : 1;
+}
+
+int ambre_explore_judge(ambre_explore_ws_t *ws, const ambre_truth_t *truth,
+                        const ambre_explore_state_t *st, const ambre_simdisk_t *sd,
+                        ambre_invariant_report_t *rep, ambre_recovery_result_t *out)
+{
+    if (out) memset(out, 0, sizeof(*out));
+    if (st->variant_type == AMBRE_VAR_NESTED) {
+        return run_nested(ws, truth, st, sd, rep, out);
+    }
+    return run_plain(ws, truth, st, sd, rep, out);
+}
+
+const ambre_disk_t *ambre_explore_recovered_disk(const ambre_explore_ws_t *ws,
+                                                 const ambre_explore_state_t *st)
+{
+    if (!ws) return NULL;
+    if (st->variant_type == AMBRE_VAR_NESTED && ws->nested_used) {
+        return &ws->nested.disk;
+    }
+    return &ws->work.disk;
 }
 
 int ambre_explore_ws_test(ambre_explore_ws_t *ws,
@@ -177,20 +207,54 @@ int ambre_explore_ws_test(ambre_explore_ws_t *ws,
                           ambre_invariant_report_t *rep)
 {
     memset(rep, 0, sizeof(*rep));
-    if (build_image(ws, sd, st) != 0) return -1;
-    int rc;
-    if (st->variant_type == AMBRE_VAR_NESTED) {
-        rc = run_nested(ws, truth, st, sd, rep);
-    } else {
-        rc = run_plain(ws, truth, st, sd, rep);
-    }
+    if (ambre_explore_build_image(ws, sd, st) != 0) return -1;
+    int rc = ambre_explore_judge(ws, truth, st, sd, rep, NULL);
     if (rep->violated_mask != 0 && cfg->violation_dir) {
         /* Keep the crash image itself, not the recovered one. */
-        if (build_image(ws, sd, st) == 0) {
+        if (ambre_explore_build_image(ws, sd, st) == 0) {
             ambre_save_violation(cfg, st, ws->work.image, ws->size, rep);
         }
     }
     return rc;
+}
+
+/* ------------------------------------------------- counters (shared with
+ * the browser sweep, so both report an exploration the same way) ---------- */
+
+void ambre_explore_merge_stats(ambre_explore_stats_t *dst,
+                               const ambre_explore_stats_t *src)
+{
+    dst->states_explored += src->states_explored;
+    dst->violations += src->violations;
+    dst->events_acquired += src->events_acquired;
+    dst->events_phantom += src->events_phantom;
+    dst->recoveries_run += src->recoveries_run;
+    for (uint32_t i = 0; i < 6u; i++) {
+        dst->states_by_variant[i] += src->states_by_variant[i];
+    }
+    for (uint32_t i = 0; i < AMBRE_INVARIANT_COUNT; i++) {
+        dst->per_invariant[i] += src->per_invariant[i];
+    }
+    if (dst->first_violation[0] == '\0' && src->first_violation[0] != '\0') {
+        snprintf(dst->first_violation, sizeof(dst->first_violation), "%s",
+                 src->first_violation);
+    }
+}
+
+/* Events already durable (acquired) before the cut at `prefix`. */
+uint32_t ambre_explore_acquired_before(const ambre_truth_t *truth,
+                                       uint32_t prefix)
+{
+    uint32_t n = 0u;
+
+    for (uint32_t i = 0u; i < truth->event_count; i++) {
+        const ambre_truth_event_t *te = &truth->events[i];
+
+        if (te->acquired_op >= 0 && (uint32_t)te->acquired_op < prefix) {
+            n++;
+        }
+    }
+    return n;
 }
 
 void ambre_save_violation(const ambre_explore_cfg_t *cfg,

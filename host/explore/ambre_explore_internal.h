@@ -100,6 +100,7 @@ typedef struct {
     uint32_t        plain_prefix;
     ambre_memdisk_t work;       /* image the recovery runs on                */
     ambre_memdisk_t nested;     /* base + part of the recovery's own writes  */
+    bool            nested_used; /* nested recovery ran on ws->nested        */
 } ambre_explore_ws_t;
 
 int  ambre_explore_ws_init(ambre_explore_ws_t *ws, uint64_t size);
@@ -110,6 +111,30 @@ int  ambre_explore_ws_test(ambre_explore_ws_t *ws,
                            const ambre_truth_t *truth,
                            const ambre_explore_state_t *st,
                            ambre_invariant_report_t *rep);
+
+/* The three steps ambre_explore_ws_test() is made of. The browser emulator
+ * (host/web/) needs the crash image itself, before the recovery rewrites it,
+ * so it drives the same steps instead of re-implementing them. */
+int  ambre_explore_build_image(ambre_explore_ws_t *ws, const ambre_simdisk_t *sd,
+                               const ambre_explore_state_t *st);
+/* Returns 1 when an invariant was violated, 0 when the state is clean,
+ * negative on an internal error. rec_out (may be NULL) receives the recovery
+ * result the verdict was judged on. */
+int  ambre_explore_judge(ambre_explore_ws_t *ws, const ambre_truth_t *truth,
+                         const ambre_explore_state_t *st, const ambre_simdisk_t *sd,
+                         ambre_invariant_report_t *rep,
+                         ambre_recovery_result_t *rec_out);
+/* Disk holding the recovered image of the state judged last: ws->work, except
+ * for a nested cut whose verdict comes from the second recovery on ws->nested. */
+const ambre_disk_t *ambre_explore_recovered_disk(const ambre_explore_ws_t *ws,
+                                                 const ambre_explore_state_t *st);
+
+/* Counters shared by the PC driver and the browser sweep, so both report the
+ * exploration exactly the same way. */
+void ambre_explore_merge_stats(ambre_explore_stats_t *dst,
+                               const ambre_explore_stats_t *src);
+uint32_t ambre_explore_acquired_before(const ambre_truth_t *truth,
+                                       uint32_t prefix);
 
 void ambre_save_violation(const ambre_explore_cfg_t *cfg,
                           const ambre_explore_state_t *st,

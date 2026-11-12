@@ -16,8 +16,16 @@
 
 #include "../../fmt/ambre_fmt.h"
 
+/* Both bounds are overridable at build time. The browser build (host/web/)
+ * compiles the same sources with a smaller op-log capacity: a 400 000-entry
+ * log would reserve more memory than a web page should. Exceeding a bound is
+ * never silent — the write is refused with AMBRE_ERR_TOO_BIG. */
+#ifndef AMBRE_SIMDISK_MAX_OPS
 #define AMBRE_SIMDISK_MAX_OPS   400000u
+#endif
+#ifndef AMBRE_SIMDISK_MAX_DATA
 #define AMBRE_SIMDISK_MAX_DATA  8192u   /* bytes kept per logged write       */
+#endif
 
 typedef enum {
     AMBRE_OP_WRITE = 1,

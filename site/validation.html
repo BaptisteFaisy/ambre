@@ -1,0 +1,413 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Validation — Ambre</title>
+<meta name="description" content="Every number behind the claim: 1 379 264 power-cut states explored with zero invariant violations, 200 real process cuts, 98.40% coverage of the format library, and the one requirement that fails.">
+<meta name="color-scheme" content="dark light">
+<link rel="stylesheet" href="assets/ambre.css">
+</head>
+<body>
+
+<header class="site-header">
+  <div class="shell">
+    <a class="brand" href="index.html">
+      <span class="brand-mark" aria-hidden="true"></span>
+      Ambre <small>QNX 8.0 event data recorder</small>
+    </a>
+    <nav class="site-nav" aria-label="Main">
+      <ul>
+        <li><a href="index.html">Overview</a></li>
+        <li><a href="validation.html" aria-current="page">Validation</a></li>
+        <li><a href="tutorial.html">Tutorial</a></li>
+        <li><a href="report/index.html">Sample report</a></li>
+        <li><a href="https://github.com/BaptisteFaisy/ambre">Code</a></li>
+      </ul>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+
+<section class="hero">
+  <div class="shell">
+    <p class="kicker">Level 0 → 3 · measured 2026-11-11</p>
+    <h1>The claim, and <em>every number behind it</em></h1>
+    <p class="hero-lede">
+      Ambre says: past the announced freeze delay, the regulatory pre-crash data
+      survives any power cut. This page is that sentence turned into counts,
+      with the command that reproduces each one — and with the requirement that
+      currently <strong>fails</strong>, shown as failing.
+    </p>
+    <div class="cards">
+      <div class="card">
+        <div class="card-figure">1 379 264</div>
+        <div class="card-label">power-cut states explored, invariants I1–I8 checked on each</div>
+        <div class="card-note">./scripts/explore-campaign.sh</div>
+      </div>
+      <div class="card">
+        <div class="card-figure good">0</div>
+        <div class="card-label">invariant violations across 2 567 421 acquired-event observations</div>
+        <div class="card-note">docs/results/exploration-campaign.json</div>
+      </div>
+      <div class="card">
+        <div class="card-figure">200 / 200</div>
+        <div class="card-label">real process cuts (SIGKILL) survived, zero unexpected loss</div>
+        <div class="card-note">host/processcut/campaign.py</div>
+      </div>
+      <div class="card">
+        <div class="card-figure">98.40 %</div>
+        <div class="card-label">of the lines of <code>fmt/</code>, the format and recovery library</div>
+        <div class="card-note">make coverage-gate</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="section">
+  <div class="shell">
+    <h2 class="section-title">Four levels of test, each proving something different</h2>
+    <p class="section-lede">
+      A crash-tolerance claim is only as good as the fault model behind it. Each
+      level below says plainly what it can and cannot prove.
+    </p>
+    <table class="data">
+      <caption>Test levels of the specification (§7.1) and their status.</caption>
+      <thead>
+        <tr>
+          <th scope="col">Level</th>
+          <th scope="col">What it proves</th>
+          <th scope="col">What it does not prove</th>
+          <th scope="col">Result</th>
+          <th scope="col">Reproduce</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <th scope="row">0 — unit, PC</th>
+          <td>Block encoding, CRC-32C, table copy selection, recovery state machine, trigger arithmetic, journal write path.</td>
+          <td>Nothing about timing or a real device.</td>
+          <td><span class="ok">22 C suites · 48 865 checks</span><br><span class="ok">C++ archive · 71</span><br><span class="ok">10 Python suites</span></td>
+          <td><code>make test</code></td>
+        </tr>
+        <tr>
+          <th scope="row">1 — exhaustive exploration, PC</th>
+          <td>For <em>every</em> reachable cut instant of a scenario, and for torn writes, lost unflushed writes, flipped bits and destroyed tables: recovery keeps every acquired event, invents none, and is idempotent.</td>
+          <td>It is a simulated disk, not a device with its own cache policy.</td>
+          <td><span class="ok">1 379 264 states · 0 violations</span></td>
+          <td><code>make explore-full</code><br><code>./scripts/explore-campaign.sh</code></td>
+        </tr>
+        <tr>
+          <th scope="row">2 — real cuts, PC backend</th>
+          <td>The five real processes, a real file as the partition, a real <code>SIGKILL</code> at a chosen instant, a real restart, a real export checked against the injected data.</td>
+          <td>Writes already handed to the host kernel survive a kill: a lost volatile cache is <em>not</em> tested here (that is level 1). Nothing about QNX.</td>
+          <td><span class="ok">200 cycles · ok=200 · 0 violations</span><br><span class="warn">0 / 200 QEMU cuts — no QNX image</span></td>
+          <td><code>python3 host/processcut/campaign.py --cycles 200</code></td>
+        </tr>
+        <tr>
+          <th scope="row">3 — hardware</th>
+          <td>Real power cuts through a relay, real media latency (PERF-08).</td>
+          <td>—</td>
+          <td><span class="blocked">BLOCKED — no Raspberry Pi 5 bench</span></td>
+          <td>—</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="section">
+  <div class="shell">
+    <h2 class="section-title">The eight invariants</h2>
+    <p class="section-lede">
+      Every explored state is judged against these eight sentences (§7.2). One
+      violation anywhere fails the campaign.
+    </p>
+    <table class="data">
+      <caption>Checked on all 1 379 264 states; violations per invariant: all zero.</caption>
+      <thead>
+        <tr><th scope="col">ID</th><th scope="col">Invariant</th><th class="num" scope="col">Violations</th></tr>
+      </thead>
+      <tbody>
+        <tr><th scope="row">I1</th><td>Recovery terminates, in a bounded number of steps, without crashing.</td><td class="num">0</td></tr>
+        <tr><th scope="row">I2</th><td>Every event acquired before the cut is present, and its pre-crash class A data is identical to what was injected.</td><td class="num">0</td></tr>
+        <tr><th scope="row">I3</th><td>No event appears that was not triggered.</td><td class="num">0</td></tr>
+        <tr><th scope="row">I4</th><td>Every returned sample equals the injected sample of the same instant.</td><td class="num">0</td></tr>
+        <tr><th scope="row">I5</th><td>For an acquired event, the last returned sample is less than one flush period plus one block before the cut.</td><td class="num">0</td></tr>
+        <tr><th scope="row">I6</th><td>A locked event survives any later sequence of events and cuts.</td><td class="num">0</td></tr>
+        <tr><th scope="row">I7</th><td>“Complete file” is yes if and only if the event was sealed before the cut.</td><td class="num">0</td></tr>
+        <tr><th scope="row">I8</th><td>A cut during recovery, or during archiving, followed by a new recovery, gives the same final state.</td><td class="num">0</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="section">
+  <div class="shell">
+    <h2 class="section-title">What “every cut” actually means</h2>
+    <p class="section-lede">
+      One 30-second scenario produces 5 803 disk operations. Its whole reachable
+      state space is <strong>64 591 states</strong> — the campaign sums 18
+      scenarios (different seeds, durations, crash instants and Δv) to reach the
+      one million the specification asks for at “complet” level.
+    </p>
+    <table class="data">
+      <caption>States per cut variant, summed over the 18 scenarios of the campaign of record.</caption>
+      <thead>
+        <tr><th scope="col">Variant</th><th scope="col">What is injected</th><th class="num" scope="col">States</th></tr>
+      </thead>
+      <tbody>
+        <tr><th scope="row">prefix</th><td>Cut after exactly <em>n</em> operations, nothing else. The plain power cut.</td><td class="num">127 186</td></tr>
+        <tr><th scope="row">torn</th><td>The last write lands only up to a sector boundary — every boundary of that write is tried.</td><td class="num">279 552</td></tr>
+        <tr><th scope="row">cache</th><td>A volatile disk cache: subsets of the writes not yet flushed are dropped.</td><td class="num">463 782</td></tr>
+        <tr><th scope="row">bitflip</th><td>One bit flipped anywhere in the data area (media error, ROB-07).</td><td class="num">127 186</td></tr>
+        <tr><th scope="row">table</th><td>Allocation table copy A destroyed, then both copies destroyed (REP-02 rebuild path).</td><td class="num">254 372</td></tr>
+        <tr><th scope="row">nested</th><td>A cut <em>inside</em> the recovery itself, then recovery again (I8).</td><td class="num">127 186</td></tr>
+      </tbody>
+    </table>
+
+    <h3>Two expectations are deliberately relaxed — and why</h3>
+    <div class="note note-honesty">
+      <p><strong>Volatile cache (I7).</strong> If the SEAL record was written but
+      never flushed, a disk with a volatile cache may legitimately lose it. The
+      event then comes back with “complete file = no”, which is correct: the seal
+      never became durable. Expecting “yes” there would be demanding a guarantee
+      the hardware does not give.</p>
+      <p><strong>Flipped bit (I2, I4, I5, I6).</strong> A media bit error inside
+      an acquired event destroys data the journal has no redundancy for. What is
+      required of it — and checked — is <em>detection and isolation</em>: the
+      corrupt block is discarded, the neighbours are unaffected, recovery still
+      terminates (I1) and still invents nothing (I3). Claiming the data survived
+      would be a lie.</p>
+    </div>
+  </div>
+</section>
+
+<section class="section">
+  <div class="shell">
+    <h2 class="section-title">Five defects the harnesses caught, and their regression test</h2>
+    <p class="section-lede">
+      The specification (§7.7) requires that every violation found during
+      development is kept as a regression test. These are real bugs that the
+      exploration and the cut bench found in this project's own code.
+    </p>
+    <table class="data">
+      <caption>Found by level 1 (exploration) and level 2 (real process cuts).</caption>
+      <thead>
+        <tr><th scope="col">Defect</th><th scope="col">Found by</th><th scope="col">Fix</th><th scope="col">Regression test</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>The explorer's work image was only rolled back on the blocks the previous recovery had written, never resynchronised with the new prefix's writes → phantom I2 failures.</td>
+          <td>level 1</td>
+          <td>New prefix writes are applied to both images.</td>
+          <td><code>tests/test_explore.c</code></td>
+        </tr>
+        <tr>
+          <td>I7's ground truth was anchored on the durability <em>mark</em> (after the flush) instead of the SEAL record write → false violations.</td>
+          <td>level 1</td>
+          <td>Ground truth uses the write instant; the mark only decides the cache case.</td>
+          <td><code>tests/test_explore.c</code></td>
+        </tr>
+        <tr>
+          <td>The portability layer had no request/reply, so the shipped <code>edrctl</code> could not answer at all.</td>
+          <td>level 2 bench</td>
+          <td><code>ambre_port_conn_request()</code> added (POSIX + QNX <code>MsgSend</code>).</td>
+          <td><code>tests/test_ctl_live_py.py</code></td>
+        </tr>
+        <tr>
+          <td><code>edr-capture</code> acknowledged data frames but not EXTERNAL signals: a producer sending “restraint deployed” timed out after 500 ms and exited 1 (ROB-06).</td>
+          <td>level 2 bench</td>
+          <td>Every message type is acknowledged through one shared <code>reply_ack()</code>.</td>
+          <td><code>tests/test_e2e_py.py</code>, <code>tests/test_rob02_py.py</code></td>
+        </tr>
+        <tr>
+          <td>The MCAP export emitted <code>/edr/meta/gaps</code> in detection order, so the channel's log time went backwards.</td>
+          <td>level 2 bench (7 of 200 cycles)</td>
+          <td>Gaps sorted by start timestamp before emission.</td>
+          <td><code>tests/test_mcap_py.py::test_gaps_channel_is_time_ordered</code></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<section class="section">
+  <div class="shell">
+    <h2 class="section-title">Latency: what is measured, and one requirement that fails</h2>
+    <p class="section-lede">
+      200 triggers per load, four loads, backend <code>posix</code>: a regular
+      file as the partition, <code>fdatasync()</code> as the flush. The software
+      share is measured with the journal on tmpfs, where the flush has no device
+      to talk to — that separates our code from the media.
+    </p>
+    <table class="data">
+      <caption>Microseconds. Limits from §5.7: PERF-01 ≤ 2 000, PERF-02 ≤ 20 000, PERF-03 ≤ 500.</caption>
+      <thead>
+        <tr>
+          <th scope="col">Load</th>
+          <th class="num" scope="col">PERF-01 median / p99</th>
+          <th class="num" scope="col">PERF-02 freeze median / p99 / max</th>
+          <th class="num" scope="col">PERF-03 software median / p99 / max</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><th scope="row">none</th><td class="num">1 082 / 7 329</td><td class="num">3 479 / 10 922 / 16 931</td><td class="num">10 / 58 / 80</td></tr>
+        <tr><th scope="row">cpu (12 spinners)</th><td class="num">1 089 / 9 130</td><td class="num">4 308 / 15 251 / 44 275</td><td class="num">10 / 110 / 918</td></tr>
+        <tr><th scope="row">disk (fsync storm)</th><td class="num">1 076 / 2 077</td><td class="num">3 437 / 10 667 / 23 490</td><td class="num">10 / 237 / 4 045</td></tr>
+        <tr><th scope="row">mem (35 % held)</th><td class="num">1 074 / 10 324</td><td class="num">3 424 / 9 749 / 21 222</td><td class="num">10 / 56 / 84</td></tr>
+      </tbody>
+    </table>
+    <p>
+      Overshoots against the limits: PERF-01 4 / 8 / 1 / 4 of 25–26 crash
+      triggers; PERF-02 0 / 1 / 1 / 1 of 200; PERF-03 0 / 1 / 1 / 0 of 200.
+      The decomposition is the point: at the median the software is
+      <strong>10 µs</strong> and the media <strong>3 469 µs</strong> — 99.7 % of
+      the freeze is <code>fdatasync()</code> on a file, not our code. On a QNX
+      target with a real partition that media term changes completely, which is
+      exactly why <strong>PERF-02 is not claimed here</strong>.
+    </p>
+
+    <div class="note note-fail">
+      <p><strong>PERF-05 — FAILED.</strong> Requirement: a producer sends one
+      frame in under 50 µs at p99. Measured: p50 under 50 µs, but the p99
+      ceiling is ~1 ms with no load and ~5 ms under disk and memory pressure.</p>
+      <p>Two measured causes, not guesses: (1) the figure is a round trip that
+      waits for the acknowledgement, and the acknowledgement is synchronous;
+      (2) 34–102 GAP records are written on the input path, and a GAP is
+      forwarded synchronously, so it blocks the producer's send. Fix path:
+      acknowledge before journaling, and move GAP emission off the input path.
+      Published as a failure because hiding it would invalidate every other
+      number on this page.</p>
+    </div>
+  </div>
+</section>
+
+<section class="section">
+  <div class="shell">
+    <h2 class="section-title">Two independent implementations agreeing byte for byte</h2>
+    <p class="section-lede">
+      The trigger decides whether a crash happened; a wrong threshold means a
+      missing event. Requirement DEC-12 demands a second, independent
+      implementation giving the same decisions.
+    </p>
+    <div class="cards">
+      <div class="card">
+        <div class="card-figure">10 000</div>
+        <div class="card-label">random scenarios, including the exact regulatory edge cases (7.9 / 8.1 km/h at 150 ms, 8.1 km/h at 151 ms)</div>
+      </div>
+      <div class="card">
+        <div class="card-figure">2 744 840</div>
+        <div class="card-label">decision lines compared between the C engine and the Python twin</div>
+      </div>
+      <div class="card">
+        <div class="card-figure good">0</div>
+        <div class="card-label">divergences — the two <code>.dec</code> files are byte-identical</div>
+        <div class="card-note">make crosscheck</div>
+      </div>
+    </div>
+    <p>
+      The contract that makes this possible is arithmetic, not stylistic:
+      integer division truncating toward zero (Python's <code>//</code> floors
+      toward −∞ and would diverge on every negative Δv), fixed units
+      (µs, mm/s², mm/s), and thresholds derived once as
+      <code>mkmh × 5 ÷ 18</code> → 2 222 / 6 944 / 222 mm/s.
+    </p>
+  </div>
+</section>
+
+<section class="section">
+  <div class="shell">
+    <h2 class="section-title">What is not measured</h2>
+    <p class="section-lede">
+      No QNX SDP 8.0 was available on any machine used for this work, so the
+      target never booted. Everything below is blocked on that, and is labelled
+      <code>BLOCKED</code> in the repository rather than estimated.
+    </p>
+    <table class="data">
+      <caption>Blocked items and what would unblock them.</caption>
+      <thead>
+        <tr><th scope="col">Blocked</th><th scope="col">Requirement</th><th scope="col">Needs</th></tr>
+      </thead>
+      <tbody>
+        <tr><td>Resource manager serving <code>/dev/edr</code> at runtime</td><td>QNX-01, QNX-03, EXP-08</td><td rowspan="6"><code>BLOCKED(no QNX SDP)</code> — install SDP 8.0, then <code>make qnx CC=qcc</code>, <code>mkqnximage -f image/ambre.build</code>, boot under QEMU</td></tr>
+        <tr><td>Flush order reaching a real virtual disk (essay E1)</td><td>§10 E1, GEL-02</td></tr>
+        <tr><td>QEMU kill/restart cycle under 10 s (essay E3), 200 → 2 000 real cuts</td><td>§7.4, §13</td></tr>
+        <tr><td>Kernel trace showing the disk driver at the journal's priority</td><td>QNX-02, PERF-07</td></tr>
+        <tr><td>Security policy enforced by the kernel: an intruder refused</td><td>SEC-01, §13 complet</td></tr>
+        <tr><td>Freeze deadline and boot time on target</td><td>PERF-02, PERF-04 (10 000), PERF-06</td></tr>
+        <tr><td>Frame send cost on target (essay E4)</td><td>PERF-05</td><td><code>BLOCKED(no QNX SDP)</code> + the two causes above must be fixed first</td></tr>
+        <tr><td>Real media latency, SD card then NVMe</td><td>PERF-08</td><td><code>BLOCKED(no Raspberry Pi 5 bench)</code></td></tr>
+        <tr><td>24 h of randomised images</td><td>ROB-08, §12.10</td><td><code>BLOCKED(wall-clock)</code> — the fuzzer runs; <code>--quick</code> is what fits a CI job (53 images, 0 violations)</td></tr>
+        <tr><td>Opening the export in Foxglove Studio</td><td>EXP-03</td><td><code>BLOCKED(manual GUI demo)</code> — the layout file is in <code>foxglove/</code>, and the sample MCAP is downloadable from this site</td></tr>
+      </tbody>
+    </table>
+    <div class="note">
+      <p>The QNX half of the code is not absent: five <code>*_qnx.c</code> files
+      implement the resource manager, the io-blk partition with
+      <code>DCMD_FLUSH_CACHE</code>, channels, pulses, <code>slog2</code>,
+      <code>TraceUser</code>, priorities and <code>mlock</code>. They compile
+      clean under <code>-Werror</code> against stub headers
+      (<code>make qnx-syntax</code>, 5/5). That proves syntax, prototypes and
+      structure fields — <strong>not behaviour</strong>. See
+      <a href="https://github.com/BaptisteFaisy/ambre/blob/main/docs/QNX-PORT.md">docs/QNX-PORT.md</a>.</p>
+    </div>
+  </div>
+</section>
+
+<section class="section">
+  <div class="shell">
+    <h2 class="section-title">Reproduce all of it</h2>
+    <pre class="code"><code>git clone https://github.com/BaptisteFaisy/ambre &amp;&amp; cd ambre
+make                     # library, 22 test binaries, 5 processes
+make test                # 48 865 checks
+make test_archive_cpp    # C++17 MCAP archive, 71 checks
+make explore             # 10 000 cut states (~25 s)
+make explore-full        # every reachable state of the 30 s scenario: 64 591
+./scripts/explore-campaign.sh --scenarios 12   # the campaign of record
+make crosscheck          # 10 000 scenarios, C vs Python twin
+make coverage-gate       # fmt/ line coverage, gate at 95 %
+make qnx-syntax          # QNX glue compiled against the stub headers
+make image-check         # static consistency of image/ and the security policy
+make verify              # MCAP export checked against the injected scenario
+bash scripts/demo.sh     # the whole story in one command</code></pre>
+    <table class="data">
+      <caption>Machine the published numbers come from.</caption>
+      <tbody>
+        <tr><th scope="row">CPU</th><td>11th Gen Intel Core i5-11600K @ 3.90 GHz, 12 logical cores</td></tr>
+        <tr><th scope="row">Memory</th><td>31 GiB</td></tr>
+        <tr><th scope="row">Kernel</th><td>Linux 6.14.0-37-generic</td></tr>
+        <tr><th scope="row">Storage</th><td>ext4 on NVMe; tmpfs (<code>/dev/shm</code>) for the software-share pass</td></tr>
+        <tr><th scope="row">Toolchain</th><td>gcc 13.3.0 locally, gcc/g++ 14.2.0 on the CI runners; Python 3.12.3</td></tr>
+        <tr><th scope="row">Backend</th><td><code>posix</code> — file as raw partition, <code>CLOCK_MONOTONIC</code>, AF_UNIX <code>SOCK_SEQPACKET</code>, <code>fdatasync()</code> as flush</td></tr>
+      </tbody>
+    </table>
+    <p>
+      Raw results, downloadable:
+      <a href="assets/data/exploration-campaign.json">exploration campaign (JSON)</a> ·
+      <a href="assets/data/processcut-200.json">200 process cuts (JSON)</a> ·
+      <a href="assets/data/sample-event.mcap">a real event as MCAP</a> — open it in
+      Foxglove Studio, T0 sits at 60 s and no absolute timestamp appears anywhere.
+    </p>
+  </div>
+</section>
+
+</main>
+
+<footer class="site-footer">
+  <div class="shell">
+    <p>Apache-2.0 · QNX Global Hackathon 2026, Automotive &amp; Mobility.<br>
+       Aligned with UN Regulation No.&nbsp;160 — not compliant, not certified.</p>
+    <nav aria-label="Footer">
+      <ul>
+        <li><a href="https://github.com/BaptisteFaisy/ambre">Repository</a></li>
+        <li><a href="https://github.com/BaptisteFaisy/ambre/blob/main/NOTICE">Notice</a></li>
+        <li><a href="https://github.com/BaptisteFaisy/ambre/blob/main/docs/CAMPAIGN.md">Campaign</a></li>
+      </ul>
+    </nav>
+  </div>
+</footer>
+
+</body>
+</html>

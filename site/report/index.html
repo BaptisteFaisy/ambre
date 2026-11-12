@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Ambre EDR - Expert reading report - event 1</title>
+<style>
+body{font-family:Georgia,'Times New Roman',serif;margin:0;background:#f4f2ec;
+color:#1c1c1c}
+.page{max-width:960px;margin:24px auto;background:#fff;border:1px solid #c9c4b8;
+padding:36px 44px}
+h1{font-size:22px;border-bottom:3px double #1c1c1c;padding-bottom:8px;margin:0 0
+4px}
+h2{font-size:16px;margin:26px 0 8px;border-bottom:1px solid #c9c4b8;
+padding-bottom:4px}
+.subtitle{color:#5a564c;font-size:13px;margin-bottom:18px}
+table{border-collapse:collapse;width:100%;font-size:13px;margin:8px 0}
+th,td{border:1px solid #b9b3a5;padding:5px 8px;text-align:left;vertical-align:top}
+th{background:#ece8dd}
+tr:nth-child(even) td{background:#faf9f5}
+code,.mono{font-family:'Courier New',monospace;font-size:12px}
+.stamp{display:inline-block;border:2px solid #7a2020;color:#7a2020;
+padding:3px 10px;font-weight:bold;letter-spacing:1px;transform:rotate(-2deg);
+font-size:12px}
+.note{font-size:12px;color:#5a564c}
+.ok{color:#1d6e2f;font-weight:bold}
+.bad{color:#a02020;font-weight:bold}
+footer{margin-top:28px;border-top:1px solid #c9c4b8;padding-top:8px;
+font-size:11px;color:#5a564c}
+</style>
+</head>
+<body>
+<div class="page">
+<h1>Event Data Recorder &mdash; Expert reading report</h1>
+<p class="subtitle">Project Ambre (QNX 8.0) &mdash; report produced by
+host/report/expert_report.py (spec 12.12, EXP-05). Self-contained document:
+inline CSS, no script, no external resource.</p>
+<div id="source-fingerprint"><p class="note" id="source-fingerprint">Source: image file <span class="mono">/tmp/site-journal.img</span> &mdash; SHA-256 <span class="mono">e9dcddbbef0b00a8497a6daca3f92cb6ef69448ce398cfa13ff4bd6e18199268</span> &mdash; 8389632 bytes.</p></div>
+<h2>1. Event summary</h2>
+<table id="event-summary">
+<tr><th>Event id</th><td>1</td></tr>
+<tr><th>Trigger reason</th><td>delta-v longitudinal above 8 km/h within 150 ms</td></tr>
+<tr><th>Locked</th><td><span class="bad">no</span></td></tr>
+<tr><th>Complete file recorded</th><td><span class="ok">yes</span></td></tr>
+<tr><th>Sealed</th><td>yes (normal)</td></tr>
+<tr><th>Event number in this crash</th><td>1</td></tr>
+<tr><th>T0 (monotonic, relative to boot)</th><td>25067000 us</td></tr>
+<tr><th>Trigger instant (monotonic)</th><td>25067000 us</td></tr>
+<tr><th>Time since first event</th><td>113 ms</td></tr>
+<tr><th>Ignition cycle at crash</th><td>0</td></tr>
+<tr><th>Events in the journal</th><td>8</td></tr>
+<tr><th>Class A points / delta-v points</th><td>11 / 0</td></tr>
+</table>
+<h2>2. Regulation data-element table (cahier 6.1)</h2>
+<table id="regulation-table"><tr><th>Data element (cahier 6.1, aligned with the annex 4 of regulation No 160)</th><th>Interval rel. T0</th><th>Cadence</th><th>Value read in this event</th></tr>
+<tr id="el-dv"><td>Delta-v, longitudinal and lateral</td><td>0 to 250 ms, or end of event + 30 ms</td><td>100/s</td><td>no delta-v point recorded (event not continued)</td></tr>
+<tr id="el-dv-max"><td>Maximum delta-v, and its instant</td><td>0 to 300 ms</td><td>-</td><td>long 0 mm/s (0.00 km/h) at 0 ms; lat 0 mm/s (0.00 km/h) at 0 ms</td></tr>
+<tr id="el-speed"><td>Indicated speed</td><td>-5.0 to 0 s</td><td>2/s</td><td>11 points, 36.0 to 42.8 km/h</td></tr>
+<tr id="el-throttle"><td>Accelerator (% of travel)</td><td>-5.0 to 0 s</td><td>2/s</td><td>11 points, 0 to 45 %</td></tr>
+<tr id="el-brake"><td>Service brake (active or not)</td><td>-5.0 to 0 s</td><td>2/s</td><td>11 points, service brake active in 2</td></tr>
+<tr id="el-rpm"><td>Engine speed</td><td>-5.0 to 0 s</td><td>2/s</td><td>11 points, 2414 to 2639 rpm</td></tr>
+<tr id="el-abs-esc"><td>ABS activity, stability control</td><td>-5.0 to 0 s</td><td>2/s</td><td>11 points; ABS active in 0, stability control active in 0</td></tr>
+<tr id="el-steer-yaw"><td>Steering angle, yaw rate</td><td>-5.0 to 0 s</td><td>2/s</td><td>11 points, -63.5 to 11.0 deg; 11 points, 0.0 to 0.0 deg/s</td></tr>
+<tr id="el-accel-pre"><td>Pre-crash longitudinal and lateral accelerations</td><td>-5.0 to 0 s</td><td>2/s</td><td>11 points, -1823 to 1340 mm/s2; 11 points, -3500 to 666 mm/s2</td></tr>
+<tr id="el-adas"><td>Driver-assistance states (emergency braking, cruise, lane keeping)</td><td>-5.0 to 0 s</td><td>2/s</td><td>assistance states (class B) - not recorded</td></tr>
+<tr id="el-ign-crash"><td>Ignition cycle at the time of the crash</td><td>-1.0 s</td><td>-</td><td>ignition cycle 0 at the time of the crash</td></tr>
+<tr id="el-ign-read"><td>Ignition cycle at download</td><td>at reading</td><td>-</td><td>ignition cycle 0 at download (from the seal)</td></tr>
+<tr id="el-belts"><td>Belt status, airbag warning lamp</td><td>-1.0 s</td><td>-</td><td>driver belt fastened: no; airbag warning lamp lit: no</td></tr>
+<tr id="el-airbag-time"><td>Airbag deployment times</td><td>event</td><td>-</td><td>restraint deployment: 0 ms; VRU deployment: 0 ms (0 = none)</td></tr>
+<tr id="el-events"><td>Number of events, time between events 1 and 2</td><td>event</td><td>-</td><td>8 event(s) in the journal (ids: 1, 2, 3, 4, 5, 6, 7, 8); time between events 1 and 2: 60 ms</td></tr>
+<tr id="el-complete"><td>Complete file recorded (yes or no)</td><td>after other data</td><td>-</td><td>yes</td></tr>
+<tr id="el-accel-crash"><td>Accelerations during the crash (if recorded)</td><td>0 to 250 ms</td><td>500/s</td><td>crash accelerations (class B) - 12 samples (signal 1: 6, signal 2: 6, signal 3: 0)</td></tr>
+<tr id="el-vert-roll"><td>Vertical acceleration, roll angle and rate (if recorded)</td><td>-1.0 to 5.0 s</td><td>10/s</td><td>vertical accel / roll (class B) - not recorded</td></tr></table>
+<p class="note">Formats recorded in the cahier (6.1): delta-v -100 to +100 km/h, accuracy +/-10 %, resolution 1 km/h; speed 0 to 250 km/h, accuracy +/-1 km/h; instant of the maximum 0 to 300 ms, accuracy +/-3 ms, resolution 2.5 ms.</p>
+<h2>3. Class A pre-crash snapshot (5 s before T0, 2 Hz)</h2>
+<table id="precrash-table"><tr><th>t rel. (ms)</th><th>speed (km/h)</th><th>accel. (%)</th><th>brake</th><th>rpm</th><th>steer (deg)</th><th>a_long (mm/s2)</th><th>a_lat (mm/s2)</th><th>ABS</th><th>ESC</th><th>belt</th><th>lamp</th><th>yaw (deg/s)</th></tr>
+<tr><td>-5067</td><td>36.00</td><td>45</td><td>0</td><td>2557</td><td>11.0</td><td>1340</td><td>473</td><td>0</td><td>0</td><td>0</td><td>0</td><td>0.0</td></tr>
+<tr><td>-4567</td><td>38.00</td><td>32</td><td>0</td><td>2570</td><td>11.0</td><td>955</td><td>530</td><td>0</td><td>0</td><td>0</td><td>0</td><td>0.0</td></tr>
+<tr><td>-4067</td><td>39.50</td><td>23</td><td>0</td><td>2608</td><td>11.0</td><td>679</td><td>573</td><td>0</td><td>0</td><td>0</td><td>0</td><td>0.0</td></tr>
+<tr><td>-3567</td><td>40.75</td><td>20</td><td>0</td><td>2638</td><td>11.0</td><td>588</td><td>605</td><td>0</td><td>0</td><td>0</td><td>0</td><td>0.0</td></tr>
+<tr><td>-3067</td><td>41.50</td><td>12</td><td>0</td><td>2605</td><td>11.0</td><td>354</td><td>628</td><td>0</td><td>0</td><td>0</td><td>0</td><td>0.0</td></tr>
+<tr><td>-2567</td><td>42.00</td><td>9</td><td>0</td><td>2639</td><td>11.0</td><td>260</td><td>645</td><td>0</td><td>0</td><td>0</td><td>0</td><td>0.0</td></tr>
+<tr><td>-2067</td><td>42.50</td><td>5</td><td>0</td><td>2626</td><td>11.0</td><td>152</td><td>657</td><td>0</td><td>0</td><td>0</td><td>0</td><td>0.0</td></tr>
+<tr><td>-1567</td><td>42.75</td><td>5</td><td>0</td><td>2619</td><td>11.0</td><td>161</td><td>666</td><td>0</td><td>0</td><td>0</td><td>0</td><td>0.0</td></tr>
+<tr><td>-1067</td><td>41.00</td><td>0</td><td>1</td><td>2548</td><td>-63.5</td><td>-1823</td><td>-3500</td><td>0</td><td>0</td><td>0</td><td>0</td><td>0.0</td></tr>
+<tr><td>-567</td><td>38.25</td><td>0</td><td>0</td><td>2428</td><td>0.0</td><td>0</td><td>0</td><td>0</td><td>0</td><td>0</td><td>0</td><td>0.0</td></tr>
+<tr><td>-67</td><td>38.25</td><td>0</td><td>1</td><td>2414</td><td>0.0</td><td>-1000</td><td>0</td><td>0</td><td>0</td><td>0</td><td>0</td><td>0.0</td></tr></table>
+<h2>4. Delta-v during the event (continuation records)</h2>
+<table id="deltav-table"><tr><th>t rel. T0 (ms)</th><th>delta-v long (mm/s)</th><th>delta-v long (km/h)</th><th>delta-v lat (mm/s)</th><th>delta-v lat (km/h)</th></tr>
+<tr><td colspan="5">no delta-v point in this event</td></tr></table>
+<h2>5. Class B high-resolution samples and gaps</h2>
+<table id="classb-section">
+<tr><th>Class B samples attached to the event</th><td>12</td></tr>
+<tr><th>signal id 1</th><td>6</td></tr>
+<tr><th>signal id 2</th><td>6</td></tr>
+</table>
+<h2>6. Integrity: fingerprints and signature</h2>
+<table id="integrity-section">
+<tr><th>Source kind</th><td>image</td></tr>
+<tr><th>Source file</th><td><span class="mono">/tmp/site-journal.img</span></td></tr>
+<tr><th>Source SHA-256</th><td><span class="mono">e9dcddbbef0b00a8497a6daca3f92cb6ef69448ce398cfa13ff4bd6e18199268</span></td></tr>
+<tr><th>Source size</th><td>8389632 bytes</td></tr>
+<tr><th>Event payload CRC-32C (chained over the event records)</th><td><span class="mono">10dd9267</span></td></tr>
+<tr><th>Signature</th><td>none</td></tr>
+<tr><th>Journal image SHA-256 (from the export metadata)</th><td><span class="mono">e9dcddbbef0b00a8497a6daca3f92cb6ef69448ce398cfa13ff4bd6e18199268</span></td></tr>
+<tr><th>Boot session id (monotonic reference)</th><td>2779095415</td></tr>
+<tr><th>Allocation table generation</th><td>17</td></tr>
+</table>
+<h2>7. Restricted-data compliance</h2>
+<div id="compliance-section"><p><span class="stamp">PRIVACY CHECK PASSED</span></p><p>Restricted-data compliance (VIE-01, VIE-02): this report contains only whitelisted signals; every time value is relative (microseconds since boot, milliseconds around T0); no vehicle identifier, no location data and no calendar date appear in this document. The check is automated: the tool that produced this file scans its own output.</p></div>
+<footer>Ambre reading report &mdash; values read from the journal image or its
+MCAP export; every time is monotonic and relative. Element intervals and
+cadences as recorded from the regulation text published in the EU Official
+Journal (cahier 6.1, to be re-read against amendment series 01).</footer>
+</div>
+</body>
+</html>

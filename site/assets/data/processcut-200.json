@@ -1,0 +1,28 @@
+{
+  "tool": "host/processcut/campaign.py",
+  "backend": "posix",
+  "cut_kind": "SIGKILL on edr-journal",
+  "cuts": 200,
+  "verdicts": {
+    "ok": 200
+  },
+  "violations": 0,
+  "errors": 0,
+  "freeze_ms": {
+    "count": 141,
+    "max": 330.549,
+    "mean": 8.2337,
+    "median": 3.827,
+    "min": 1.722,
+    "p99": 154.882
+  },
+  "cycle_s": {
+    "count": 200,
+    "max": 17.618,
+    "mean": 7.6256,
+    "median": 7.223,
+    "min": 5.767,
+    "p99": 16.629
+  },
+  "class_a_strict": 107
+}

@@ -1,0 +1,493 @@
+<!DOCTYPE html>
+<!--
+  tutorial.html — the codelab, presented as a page of the Ambre site.
+
+  Structural contract: site/_template.html (same head, same header/nav, same
+  footer; only the <main> content and the aria-current placement change).
+  Stylesheet: site/assets/ambre.css is the only asset. No JS, no CDN, no
+  web font: the page is fully readable with JavaScript disabled.
+  Every code excerpt below is copied verbatim from the repository file named
+  in its data-src attribute.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Tutorial — Ambre</title>
+<meta name="description" content="Hands-on codelab: build a crash-tolerant EDR journal in C, then prove it survives every power cut by exhaustive exploration.">
+<meta name="color-scheme" content="dark light">
+<link rel="stylesheet" href="assets/ambre.css">
+</head>
+<body>
+
+<header class="site-header">
+  <div class="shell">
+    <a class="brand" href="index.html">
+      <span class="brand-mark" aria-hidden="true"></span>
+      Ambre <small>QNX 8.0 event data recorder</small>
+    </a>
+    <nav class="site-nav" aria-label="Main">
+      <ul>
+        <li><a href="index.html">Overview</a></li>
+        <li><a href="validation.html">Validation</a></li>
+        <li><a href="tutorial.html" aria-current="page">Tutorial</a></li>
+        <li><a href="report/index.html">Sample report</a></li>
+        <li><a href="https://github.com/BaptisteFaisy/ambre">Code</a></li>
+      </ul>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+
+  <section class="hero">
+    <div class="shell">
+      <p class="kicker">Codelab · 6 chapters · 2–3 hours</p>
+      <h1>Writing a journal that survives power cuts on QNX&nbsp;8.0, <em>and proving it</em></h1>
+      <p class="hero-lede">You build a small automotive event data recorder — a "black box" — whose journal is a
+        raw partition on QNX 8.0, and you prove that it comes back with the data it had already promised to keep.
+        The proof is not a story: it is an <strong>exhaustive enumeration</strong> of every disk state a power cut
+        can leave behind, checked against the data that was injected. Written for a developer who knows C and has
+        never written a crash-tolerant log. At the end you have a journal you can read, a test suite you can
+        re-run, and a claim that is a count.</p>
+      <div class="hero-actions">
+        <a class="btn btn-primary" href="#start">Start in three commands</a>
+        <a class="btn" href="#chapters">The six chapters</a>
+        <a class="btn" href="https://github.com/BaptisteFaisy/ambre/tree/main/codelab">Chapters on GitHub</a>
+      </div>
+    </div>
+  </section>
+
+  <section class="section">
+    <div class="shell">
+      <h2 class="section-title">What you need, what you get</h2>
+      <p class="section-lede">Nothing to install beyond a C compiler: no QNX SDP, no external library, no container,
+        no network. The QNX-specific code is <em>syntax-checked</em> against stub headers — what that proves, and
+        what it does not, is written down in
+        <a href="https://github.com/BaptisteFaisy/ambre/blob/main/docs/QNX-PORT.md">docs/QNX-PORT.md</a> and
+        repeated at the bottom of this page.</p>
+
+      <div class="cards">
+        <div class="card"><p class="card-figure">6</p><p class="card-label">chapters, 15–30 minutes each</p><p class="card-note">codelab/README.md</p></div>
+        <div class="card"><p class="card-figure">3</p><p class="card-label">commands to a green tree</p><p class="card-note">git clone · make · make test</p></div>
+        <div class="card"><p class="card-figure">23</p><p class="card-label">suites, 48 936 checks, 0 failures</p><p class="card-note">make test + make test_archive_cpp</p></div>
+        <div class="card"><p class="card-figure good">0</p><p class="card-label">invariant violations over 64 591 cut states</p><p class="card-note">make explore-full</p></div>
+        <div class="card"><p class="card-figure">0</p><p class="card-label">external dependencies</p><p class="card-note">gcc · g++ · make · python3 (stdlib only)</p></div>
+      </div>
+
+      <table class="data">
+        <caption>Prerequisites, as stated in the codelab — check them before chapter 1.</caption>
+        <thead>
+          <tr><th scope="col">Need</th><th scope="col">Why</th><th scope="col">Check</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row"><code>gcc</code> ≥ 11 and <code>g++</code> (C++17)</th>
+              <td>the portable library, the tests, the C++ archive</td><td><code>gcc --version</code></td></tr>
+          <tr><th scope="row"><code>make</code></th>
+              <td>one build for the PC and (later) for QNX</td><td><code>make --version</code></td></tr>
+          <tr><th scope="row"><code>python3</code> ≥ 3.9, standard library only</th>
+              <td>scenario generator, MCAP exporter, verifiers</td><td><code>python3 --version</code></td></tr>
+          <tr><th scope="row">~500 MB of disk</th>
+              <td>30 s scenarios, journal images, build trees</td><td><code>df -h .</code></td></tr>
+          <tr><th scope="row">A POSIX machine (Linux or macOS)</th>
+              <td>the PC backend of the portability layer</td><td>—</td></tr>
+        </tbody>
+      </table>
+
+      <div class="note">
+        <p><strong>Two conventions used throughout.</strong> One private build directory per reader, never the
+        shared <code>build/</code>: <code>make BUILD=build-mine …</code>, so that two readers on the same tree do
+        not overwrite each other's artefacts. And every test binary returns <em>the number of failed checks</em> as
+        its exit code: <code>0</code> means green, a number tells you how much is broken.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="start">
+    <div class="shell">
+      <h2 class="section-title">Start in three commands</h2>
+      <p class="section-lede">Clone, build, run the tests. That is the whole installation.</p>
+
+      <pre class="code"><code>git clone https://github.com/BaptisteFaisy/ambre.git &amp;&amp; cd ambre
+make
+make test</code></pre>
+
+      <p><code>make</code> builds the portable library, the 22 C test binaries, the five process binaries and the
+      crash explorer. <code>make test</code> runs every C suite, each binary printing its own line:</p>
+
+      <pre class="code"><code>$ make test
+== build/test_crc32c
+PASSED: 85 checks, 0 failures
+== build/test_block
+PASSED: 118 checks, 0 failures
+   (… 20 more suites …)
+ALL TESTS PASSED</code></pre>
+
+      <p>The C++17 archive suite is a separate target; with it the whole level 0 is green:</p>
+
+      <pre class="code"><code>$ make test_archive_cpp
+PASSED: 71 checks, 0 failures</code></pre>
+
+      <p><strong>What to observe.</strong> The last line of <code>make test</code> is <code>ALL TESTS PASSED</code>.
+      Measured on this repository on 2026-11-11 (development machine, x86-64, gcc 13.3.0, Python 3.12.3) —
+      <a href="https://github.com/BaptisteFaisy/ambre/blob/main/docs/CAMPAIGN.md">docs/CAMPAIGN.md</a> §1–2:</p>
+
+      <table class="data">
+        <caption>Level 0, measured on 2026-11-11 — 23 suites, 48 936 checks, 0 failures.</caption>
+        <thead>
+          <tr><th scope="col">Command</th><th scope="col">Suites</th><th scope="col">Checks</th><th scope="col">Failures</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row"><code>make test</code></th><td class="num">22 C</td><td class="num">48 865</td><td class="num">0</td></tr>
+          <tr><th scope="row"><code>make test_archive_cpp</code></th><td class="num">1 C++</td><td class="num">71</td><td class="num">0</td></tr>
+          <tr><th scope="row">level 0, total</th><td class="num">23</td><td class="num">48 936</td><td class="num">0</td></tr>
+        </tbody>
+      </table>
+
+      <div class="note note-honesty">
+        <p><strong>Not required: a QNX SDP.</strong> Nothing in this codelab needs one. Everything runs on the PC
+        against the POSIX backend, and the QNX-specific code is only syntax-checked against stub headers
+        (<code>make qnx-syntax</code>). Be suspicious of any tutorial that hides that distinction; this one does
+        not — see <a href="https://github.com/BaptisteFaisy/ambre/blob/main/docs/QNX-PORT.md">docs/QNX-PORT.md</a>.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="chapters">
+    <div class="shell">
+      <h2 class="section-title">The six chapters</h2>
+      <p class="section-lede">Read them in order: each one is the piece the next one assumes. The full text of
+      every chapter lives in the repository — the summary below is the map, not a substitute.</p>
+
+      <table class="data">
+        <caption>The six chapters, what each one builds and what it proves.</caption>
+        <thead>
+          <tr><th scope="col">#</th><th scope="col">Chapter</th><th scope="col">You build</th>
+              <th scope="col">Proves</th><th scope="col">Run</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row">1</th><td><a href="#ch1">The block format and CRC-32C</a></td>
+              <td><code>fmt/ambre_crc32c.c</code>, <code>fmt/ambre_fmt_block.c</code></td>
+              <td>STO-02, REP-05</td><td><code>build/test_crc32c</code>, <code>build/test_block</code></td></tr>
+          <tr><th scope="row">2</th><td><a href="#ch2">The table in two copies</a></td>
+              <td><code>fmt/ambre_fmt_table.c</code></td>
+              <td>STO-03, STO-04, REP-02</td><td><code>build/test_table</code>, <code>build/test_scan</code></td></tr>
+          <tr><th scope="row">3</th><td><a href="#ch3">The continuous journal</a></td>
+              <td><code>fmt/ambre_journal_core.c</code>, <code>fmt/ambre_fmt_scan.c</code></td>
+              <td>ACQ-06, STO-01, STO-03</td><td><code>build/test_simdisk</code>, <code>build/test_journal</code></td></tr>
+          <tr><th scope="row">4</th><td><a href="#ch4">The critical path of the freeze</a></td>
+              <td><code>fmt/ambre_journal_event.c</code></td>
+              <td>GEL-01, GEL-02, GEL-03</td><td><code>build/test_journal</code>, <code>build/test_explore</code></td></tr>
+          <tr><th scope="row">5</th><td><a href="#ch5">Idempotent recovery</a></td>
+              <td><code>fmt/ambre_fmt_recovery.c</code></td>
+              <td>REP-01..REP-05, I1/I3/I7/I8</td><td><code>build/test_recovery</code>, <code>build/test_explore</code></td></tr>
+          <tr><th scope="row">6</th><td><a href="#ch6">Exhaustive exploration of the cuts</a></td>
+              <td><code>host/explore/</code></td>
+              <td>ROB-01, spec §7.3</td><td><code>make explore</code>, <code>make explore-full</code></td></tr>
+        </tbody>
+      </table>
+
+      <h3 id="ch1">1 · The block format and CRC-32C</h3>
+      <p><strong>The problem.</strong> You call <code>write()</code> and the power dies. The medium may have kept
+      all 512 bytes, none of them, or the first 300 — and a half-written sector does not look half-written. So the
+      first piece of the journal is not a buffer or a queue: it is a <em>unit of storage you can judge</em>.</p>
+      <p><strong>The idea.</strong> One 512-byte sector with a 48-byte header (magic, version, sequence number,
+      session id, type, length) and <em>two</em> checksums: <code>payload_crc</code> over the body,
+      <code>block_crc</code> over header plus body. A block whose CRC is invalid is never returned as data, and a
+      record is valid only if every one of its chunks is valid — half an event is worse than no event.</p>
+      <p><strong>Files.</strong> <code>fmt/ambre_crc32c.c</code>, <code>fmt/ambre_fmt_block.c</code>,
+      <code>fmt/ambre_types.h</code>; the proofs live in <code>tests/test_crc32c.c</code> and
+      <code>tests/test_block.c</code>.</p>
+      <pre class="code" data-src="fmt/ambre_crc32c.c"><code>    for (i = 0; i &lt; len; i++) {
+        c = s_crc32c_table[(c ^ p[i]) &amp; 0xFFu] ^ (c &gt;&gt; 8);
+    }
+    return c ^ 0xFFFFFFFFu;</code></pre>
+      <p><strong>Prove it.</strong> <code>make &amp;&amp; ./build/test_crc32c &amp;&amp; ./build/test_block</code> →
+      <code>PASSED: 85 checks, 0 failures</code> and <code>PASSED: 118 checks, 0 failures</code>. Watch
+      <code>crc32c_check_value</code> produce the public constant <code>0xE3069283</code>, and
+      <code>block_corruption_error_codes</code> return a <em>different</em> error for a bad magic, a bad version and
+      a bad CRC.</p>
+      <p><strong>Requirement covered.</strong> <span class="ok">STO-02</span> <span class="ok">REP-05</span>
+      — <a href="https://github.com/BaptisteFaisy/ambre/blob/main/codelab/01-block-and-crc.md">Read the chapter
+      (01-block-and-crc.md)</a></p>
+
+      <h3 id="ch2">2 · The table in two copies</h3>
+      <p><strong>The problem.</strong> The allocation table says where the data is, and it changes on every event —
+      so it is the structure most likely to be caught mid-write by the cut. Lose the table and the data is still
+      physically on the medium but unreachable, which from the driver's point of view is indistinguishable from
+      data loss.</p>
+      <p><strong>The idea.</strong> Keep the table in two copies, each with a generation counter and a CRC. The
+      writer always overwrites the copy with the <em>lower</em> generation; the reader always trusts the copy with
+      the <em>highest</em> valid generation. Those two rules are what make a single-copy update safe: at every
+      instant one copy is intact and carries the newest committed generation.</p>
+      <p><strong>Files.</strong> <code>fmt/ambre_fmt_table.c</code>; the proofs live in
+      <code>tests/test_table.c</code> and <code>tests/test_scan.c</code>.</p>
+      <pre class="code" data-src="fmt/ambre_fmt_table.c"><code>    /* STO-04: always overwrite the OLDER copy; an invalid copy counts as
+     * older than any valid one. Both invalid -&gt; fall back to copy A. */
+    if (p.valid_a &amp;&amp; p.valid_b) {
+        target = (p.a.generation &lt;= p.b.generation)
+                 ? AMBRE_TABLE_A_OFFSET : AMBRE_TABLE_B_OFFSET;</code></pre>
+      <p><strong>Prove it.</strong> <code>./build/test_table &amp;&amp; ./build/test_scan</code> →
+      <code>PASSED: 44 checks, 0 failures</code> and <code>PASSED: 68 checks, 0 failures</code>. Watch
+      <code>table_commit_alternates_corrupt</code> (corrupt the copy just written: the other one still works) and
+      <code>scan_rebuild_table_exact_events</code> (with the table gone, the rebuild finds exactly the injected
+      events and nothing else).</p>
+      <p><strong>Requirement covered.</strong> <span class="ok">STO-03</span> <span class="ok">STO-04</span>
+      <span class="ok">REP-02</span> — <a href="https://github.com/BaptisteFaisy/ambre/blob/main/codelab/02-table-two-copies.md">Read
+      the chapter (02-table-two-copies.md)</a></p>
+
+      <h3 id="ch3">3 · The continuous journal</h3>
+      <p><strong>The problem.</strong> A crash is short, but around it the car is doing 90 km/h and the interesting
+      data is produced continuously, long before anyone knows an event will happen. The journal cannot be an event
+      log: it must be always on, appending bands of samples at a fixed cadence, on a medium with no file system in
+      the way.</p>
+      <p><strong>The idea.</strong> Build the journal on a vtable of four operations — <code>read</code>,
+      <code>write</code>, <code>flush</code>, <code>mark</code> — and a simulated disk that logs every operation in
+      order. That log is the ground truth: for any cut point it says exactly what was durable. Each record is
+      staged into a pre-allocated buffer and submitted as <em>one</em> contiguous write, and a record never
+      straddles two segments.</p>
+      <p><strong>Files.</strong> <code>fmt/ambre_journal_core.c</code>, <code>fmt/ambre_fmt_scan.c</code>,
+      <code>host/simdisk/</code>; the proofs live in <code>tests/test_simdisk.c</code>,
+      <code>tests/test_scan.c</code> and <code>tests/test_journal.c</code>.</p>
+      <pre class="code" data-src="fmt/ambre_journal_core.c"><code>    /* One single contiguous write: that is what GEL-01 asks for. */
+    rc = j-&gt;disk-&gt;write(j-&gt;disk-&gt;ctx, ambre_journal_write_offset(j), j-&gt;rec_buf,
+                        (size_t)chunks * AMBRE_BLOCK_SIZE);</code></pre>
+      <p><strong>Prove it.</strong> <code>./build/test_simdisk &amp;&amp; ./build/test_scan &amp;&amp;
+      ./build/test_journal</code> → <code>PASSED: 3345 checks, 0 failures</code>,
+      <code>PASSED: 68 checks, 0 failures</code> and <code>PASSED: 4195 checks, 0 failures</code>. Watch
+      <code>logging_exactness</code> (the log records exactly the calls made, in order) and
+      <code>locked_event_is_never_recycled</code> (a locked event is never a victim).</p>
+      <p><strong>Requirement covered.</strong> <span class="ok">ACQ-06</span> <span class="ok">STO-01</span>
+      <span class="ok">STO-03</span> — <a href="https://github.com/BaptisteFaisy/ambre/blob/main/codelab/03-continuous-journal.md">Read
+      the chapter (03-continuous-journal.md)</a></p>
+
+      <h3 id="ch4">4 · The critical path of the freeze</h3>
+      <p><strong>The problem.</strong> The event you must record is the event that destroys your power supply. From
+      the impact to the loss of the 12 V rail there are tens of milliseconds, and about a kilobyte of Class A data
+      must be <em>durable</em> — not merely buffered — inside that window.</p>
+      <p><strong>The idea.</strong> Three steps and no more: one contiguous write of the emergency record, one
+      allocation-table commit, one flush. "Acquired" means the flush was acknowledged, never that
+      <code>write()</code> returned. The path allocates nothing, faults nothing and waits on no lower-priority
+      process — the emergency snapshot is staged into the journal's own pre-allocated buffer.</p>
+      <p><strong>Files.</strong> <code>fmt/ambre_journal_event.c</code>; the proofs live in
+      <code>tests/test_journal.c</code> (<code>trigger_path_is_write_commit_flush</code>) and
+      <code>tests/test_explore.c</code> (<code>explore_acquisition_boundary</code>).</p>
+      <pre class="code" data-src="fmt/ambre_journal_event.c"><code>    /* GEL-01: the class A snapshot leaves in ONE contiguous write. */
+    rc = ambre_journal_write_record(j, (uint8_t)AMBRE_REC_EMERG,
+                                    emerg-&gt;t0_ts_us, emerg,
+                                    (uint32_t)sizeof(*emerg), &amp;seq, &amp;blocks);</code></pre>
+      <pre class="code" data-src="fmt/ambre_journal_event.c"><code>    /* GEL-02: table update, then the flush that makes the event acquired. */
+    rc = ambre_journal_register_event(j, &amp;desc);</code></pre>
+      <p><strong>Prove it.</strong> <code>./build/test_journal &amp;&amp; ./build/test_explore</code> →
+      <code>PASSED: 4195 checks, 0 failures</code> and <code>PASSED: 58 checks, 0 failures</code>. The trace of a
+      trigger must be exactly one EMERG write, one table commit, one flush — in that order. If a refactor ever
+      adds a fourth operation, this test says so.</p>
+      <p><strong>Requirement covered.</strong> <span class="ok">GEL-01</span> <span class="ok">GEL-02</span>
+      <span class="ok">GEL-03</span> — <a href="https://github.com/BaptisteFaisy/ambre/blob/main/codelab/04-freeze-critical-path.md">Read
+      the chapter (04-freeze-critical-path.md)</a></p>
+
+      <h3 id="ch5">5 · Idempotent recovery</h3>
+      <p><strong>The problem.</strong> Recovery is the code that runs <em>after</em> the failure it is supposed to
+      handle, so it will be interrupted by exactly the event it is recovering from — and then run again. It must
+      be safe on anything (a half-written record, a wiped table, a partition of noise) and idempotent: run it
+      twice, or after being interrupted, and the final state must be the same.</p>
+      <p><strong>The idea.</strong> Keep the valid table copy with the highest generation, else rebuild the map by
+      scanning; drop torn records; register an <code>EMERG</code> the table does not know about (the record wins
+      over the table); then seal every event still open with <code>file_complete = 0</code> and cause
+      <code>POWERCUT</code>, and commit the table. Everything is fixed-size: recovery cannot fail for lack of
+      memory.</p>
+      <p><strong>Files.</strong> <code>fmt/ambre_fmt_recovery.c</code>; the proofs live in
+      <code>tests/test_recovery.c</code> and <code>tests/test_explore.c</code>
+      (<code>explore_double_recovery</code>, <code>explore_table_destruction</code>).</p>
+      <pre class="code" data-src="fmt/ambre_fmt_recovery.c"><code>    memset(&amp;seal, 0, sizeof(seal));
+    seal.event_id        = desc-&gt;event_id;
+    seal.file_complete   = 0u;
+    seal.seal_cause      = (uint8_t)AMBRE_SEAL_POWERCUT;</code></pre>
+      <p><strong>Prove it.</strong> <code>./build/test_recovery &amp;&amp; ./build/test_explore</code> →
+      <code>PASSED: 124 checks, 0 failures</code> and <code>PASSED: 58 checks, 0 failures</code>. Watch
+      <code>event_found_without_table_entry</code> (the EMERG alone registers the event),
+      <code>torn_emerg_is_dropped</code> (a torn record never surfaces),
+      <code>both_tables_destroyed</code> (rebuild by scanning) and <code>recovery_is_idempotent</code> (run
+      twice, same state).</p>
+      <p><strong>Requirement covered.</strong> <span class="ok">REP-01..REP-05</span>
+      <span class="ok">I1/I3/I7/I8</span> — <a href="https://github.com/BaptisteFaisy/ambre/blob/main/codelab/05-idempotent-recovery.md">Read
+      the chapter (05-idempotent-recovery.md)</a></p>
+
+      <h3 id="ch6">6 · Exhaustive exploration of the cuts</h3>
+      <p><strong>The problem.</strong> "Survives a power cut" sounds like an infinite claim, and it is usually
+      argued with a story: we cut the power twenty times and it always came back. Twenty times out of a continuum
+      of instants is not evidence, it is a demo. But the journal performs a <em>finite</em> sequence of operations:
+      cut the power after operation <em>k</em> and you have a finite set of possible disk states.</p>
+      <p><strong>The idea.</strong> Enumerate them all — every prefix of the operation trace, plus the torn-write,
+      lost-cache, bit-flip and wiped-table variants — run the <em>real</em> recovery code on each image and check
+      the invariants I1..I8 against the <em>injected</em> ground truth, never against the recovered data. A
+      recovery that invents state cannot hide, because the expected values come from the input side.</p>
+      <p><strong>Files.</strong> <code>host/explore/</code> (the checker is
+      <code>host/explore/ambre_invariants.c</code>); the proofs are the campaign itself, run by
+      <code>make explore</code> and <code>make explore-full</code>.</p>
+      <pre class="code" data-src="host/explore/ambre_invariants.c"><code>    bool media_fault = (variant_type == AMBRE_VAR_BITFLIP);
+
+    check_i1(rec, report);
+    if (!media_fault) {
+        check_i2(truth, rec, recovered_disk, prefix, report);
+    }</code></pre>
+      <p><strong>Prove it.</strong> <code>make explore</code> →
+      <code>ambre-explore: 10000 states in 29.260s (342 states/s), 0 violations</code>;
+      <code>make explore-full</code> → <code>ambre-explore: 64591 states in 495.263s (130 states/s), 0
+      violations</code> (measured on 2026-11-11). 64 591 is not a cap that was hit: it is the whole reachable space
+      of the reference scenario, and <code>violations_by_invariant</code> is zero for each of I1..I8.</p>
+      <p><strong>Requirement covered.</strong> <span class="ok">ROB-01</span> <span class="ok">spec §7.3</span>
+      — <a href="https://github.com/BaptisteFaisy/ambre/blob/main/codelab/06-exhaustive-exploration.md">Read the
+      chapter (06-exhaustive-exploration.md)</a></p>
+    </div>
+  </section>
+
+  <section class="section" id="demo">
+    <div class="shell">
+      <h2 class="section-title">The demonstration, in one command</h2>
+      <p class="section-lede">After chapter 4, the whole chain fits in one command: real processes, a real
+      <code>SIGKILL</code>, a real recovery, a real export — on the PC, with the caveats written at the bottom of
+      this page.</p>
+
+      <pre class="code"><code>bash scripts/demo.sh        # or: make demo</code></pre>
+
+      <div class="timeline">
+        <div class="tl-step"><b>scenario</b><span>frontal impact with restraint deployment, 9 000 ms drive, impact at 6 000 ms (<code>host/scenarios/generate.py</code>, preset <code>urban-frontal</code>, seed 1234) — the restraint makes the event <em>locked</em>, so it can never be overwritten</span></div>
+        <div class="tl-step"><b>trigger</b><span>the drive is replayed through <code>edr-replay</code> → <code>edr-capture</code> → <code>edr-journal</code>; the impact is detected, the Class A snapshot is frozen and written</span></div>
+        <div class="tl-step tl-acquired"><b>acquired</b><span>the flush is acknowledged — that instant, and only that instant, is the durability promise (GEL-02)</span></div>
+        <div class="tl-step tl-cut"><b>cut</b><span><code>SIGKILL</code> on <code>edr-journal</code>, right after the acquisition</span></div>
+        <div class="tl-step"><b>restart</b><span>the same disk file: the recovery runs before any new capture (REP-01)</span></div>
+        <div class="tl-step"><b>list</b><span>the service list shows the recovered event: sealed, <code>locked=yes</code>, <code>complete file=no</code></span></div>
+        <div class="tl-step"><b>export</b><span>the recovered journal image becomes one MCAP file (<code>host/mcap/export_mcap.py</code>)</span></div>
+        <div class="tl-step"><b>verify</b><span>the official verifier plus the Class A comparison (<code>host/verify/edr_verify.py</code>)</span></div>
+        <div class="tl-step"><b>verdict</b><span>the script prints <code>DEMO OK</code> — or stops with an explicit error</span></div>
+      </div>
+
+      <p><strong>What to observe.</strong> The last two lines of the run are:</p>
+
+      <pre class="code"><code>    DEMO OK — the event survived a brutal process death, the recovery sealed it,
+    the export verified and its class A data equals the injected scenario.</code></pre>
+
+      <p>Measured on 2026-11-11 (<a href="https://github.com/BaptisteFaisy/ambre/blob/main/docs/CAMPAIGN.md">docs/CAMPAIGN.md</a>
+      §1 and §4): the run took 7.1 s, the <code>SIGKILL</code> landed in the <code>acquired</code> window at
+      +6 033 ms, the recovery returned 1 event <code>sealed locked=yes complete_file=no</code>, the MCAP export
+      exited with rc=0, the official checks were green and the Class A data matched the injected rows 11/11
+      (alignment 29 ms, worst row slop 4 ms). The demo also prints its own one-shot "acquired in 4.428 ms" under
+      load — that is a single sample, not a campaign figure; the medians are in
+      <a href="https://github.com/BaptisteFaisy/ambre/blob/main/docs/CAMPAIGN-LATENCY.md">docs/CAMPAIGN-LATENCY.md</a>.</p>
+    </div>
+  </section>
+
+  <section class="section" id="more">
+    <div class="shell">
+      <h2 class="section-title">Going further</h2>
+      <p class="section-lede">The codelab is the short path; these are the campaigns the project is built on. All
+      the figures below were produced by the command quoted next to them, on 2026-11-11, and are published in
+      <a href="https://github.com/BaptisteFaisy/ambre/blob/main/docs/CAMPAIGN.md">docs/CAMPAIGN.md</a>.</p>
+
+      <table class="data">
+        <caption>Campaigns beyond the codelab — command, what it proves, measured result.</caption>
+        <thead>
+          <tr><th scope="col">Command</th><th scope="col">What it proves</th><th scope="col">Measured</th></tr>
+        </thead>
+        <tbody>
+          <tr><th scope="row"><code>make explore</code></th>
+              <td>the socle cut-state budget (spec §7.7), invariants I1..I8</td>
+              <td>10 000 states, 0 violations, 29.3 s</td></tr>
+          <tr><th scope="row"><code>make explore-full</code></th>
+              <td>every reachable state of the reference scenario, nested cuts included</td>
+              <td>64 591 states, 46 390 acquisitions observed, 0 violations</td></tr>
+          <tr><th scope="row"><code>./scripts/explore-campaign.sh --scenarios 12 --jobs 4 --out build/campaign</code></th>
+              <td>the campaign of record, over several scenarios</td>
+              <td>18 scenarios, 1 379 264 cut states, 0 violations</td></tr>
+          <tr><th scope="row"><code>make crosscheck</code></th>
+              <td>the C trigger engine and its independent Python twin decide identically</td>
+              <td>10 000 scenarios, 2 744 840 decision lines, 0 divergences</td></tr>
+          <tr><th scope="row"><code>make coverage-gate</code></th>
+              <td>line coverage of <code>fmt/</code> against the spec §12.10 gate</td>
+              <td>98.40 % (1 349 / 1 371 lines)</td></tr>
+          <tr><th scope="row"><code>make fuzz</code></th>
+              <td>random-data testing: hostile images, ASan/UBSan twin</td>
+              <td>52 hostile images, 0 violations, 5.0 s smoke</td></tr>
+          <tr><th scope="row"><code>make processcut</code> (or <code>python3 host/processcut/campaign.py --bins build
+              --scenario build/scenario.txt --cycles 200 --report build/processcut-report.json</code>)</th>
+              <td>real <code>SIGKILL</code> cuts on the POSIX bench, with the recovery and the export</td>
+              <td>200 cuts, 0 invariant violations, 199 ok + 1 <code>check_failed</code>; 500 cycles at the
+                close-out: 498 ok + 2 <code>inconsistent_state</code>, published unresolved</td></tr>
+          <tr><th scope="row"><code>make qnx-syntax</code></th>
+              <td>the five QNX glue files compile against the stub headers</td>
+              <td>5/5 OK — syntax only, never linked</td></tr>
+          <tr><th scope="row"><code>make image-check</code></th>
+              <td>the image fragments, the security policy and the priorities are internally coherent</td>
+              <td>11/11 static checks pass</td></tr>
+          <tr><th scope="row"><code>make verify</code></th>
+              <td>the MCAP export matches the scenario that produced it</td>
+              <td>10/10 checks pass</td></tr>
+        </tbody>
+      </table>
+
+      <div class="note">
+        <p><strong>Two of these rows are honest failures and stay published.</strong> The 24-hour fuzz soak is
+        <span class="blocked">BLOCKED(wall-clock)</span> — the 5-second smoke is what fits a session — and the
+        500-cut campaign ends with two <code>inconsistent_state</code> verdicts (I7) that the project publishes
+        unresolved, with their artefacts, rather than hiding. A campaign whose only blemish is hidden is worth
+        nothing.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="section" id="limits">
+    <div class="shell">
+      <h2 class="section-title">What this tutorial does not prove</h2>
+      <p class="section-lede">Read this before you quote any number from the codelab. It is the part that makes the
+      rest worth reading.</p>
+
+      <div class="note note-honesty">
+        <p><strong>The PC build proves the logic and the syntax of the QNX glue — not its execution.</strong>
+        <code>make qnx-syntax</code> compiles the five <code>*_qnx.c</code> files with <code>-fsyntax-only</code>
+        against stub headers: no typo, no wrong prototype, no wrong struct field. It produces objects only, never
+        links them, and proves nothing about QNX scheduling, drivers, the kernel or the security policy at
+        runtime.</p>
+        <p><strong>No QNX SDP 8.0 was available</strong> on the development machine or the build server, and none
+        could be obtained: no image was built, nothing was booted, no kernel trace was taken, no target latency
+        was measured. Every figure on this page carries <code>backend=posix</code>. The full statement — what each
+        build proves and what it does not — is in
+        <a href="https://github.com/BaptisteFaisy/ambre/blob/main/docs/QNX-PORT.md">docs/QNX-PORT.md</a>.</p>
+        <p><strong>Killing a process is not a power cut.</strong> A <code>SIGKILL</code> does not lose the writes
+        already handed to the host kernel, so the POSIX bench exercises the order and the interruption of writes
+        and the whole recovery path, but not the loss of a volatile cache. That case is covered at level 1 (the
+        <code>cache</code> variant, 21 240 states) and, on the target, by the faulty block server
+        (<code>host/powercut/faulty_block_server.py</code>).</p>
+        <p><strong>The latency budget is not met by these numbers.</strong> PERF-02 (≤ 20 ms trigger → acquired) is
+        not proven: 99.7 % of the measured freeze is NVMe media time on a PC file. PERF-03 (the software share) is
+        met at the median — 10 µs against a 500 µs budget — but PERF-01 is exceeded at the tail (p99 up to 203 ms
+        under disk load). Read <a href="https://github.com/BaptisteFaisy/ambre/blob/main/docs/CAMPAIGN.md">docs/CAMPAIGN.md</a>
+        §7 before quoting any of it.</p>
+      </div>
+
+      <p>Two pages of this site carry the full picture: the <a href="validation.html">Validation</a> page for the
+      requirement-by-requirement traceability matrix, and
+      <a href="https://github.com/BaptisteFaisy/ambre/blob/main/docs/QNX-PORT.md">docs/QNX-PORT.md</a> for the
+      exact procedure to build and boot the QNX target once an SDP exists — every step of it says what must be
+      observed for it to count as passing, and none of them has been executed here.</p>
+    </div>
+  </section>
+
+</main>
+
+<footer class="site-footer">
+  <div class="shell">
+    <p>Apache-2.0 · QNX Global Hackathon 2026, Automotive &amp; Mobility.<br>
+       Aligned with UN Regulation No.&nbsp;160 — not compliant, not certified.</p>
+    <nav aria-label="Footer">
+      <ul>
+        <li><a href="https://github.com/BaptisteFaisy/ambre">Repository</a></li>
+        <li><a href="https://github.com/BaptisteFaisy/ambre/blob/main/NOTICE">Notice</a></li>
+        <li><a href="https://github.com/BaptisteFaisy/ambre/blob/main/docs/CAMPAIGN.md">Campaign</a></li>
+      </ul>
+    </nav>
+  </div>
+</footer>
+
+</body>
+</html>

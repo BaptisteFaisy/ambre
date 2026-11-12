@@ -7,6 +7,11 @@ state instead of running a handful of lucky reboots.
 
 QNX Global Hackathon 2026 — Automotive & Mobility.
 
+**Website (public):** <https://baptistefaisy.github.io/ambre/> — the pitch, the
+validation results, the tutorial and a real generated expert report. It is
+published from [`site/`](site/) by [`.github/workflows/pages.yml`](.github/workflows/pages.yml)
+on every push to `main`; no build step, no external dependency.
+
 ---
 
 ## 1. The problem

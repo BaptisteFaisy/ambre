@@ -1,0 +1,471 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Ambre — a QNX 8.0 event data recorder that survives the crash</title>
+<meta name="description" content="Ambre is an automotive event data recorder for QNX 8.0 whose pre-crash regulatory data survives any power cut — proved by exhaustive exploration, not asserted.">
+<meta name="color-scheme" content="dark light">
+<link rel="stylesheet" href="assets/ambre.css">
+</head>
+<body>
+
+<header class="site-header">
+  <div class="shell">
+    <a class="brand" href="index.html"><span class="brand-mark" aria-hidden="true"></span> Ambre <small> QNX 8.0 event data recorder
+    </small></a>
+    <nav class="site-nav" aria-label="Main">
+      <ul>
+        <li><a href="index.html" aria-current="page">Overview</a></li>
+        <li><a href="validation.html">Validation</a></li>
+        <li><a href="tutorial.html">Tutorial</a></li>
+        <li><a href="report/index.html">Sample report</a></li>
+        <li><a href="https://github.com/BaptisteFaisy/ambre">Code</a></li>
+      </ul>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+
+<!-- ------------------------------------------------------------- hero --- -->
+<div class="shell hero">
+  <p class="kicker">QNX Global Hackathon 2026 — Automotive &amp; Mobility</p>
+  <h1>Ambre: an event data recorder that <em>survives the crash</em></h1>
+  <p class="hero-lede">Once the announced freeze deadline has passed, the pre-crash regulatory data survives any power cut
+  — and that is shown by exhaustive exploration, not asserted.</p>
+  <div class="hero-actions">
+    <a class="btn btn-primary" href="https://github.com/BaptisteFaisy/ambre">Read the code</a>
+    <a class="btn" href="validation.html">See the proof</a>
+  </div>
+
+  <div class="cards">
+    <div class="card">
+      <p class="card-figure">1 379 264</p>
+      <p class="card-label">power-cut states explored, over 18 scenarios — every
+      reachable cut instant, not three lucky reboots</p>
+      <p class="card-note">scripts/explore-campaign.sh · docs/CAMPAIGN.md</p>
+    </div>
+    <div class="card">
+      <p class="card-figure good">0</p>
+      <p class="card-label">violations of invariants I1–I8, against 2 567 421
+      acquired-event observations</p>
+      <p class="card-note">docs/results/exploration-campaign.json</p>
+    </div>
+    <div class="card">
+      <p class="card-figure">98.40 %</p>
+      <p class="card-label">line coverage of the portable format library
+      <code>fmt/</code> (1 349 of 1 371 lines)</p>
+      <p class="card-note">scripts/coverage.sh</p>
+    </div>
+  </div>
+
+  <p class="note">Every figure on this page was produced by the command quoted next to it, on the development machine,
+  on 2026-11-11 — backend <code>posix</code>. <a href="#honesty">What that does and does not prove</a>.</p>
+</div>
+
+<!-- ---------------------------------------------------------- problem --- -->
+<section class="section" id="problem">
+  <div class="shell">
+    <p class="kicker">The problem</p>
+    <h2 class="section-title">A recorder that has to write at the moment the power dies</h2>
+    <p class="section-lede">Since 6 July 2022 every new vehicle type sold in the European Union must carry an event data
+    recorder. What the device owes the regulator is a kilobyte of pre-crash data — and it owes it in the
+    tens of milliseconds during which the impact may take the 12 V rail down.</p>
+
+    <div class="cards">
+      <div class="card">
+        <h3>Mandatory</h3>
+        <p><strong>Regulation (EU) 2019/2144</strong> makes the EDR compulsory: new vehicle types since 6
+        July 2022, all new cars and light vans since 7 July 2024; buses and heavy vehicles from 7 January
+        2026 and 2029. The device cannot be disabled, and it must not record the last four characters of the
+        VIN.</p>
+      </div>
+      <div class="card">
+        <h3>What to record</h3>
+        <p><strong>UN Regulation No. 160</strong> lists the data elements (delta-v, pre-crash speed, belt and
+        brake states, airbag status, ignition cycle, the “complete file recorded” flag), the trigger
+        thresholds (longitudinal delta-v above 8 km/h within 150 ms), the locking rules (above 25 km/h) and
+        the definition of T0.</p>
+      </div>
+      <div class="card">
+        <h3>The hard part is temporal</h3>
+        <p>“The event you must record is the event that destroys your power supply.” A general-purpose stack
+        bounds neither when a task wakes up nor the time spent inside the disk driver, and the Power-Safe
+        file system synchronises a whole volume, not a file.</p>
+      </div>
+    </div>
+
+    <div class="note note-honesty">
+      <p><strong>Ambre is aligned with UN Regulation No. 160.</strong> It applies the regulation’s
+      thresholds and records its data elements. It is <em>not</em> “compliant”, <em>not</em>
+      “certified”, <em>not</em> “homologated”, and it is not an airbag ECU. Delegated Regulation (EU)
+      2022/545 and the 49 CFR Part 563 profile (United States) are referenced in the repository; ISO 26262
+      certification, mechanical qualification and production-grade crash detection are explicitly out of
+      scope.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ------------------------------------------------------------- ideas --- -->
+<section class="section" id="ideas">
+  <div class="shell">
+    <p class="kicker">Three load-bearing ideas</p>
+    <h2 class="section-title">Save the essential first, keep writing ahead of time, prove it by exhaustion</h2>
+
+    <div class="cards">
+      <div class="card">
+        <h3>1 · Save the essential first</h3>
+        <p>The regulatory data set — 5 s before the crash at 2 points per second — weighs about 1 KiB. It
+        leaves for the disk in <strong>one single contiguous write</strong>: one EMERG record, a 452-byte
+        payload in one 512-byte block with one CRC. The 1.1 MiB of high-resolution Class B data is already
+        on disk from the continuous journal, so nothing bulky stands between the impact and the durable
+        record.</p>
+      </div>
+      <div class="card">
+        <h3>2 · A continuous journal on a raw partition</h3>
+        <p>The journal owns a 48 MiB raw partition with no file system: 24 segments of 2 MiB, 512-byte blocks,
+        each carrying a magic, a version, a sequence number, a session id and a CRC-32C, plus an allocation
+        table in two alternating copies. No metadata journal, no block allocation, no whole-volume sync. At
+        trigger time, only pinning what is already on the disk remains.</p>
+      </div>
+      <div class="card">
+        <h3>3 · Proof by exhaustive exploration</h3>
+        <p>The explorer enumerates power-cut states on a simulated disk: every cut point of the write stream,
+        plus torn writes, cache loss, bit flips, table corruption and cuts nested inside recovery. Each
+        image is re-opened with the real recovery code and checked against eight invariants (I1–I8). The
+        claim becomes a count of explored states with zero violations — reproducible with one command.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- -------------------------------------------------------------- how --- -->
+<section class="section" id="how">
+  <div class="shell">
+    <p class="kicker">How it works</p>
+    <h2 class="section-title">One event, one deadline</h2>
+    <p class="section-lede">From the trigger to the durability point, the path is exactly three steps and nothing else may
+    happen on it. The event is “acquired” only on the flush acknowledgement, never on the submission of
+    the write.</p>
+
+    <div class="timeline">
+      <div class="tl-step">
+        <b>before T0</b>
+        <span><strong>Continuous journal.</strong> Class B samples are written to the raw partition as they
+        come, in blocks flushed every 100 ms. The high-resolution data is already on the disk before
+        anything happens.</span>
+      </div>
+      <div class="tl-step">
+        <b>T0</b>
+        <span><strong>Trigger.</strong> The capture process runs the UN R160 arithmetic (delta-v above 8 km/h
+        within 150 ms) and keeps the 5 s Class A pre-crash buffer.</span>
+      </div>
+      <div class="tl-step">
+        <b>t = 0</b>
+        <span><strong>① One contiguous write of the EMERG record</strong> — the whole Class A snapshot, one
+        512-byte block, one CRC.</span>
+      </div>
+      <div class="tl-step">
+        <b>t = 0</b>
+        <span><strong>② One allocation-table commit</strong> — the copy with the lower generation, generation +
+        1, then its CRC.</span>
+      </div>
+      <div class="tl-step tl-acquired">
+        <b>≤ 20 ms</b>
+        <span><strong>③ One disk flush → ACQUIRED.</strong> The event is durable on the flush acknowledgement.
+        20 ms is the <em>target</em> deadline (PERF-02), not a measurement on the target.</span>
+      </div>
+      <div class="tl-step">
+        <b>every 10 ms</b>
+        <span><strong>Continuation.</strong> While the event runs, one CONT
+        record and one flush every 10 ms.</span>
+      </div>
+      <div class="tl-step">
+        <b>end + 30 ms</b>
+        <span><strong>Sealing.</strong> The SEAL record carries the maximum delta-v and its instant, the
+        restraint deployment times and <strong>“complete file = yes”</strong>.</span>
+      </div>
+      <div class="tl-step">
+        <b>later</b>
+        <span><strong>Archive.</strong> A low-priority process (priority 8) converts the sealed segments to MCAP
+        on a separate Power-Safe partition — off the critical path, rebuildable at any time from the durable
+        source.</span>
+      </div>
+    </div>
+
+    <h3>What survives a cut</h3>
+    <table class="data">
+      <caption>Specification §4.3 — the risk window is the physical meaning of a 20 ms freeze budget.</caption>
+      <thead>
+        <tr>
+          <th scope="col">Power cut…</th>
+          <th scope="col">What survives</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>before the trigger</td>
+          <td>Nothing to keep: there is no event.</td>
+        </tr>
+        <tr>
+          <td>between the trigger and “acquired”</td>
+          <td><strong>Not guaranteed.</strong> This is the risk window, and it
+          is exactly the freeze delay.</td>
+        </tr>
+        <tr>
+          <td>after “acquired”, before sealing</td>
+          <td>All the pre-crash data, and the crash up to the last flush (at most 10 ms of loss). The event is
+          restored with “complete file = no”.</td>
+        </tr>
+        <tr>
+          <td>after sealing</td>
+          <td>Everything, with “complete file = yes”.</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ------------------------------------------------------ architecture --- -->
+<section class="section" id="architecture">
+  <div class="shell">
+    <p class="kicker">Architecture</p>
+    <h2 class="section-title">Five processes, one owner of the medium</h2>
+    <p class="section-lede">QNX scheduling priorities, higher means more urgent. Exactly one process writes to the raw
+    partition, so no writer can interleave with the critical path; the archive and the service tool are
+    strictly lower priority, so an archive write can never delay a freeze.</p>
+
+    <table class="data">
+      <caption>Specification §4.4 — the five processes of the target runtime.</caption>
+      <thead>
+        <tr>
+          <th scope="col">Process</th>
+          <th scope="col" class="num">Priority</th>
+          <th scope="col">Role</th>
+          <th scope="col">May access</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><code>edr-capture</code></td>
+          <td class="num">60–61</td>
+          <td>Receives frames, timestamps them, computes the trigger, holds the Class A buffers; on trigger it
+          sends the journal the snapshot.</td>
+          <td>The journal channel only</td>
+        </tr>
+        <tr>
+          <td><code>edr-journal</code></td>
+          <td class="num">62</td>
+          <td><strong>Sole owner of the raw partition.</strong> Writes, pins, seals, recovers at start-up;
+          resource manager exposing <code>/dev/edr</code>.</td>
+          <td>The raw partition</td>
+        </tr>
+        <tr>
+          <td><code>edr-archive</code></td>
+          <td class="num">8</td>
+          <td>Converts sealed events to MCAP; manages retention.</td>
+          <td>The archive, the journal read-only</td>
+        </tr>
+        <tr>
+          <td><code>edrctl</code></td>
+          <td class="num">10</td>
+          <td>Service tool: status, list, export, verify.</td>
+          <td>The service interfaces</td>
+        </tr>
+        <tr>
+          <td><code>edr-replay</code></td>
+          <td class="num">50</td>
+          <td>Demonstration producer: replays a scenario file.</td>
+          <td>The input only</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h3>The portability layer is the load-bearing wall</h3>
+    <p><code>target/port/ambre_port.h</code> is one frozen interface — identity, monotonic clock,
+    logging, kernel trace, real-time priority, memory lock, the disk vtable, the message transport,
+    access control, supervision — with two backends: the <strong>POSIX backend</strong> (PC) is
+    compiled and <em>tested</em>, the <strong>QNX 8.0 backend</strong> <em>compiles</em> against
+    the stub headers and has never executed. Every process keeps its logic portable and pushes
+    everything OS-specific into a <code>&lt;proc&gt;_qnx.c</code> file — which is why the exhaustive
+    exploration exercises the very code that runs on the target.</p>
+
+    <h3>Why QNX, in one sentence</h3>
+    <p>On QNX the drivers are ordinary processes, so the journal reaches the disk through a message and the
+    driver runs the write <strong>at the caller’s priority</strong> (priority inheritance through
+    <code>MsgSend</code>), the journal is a <strong>resource manager</strong> exposing a typed
+    <code>/dev/edr</code> API, periodic work runs on kernel <strong>timers and pulses</strong>, the
+    archive sits on the <strong>Power-Safe</strong> file system, and every deadline claim can be
+    confronted with a <strong>kernel trace</strong> (<code>tracelogger</code>).</p>
+
+  </div>
+</section>
+
+<!-- ------------------------------------------------------------- proof --- -->
+<section class="section" id="proof">
+  <div class="shell">
+    <p class="kicker">The proof</p>
+    <h2 class="section-title">Four levels of test, each proving something different</h2>
+    <p class="section-lede">The full protocol, the invariants I1–I8 and the traceability matrix are in
+    <a href="validation.html">Validation</a>; the campaign report with every command and every figure
+    is in <a href="https://github.com/BaptisteFaisy/ambre/blob/main/docs/CAMPAIGN.md">docs/CAMPAIGN.md</a>.</p>
+
+    <table class="data">
+      <caption>Validation levels of the specification §7, as run on the development machine.</caption>
+      <thead>
+        <tr>
+          <th scope="col">Level</th>
+          <th scope="col">What it does</th>
+          <th scope="col">What it proves</th>
+          <th scope="col">Status</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Level 0 — unit suites</td>
+          <td>22 C suites + 1 C++17 suite, 48 936 checks (48 865 C + 71 C++17); 10 Python suites, 162 tests;
+          DEC-12 cross-check: 10 000 random scenarios, 2 744 840 decision lines, C engine and Python twin
+          byte-identical, 0 divergences; <code>make verify</code>: 10 / 10 official checks on the exported
+          MCAP, including Class A fidelity on 11 points.</td>
+          <td>The format library, the journal engine, the trigger arithmetic and the recovery path behave as
+          specified.</td>
+          <td><span class="ok">green</span></td>
+        </tr>
+        <tr>
+          <td>Level 1 — exhaustive exploration</td>
+          <td>Every reachable cut instant of 18 scenarios: 1 379 264 states, 2 567 421 acquired-event
+          observations, 46 390 of them on the 30 s reference scenario (64 591 states = its whole reachable
+          space).</td>
+          <td>Recovery keeps every acquired event, invents none, and is idempotent — checked against the injected
+          ground truth, never against the recovered data alone.</td>
+          <td><span class="ok">0 violations of I1–I8</span></td>
+        </tr>
+        <tr>
+          <td>Level 2 — real process cuts</td>
+          <td>200 forced <code>SIGKILL</code> cuts of <code>edr-journal</code> with restart and recovery on
+          the same disk (median cycle 3.6 s); a 500-cut close-out ran later.</td>
+          <td>The whole chain — capture → trigger → journal → cut → recovery → MCAP export → verifier — with real
+          processes and real files.</td>
+          <td><span class="ok">0 errors, 0 invariant violations</span> over 200 cuts (199 <code>ok</code> + 1
+          <code>check_failed</code> published unresolved); 500 cuts: 498 <code>ok</code> + 2 <code>
+          inconsistent_state</code> (I7) published unresolved.</td>
+        </tr>
+        <tr>
+          <td>Level 2 — QEMU power cuts</td>
+          <td>200 cuts of a booted QNX image, and the E1 flush-probe.</td>
+          <td>That a flush order issued from QNX reaches the virtual disk, and that a real power cut loses
+          nothing.</td>
+          <td><span class="blocked">blocked — no QNX SDP</span></td>
+        </tr>
+        <tr>
+          <td>Level 3 — electrical cuts</td>
+          <td>500 relay-driven cuts on a Raspberry Pi 5 bench.</td>
+          <td>Nothing — the hardware bench does not exist yet.</td>
+          <td><span class="blocked">blocked — no Pi 5 bench</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+
+<!-- ---------------------------------------------------------- honesty --- -->
+<section class="section" id="honesty">
+  <div class="shell">
+    <p class="kicker">Honesty</p>
+    <h2 class="section-title">What is measured, what is blocked, what failed</h2>
+    <p class="section-lede">This section is the point of the project: the claim “we survive power loss” is only worth something
+    if the boundary of the proof is published with it.</p>
+
+    <div class="note note-honesty">
+      <p><strong>Everything measured was measured on a PC, backend <code>posix</code>.</strong> The “raw
+      partition” is a regular file, the flush is <code>fdatasync()</code>, the transport is an AF_UNIX
+      socket, the trace is a text file, and a “cut” is a <code>SIGKILL</code> — not a power cut, and not
+      the loss of a volatile cache. These are claims about <em>logic</em>, not about QNX scheduling,
+      drivers or the kernel.</p>
+    </div>
+
+    <div class="note note-honesty">
+      <p><strong>There is no QNX SDP on the development machine.</strong> The five <code>*_qnx.c</code>
+      glue files compile against stub headers (<code>make qnx-syntax</code>, 5/5) — which proves there
+      is no typo, no wrong prototype, no wrong struct field — and proves nothing about runtime. The image
+      has never been built or booted: the documentation carries 46 <code>BLOCKED(no QNX SDP)</code>
+      markers, each naming the command that will produce the number. The target has never started.</p>
+    </div>
+
+    <div class="note note-fail">
+      <p><strong>PERF-05 is not met.</strong> The requirement is a p99 below 50 µs for the cost of sending
+      one frame; the measured p99 ceiling is 1 ms with no load and 5 ms under disk and memory pressure.
+      Two measured causes: the measurement is a round trip that waits for the acknowledgement, and the
+      quiet drive is not empty — the journal image of that run holds 34 to 102 <code>GAP</code> records,
+      and each gap costs one synchronous journal round trip on the input path. The verdict is published as
+      a failure.</p>
+    </div>
+
+    <div class="note">
+      <p><strong>Latency, read with the caveats.</strong> The freeze (trigger → acquired) has a median of
+      3.4–4.3 ms on the PC, but <strong>99.7 % of it is NVMe media time</strong>: the software share —
+      the part the code owns — is a median of 10 µs against a 500 µs budget, with a p99 of 56–237 µs
+      depending on the load. PERF-01 is exceeded at the tail (p99 up to 203 ms under disk load), and
+      PERF-04 was measured at the small volume and <em>not met</em> (18 overshoots of the 20 ms deadline
+      over 1 007 cycles). The 20 ms deadline on the reference hardware remains a <strong>target</strong>.</p>
+    </div>
+
+    <div class="note">
+      <p><strong>Two bench verdicts are published unresolved</strong> rather than hidden: the 200-cut run
+      keeps one <code>check_failed</code> (Class A fidelity on one cycle) and two findings on the gaps
+      channel; the 500-cut close-out keeps two <code>inconsistent_state</code> (I7) whose events carry
+      <code>seal_cause=NORMAL</code> — the seal had reached the disk before the kill landed, which POSIX
+      allows. A campaign whose only blemish is hidden is worth nothing.</p>
+    </div>
+
+    <div class="note note-honesty">
+      <p><strong>Wording.</strong> Ambre is <strong>aligned with UN Regulation No. 160</strong>. It is
+      not compliant, not certified and not homologated. The 01 series of amendments to R160 — the one the
+      EU references — could not be consulted and must be re-read before submission.</p>
+    </div>
+  </div>
+</section>
+
+<!-- -------------------------------------------------------------- start --- -->
+<section class="section" id="start">
+  <div class="shell">
+    <p class="kicker">Getting started</p>
+    <h2 class="section-title">Five commands, on any Linux machine</h2>
+    <p class="section-lede">No dependency beyond libc and a C compiler: the portable core is C11, the archive is C++17, the host
+    tools are Python 3. Clone the repository and run:</p>
+
+<pre class="code"><code>make                  # library, unit tests and tools (gcc, C11, -Werror)
+make test             # every unit and integration suite; exit code = failures
+make explore          # 10 000 cut states, all write variants
+make verify           # export one event and check it against its scenario
+bash scripts/demo.sh  # end-to-end: replay → capture → journal → SIGKILL →
+                      # recovery → MCAP export → official verifier
+make crosscheck       # C trigger vs the independent Python twin (DEC-12)</code></pre>
+
+    <p>Nothing above needs a QNX installation. To cross-compile the target layer, obtain the QNX SDP 8.0
+    and run <code>make qnx-syntax</code> (a syntax-only compile of the five glue files against the
+    stub headers) and <code>make image-check</code> (eleven static checks on the image fragments and
+    the security policy); the boot procedure itself is written down in <code>docs/QNX-PORT.md</code>
+    and has never been executed.</p>
+  </div>
+</section>
+
+</main>
+
+<footer class="site-footer">
+  <div class="shell">
+    <p>Apache-2.0 · QNX Global Hackathon 2026, Automotive &amp; Mobility. <br> Aligned with UN Regulation
+    No.&nbsp;160 — not compliant, not certified.</p>
+    <nav aria-label="Footer">
+      <ul>
+        <li><a href="https://github.com/BaptisteFaisy/ambre">Repository</a></li>
+        <li><a href="https://github.com/BaptisteFaisy/ambre/blob/main/NOTICE">Notice</a></li>
+        <li><a href="https://github.com/BaptisteFaisy/ambre/blob/main/docs/CAMPAIGN.md">Campaign</a></li>
+      </ul>
+    </nav>
+  </div>
+</footer>
+
+</body>
+</html>

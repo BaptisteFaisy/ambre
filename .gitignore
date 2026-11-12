@@ -5,6 +5,8 @@ build-*/
 *.a
 *.img
 *.mcap
+# the sample event published on the website is a real artefact, keep it
+!site/assets/data/*.mcap
 *.jsonl
 *.gcda
 *.gcno

@@ -1,0 +1,451 @@
+/*
+ * ambre.css — design system of the Ambre project site.
+ *
+ * Self-contained on purpose: no CDN, no web font, no framework, no analytics.
+ * The site must open offline and load in one request. System font stack only.
+ *
+ * Conventions used by every page (see site/_template.html):
+ *   .shell        page-width container
+ *   .site-header / .site-nav / .site-footer
+ *   .hero, .hero-lede, .hero-actions
+ *   .cards, .card, .card-figure, .card-label
+ *   .section, .section-title, .section-lede
+ *   .timeline (the freeze chronology), .tl-step, .tl-cut
+ *   table.data (every numeric table), .num (right-aligned figures)
+ *   .ok / .fail / .blocked / .warn  (status pills)
+ *   pre.code (copyable command blocks)
+ *   .note, .note-honesty (the mandatory honesty callouts)
+ */
+
+:root {
+    --bg: #0e1116;
+    --bg-soft: #151a21;
+    --bg-card: #1a2029;
+    --line: #2a323d;
+    --ink: #e8edf4;
+    --ink-soft: #a7b2c1;
+    --ink-dim: #7d8899;
+    --amber: #f2a33c;
+    --amber-soft: #ffd39a;
+    --teal: #46c3b2;
+    --red: #ef6b6b;
+    --green: #62d188;
+    --radius: 10px;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas,
+            "Liberation Mono", monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica,
+            Arial, sans-serif;
+}
+
+@media (prefers-color-scheme: light) {
+    :root {
+        --bg: #f7f8fa;
+        --bg-soft: #ffffff;
+        --bg-card: #ffffff;
+        --line: #dce1e8;
+        --ink: #16202c;
+        --ink-soft: #46536a;
+        --ink-dim: #6b7889;
+        --amber: #a9661a;
+        --amber-soft: #7a4a12;
+        --teal: #17796c;
+        --red: #b3282d;
+        --green: #1f7a44;
+    }
+}
+
+* { box-sizing: border-box; }
+
+html { scroll-behavior: smooth; }
+
+body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 17px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+}
+
+.shell {
+    width: min(1080px, 100% - 2.5rem);
+    margin-inline: auto;
+}
+
+a { color: var(--amber); }
+a:hover { color: var(--amber-soft); }
+
+/* ------------------------------------------------------------- header --- */
+
+.site-header {
+    border-bottom: 1px solid var(--line);
+    background: var(--bg-soft);
+    position: sticky;
+    top: 0;
+    z-index: 10;
+}
+
+.site-header .shell {
+    display: flex;
+    align-items: center;
+    gap: 1.5rem;
+    padding-block: 0.85rem;
+    flex-wrap: wrap;
+}
+
+.brand {
+    display: flex;
+    align-items: baseline;
+    gap: 0.5rem;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    color: var(--ink);
+    text-decoration: none;
+    font-size: 1.15rem;
+}
+
+.brand-mark {
+    display: inline-block;
+    width: 0.7rem;
+    height: 0.7rem;
+    border-radius: 50%;
+    background: var(--amber);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--amber) 25%, transparent);
+}
+
+.brand small {
+    font-weight: 400;
+    color: var(--ink-dim);
+    font-size: 0.78rem;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+}
+
+.site-nav { margin-left: auto; }
+
+.site-nav ul {
+    display: flex;
+    gap: 0.35rem;
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    flex-wrap: wrap;
+}
+
+.site-nav a {
+    display: block;
+    padding: 0.4rem 0.75rem;
+    border-radius: 999px;
+    color: var(--ink-soft);
+    text-decoration: none;
+    font-size: 0.94rem;
+    border: 1px solid transparent;
+}
+
+.site-nav a:hover { color: var(--ink); background: var(--bg-card); }
+
+.site-nav a[aria-current="page"] {
+    color: var(--ink);
+    border-color: var(--line);
+    background: var(--bg-card);
+}
+
+/* --------------------------------------------------------------- hero --- */
+
+.hero { padding: 3.5rem 0 2.5rem; }
+
+.hero h1 {
+    font-size: clamp(2rem, 5vw, 3.1rem);
+    line-height: 1.12;
+    margin: 0 0 1rem;
+    letter-spacing: -0.02em;
+}
+
+.hero h1 em {
+    font-style: normal;
+    color: var(--amber);
+}
+
+.hero-lede {
+    font-size: clamp(1.05rem, 2.2vw, 1.28rem);
+    color: var(--ink-soft);
+    max-width: 62ch;
+    margin: 0 0 1.75rem;
+}
+
+.hero-actions {
+    display: flex;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+    margin-bottom: 2.5rem;
+}
+
+.btn {
+    display: inline-block;
+    padding: 0.7rem 1.25rem;
+    border-radius: var(--radius);
+    text-decoration: none;
+    font-weight: 600;
+    font-size: 0.98rem;
+    border: 1px solid var(--line);
+    color: var(--ink);
+    background: var(--bg-card);
+}
+
+.btn:hover { border-color: var(--amber); color: var(--amber); }
+
+.btn-primary {
+    background: var(--amber);
+    border-color: var(--amber);
+    color: #16202c;
+}
+
+.btn-primary:hover { background: var(--amber-soft); color: #16202c; }
+
+/* -------------------------------------------------------------- cards --- */
+
+.cards {
+    display: grid;
+    gap: 1rem;
+    grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+}
+
+.card {
+    background: var(--bg-card);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 1.15rem 1.25rem;
+}
+
+.card-figure {
+    font-family: var(--mono);
+    font-size: clamp(1.6rem, 4vw, 2.1rem);
+    font-weight: 700;
+    color: var(--amber);
+    line-height: 1.1;
+    letter-spacing: -0.02em;
+}
+
+.card-figure.good { color: var(--green); }
+.card-figure.bad { color: var(--red); }
+
+.card-label {
+    color: var(--ink-soft);
+    font-size: 0.92rem;
+    margin-top: 0.35rem;
+}
+
+.card-note {
+    color: var(--ink-dim);
+    font-size: 0.8rem;
+    font-family: var(--mono);
+    margin-top: 0.5rem;
+}
+
+.card h3 { margin: 0 0 0.5rem; font-size: 1.05rem; }
+.card p { margin: 0; color: var(--ink-soft); font-size: 0.95rem; }
+
+/* ------------------------------------------------------------ sections --- */
+
+.section { padding: 2.75rem 0; border-top: 1px solid var(--line); }
+
+.section-title {
+    font-size: clamp(1.4rem, 3vw, 1.85rem);
+    margin: 0 0 0.5rem;
+    letter-spacing: -0.01em;
+}
+
+.section-lede {
+    color: var(--ink-soft);
+    max-width: 68ch;
+    margin: 0 0 1.5rem;
+}
+
+.section h3 { font-size: 1.08rem; margin: 1.75rem 0 0.5rem; }
+
+.kicker {
+    font-family: var(--mono);
+    font-size: 0.76rem;
+    text-transform: uppercase;
+    letter-spacing: 0.14em;
+    color: var(--teal);
+    margin: 0 0 0.6rem;
+}
+
+/* ------------------------------------------------------------ timeline --- */
+
+.timeline {
+    display: grid;
+    gap: 0.5rem;
+    margin: 1.25rem 0;
+}
+
+.tl-step {
+    display: grid;
+    grid-template-columns: 6.5rem 1fr;
+    gap: 1rem;
+    align-items: baseline;
+    padding: 0.6rem 0.85rem;
+    background: var(--bg-card);
+    border: 1px solid var(--line);
+    border-left: 3px solid var(--teal);
+    border-radius: 6px;
+}
+
+.tl-step b {
+    font-family: var(--mono);
+    font-size: 0.86rem;
+    color: var(--teal);
+    white-space: nowrap;
+}
+
+.tl-step span { color: var(--ink-soft); font-size: 0.95rem; }
+
+.tl-cut {
+    border-left-color: var(--red);
+    background: color-mix(in srgb, var(--red) 8%, var(--bg-card));
+}
+
+.tl-cut b { color: var(--red); }
+
+.tl-acquired { border-left-color: var(--amber); }
+.tl-acquired b { color: var(--amber); }
+
+/* -------------------------------------------------------------- tables --- */
+
+table.data {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 1rem 0;
+    font-size: 0.94rem;
+}
+
+table.data caption {
+    caption-side: top;
+    text-align: left;
+    color: var(--ink-dim);
+    font-size: 0.86rem;
+    padding-bottom: 0.5rem;
+}
+
+table.data th, table.data td {
+    text-align: left;
+    padding: 0.55rem 0.7rem;
+    border-bottom: 1px solid var(--line);
+    vertical-align: top;
+}
+
+table.data thead th {
+    color: var(--ink-dim);
+    font-family: var(--mono);
+    font-size: 0.78rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    border-bottom: 1px solid var(--line);
+}
+
+table.data tbody tr:hover { background: var(--bg-card); }
+
+.num { font-family: var(--mono); text-align: right; white-space: nowrap; }
+td.num, th.num { text-align: right; }
+
+/* -------------------------------------------------------------- status --- */
+
+.ok, .fail, .blocked, .warn {
+    display: inline-block;
+    padding: 0.1rem 0.5rem;
+    border-radius: 999px;
+    font-family: var(--mono);
+    font-size: 0.76rem;
+    letter-spacing: 0.04em;
+    border: 1px solid currentColor;
+    white-space: nowrap;
+}
+
+.ok { color: var(--green); }
+.fail { color: var(--red); }
+.blocked { color: var(--ink-dim); }
+.warn { color: var(--amber); }
+
+/* ---------------------------------------------------------------- code --- */
+
+pre.code {
+    background: var(--bg-card);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 0.9rem 1rem;
+    overflow-x: auto;
+    font-family: var(--mono);
+    font-size: 0.88rem;
+    line-height: 1.55;
+    margin: 0.9rem 0;
+}
+
+pre.code code { font-family: inherit; }
+
+code {
+    font-family: var(--mono);
+    font-size: 0.88em;
+    background: var(--bg-card);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 0.05rem 0.3rem;
+}
+
+pre.code code { background: none; border: 0; padding: 0; }
+
+/* --------------------------------------------------------------- notes --- */
+
+.note {
+    border-left: 3px solid var(--teal);
+    background: var(--bg-card);
+    padding: 0.85rem 1.1rem;
+    border-radius: 6px;
+    margin: 1.25rem 0;
+    color: var(--ink-soft);
+    font-size: 0.95rem;
+}
+
+.note-honesty {
+    border-left-color: var(--amber);
+    background: color-mix(in srgb, var(--amber) 7%, var(--bg-card));
+}
+
+.note-fail { border-left-color: var(--red); }
+
+.note strong { color: var(--ink); }
+
+.note p:first-child { margin-top: 0; }
+.note p:last-child { margin-bottom: 0; }
+
+/* -------------------------------------------------------------- footer --- */
+
+.site-footer {
+    border-top: 1px solid var(--line);
+    margin-top: 2rem;
+    padding: 2rem 0 2.5rem;
+    color: var(--ink-dim);
+    font-size: 0.9rem;
+}
+
+.site-footer .shell {
+    display: flex;
+    gap: 1.5rem;
+    flex-wrap: wrap;
+    align-items: baseline;
+}
+
+.site-footer nav { margin-left: auto; }
+.site-footer ul { display: flex; gap: 1rem; list-style: none; margin: 0; padding: 0; }
+
+/* ------------------------------------------------------------ responsive - */
+
+@media (max-width: 640px) {
+    body { font-size: 16px; }
+    .site-header .shell { gap: 0.75rem; }
+    .site-nav { margin-left: 0; width: 100%; }
+    .tl-step { grid-template-columns: 1fr; gap: 0.2rem; }
+    table.data { font-size: 0.86rem; }
+    table.data th, table.data td { padding: 0.45rem 0.4rem; }
+}

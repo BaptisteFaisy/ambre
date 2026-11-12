@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<!--
+  _template.html — structural contract for every page of the Ambre site.
+
+  Copy this skeleton exactly: same <head>, same header/nav, same footer.
+  Only the <main> content and the aria-current placement change per page.
+  The stylesheet site/assets/ambre.css is the only asset; no CDN, no web font,
+  no analytics, no JS unless a page genuinely needs it (then site/assets/app.js).
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PAGE TITLE — Ambre</title>
+<meta name="description" content="ONE SENTENCE, 150 characters max.">
+<meta name="color-scheme" content="dark light">
+<link rel="stylesheet" href="assets/ambre.css">
+</head>
+<body>
+
+<header class="site-header">
+  <div class="shell">
+    <a class="brand" href="index.html">
+      <span class="brand-mark" aria-hidden="true"></span>
+      Ambre <small>QNX 8.0 event data recorder</small>
+    </a>
+    <nav class="site-nav" aria-label="Main">
+      <ul>
+        <li><a href="index.html">Overview</a></li>
+        <li><a href="validation.html">Validation</a></li>
+        <li><a href="tutorial.html">Tutorial</a></li>
+        <li><a href="report/index.html">Sample report</a></li>
+        <li><a href="https://github.com/BaptisteFaisy/ambre">Code</a></li>
+      </ul>
+    </nav>
+  </div>
+</header>
+
+<main id="main">
+  <!-- PAGE CONTENT -->
+</main>
+
+<footer class="site-footer">
+  <div class="shell">
+    <p>Apache-2.0 · QNX Global Hackathon 2026, Automotive &amp; Mobility.<br>
+       Aligned with UN Regulation No.&nbsp;160 — not compliant, not certified.</p>
+    <nav aria-label="Footer">
+      <ul>
+        <li><a href="https://github.com/BaptisteFaisy/ambre">Repository</a></li>
+        <li><a href="https://github.com/BaptisteFaisy/ambre/blob/main/NOTICE">Notice</a></li>
+        <li><a href="https://github.com/BaptisteFaisy/ambre/blob/main/docs/CAMPAIGN.md">Campaign</a></li>
+      </ul>
+    </nav>
+  </div>
+</footer>
+
+</body>
+</html>

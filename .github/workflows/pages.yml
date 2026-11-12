@@ -1,0 +1,48 @@
+# Publishes site/ on GitHub Pages so the project is readable by anyone,
+# without cloning. Static files only: no build step, no dependency to install.
+#
+# CI budget (user rule, ~/Bureau/CI-BUDGET-5MIN.md): timeout-minutes: 5,
+# concurrency with cancel-in-progress, checkout with fetch-depth: 1, and a
+# paths filter so a code-only commit does not redeploy the site.
+
+name: pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'site/**'
+      - '.github/workflows/pages.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    name: publish site/ to GitHub Pages
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: [self-hosted, Linux, X64, ambre-worker]
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+      - name: deploy
+        id: deployment
+        uses: actions/deploy-pages@v4

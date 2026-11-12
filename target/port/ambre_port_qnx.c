@@ -35,6 +35,7 @@
 #include <sys/trace.h>
 #include <time.h>
 #include <unistd.h>
+#include <unistd.h>
 
 /* ---------------------------------------------------------------- identity - */
 
@@ -93,11 +94,18 @@ static bool slog_ready;
 static void slog_init_once(const char *tag)
 {
     slog2_buffer_set_config_t cfg;
+    /* The buffer SET name must be unique per process: two processes that
+     * register the same set name are refused by slogger2, and the second
+     * one's diagnostics vanish (we lost the client's log that way). */
+    static char set_name[32];
 
+    if (set_name[0] == '\0') {
+        snprintf(set_name, sizeof(set_name), "ambre.%ld", (long)getpid());
+    }
     memset(&cfg, 0, sizeof(cfg));
     cfg.num_buffers = 1;
     cfg.verbosity_level = SLOG2_INFO;
-    cfg.buffer_set_name = "ambre";
+    cfg.buffer_set_name = set_name;
     cfg.buffer_config[0].buffer_name = (tag != NULL) ? tag : "edr";
     cfg.buffer_config[0].num_pages = 1;      /* one 4K page of log */
     slog_ready = (slog2_register(&cfg, slog_buffers, 0) == 0);

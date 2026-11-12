@@ -1,22 +1,19 @@
 #!/bin/sh
-# SPDX-License-Identifier: Apache-2.0
-#
-# diagnose.sh — what does the guest see? (QNX 8.0 demo image)
-#
-# The journal disk is attached as an IDE device; the QNX 8.0 legacy driver
-# (devb-ahci, which carries its own block layer) is started here by hand so
-# that every error it prints is visible. There is no grep in this image, so
-# the output is printed as it comes.
+# diagnose.sh — reproduce the refusal and dump what the journal logged.
 
-echo "=== devb-ahci starts ==="
-devb-ahci
-echo "=== rc=$? ==="
-echo "=== the processes now running ==="
-pidin -F "a b"
-echo "=== the journal starts on the raw device /dev/hd0 ==="
-/proc/boot/edr-journal --disk /dev/hd0 --listen /dev/edr/journal --mode continuous --segment-limit 4
-echo "=== rc=$? ==="
-echo "=== the end ==="
+echo "=== journal ==="
+/proc/boot/edr-journal --disk /dev/hd0t177 --listen /dev/edr/journal --mode continuous --segment-limit 4 &
+i=0
+while [ "$i" -lt 400 ]; do
+    /proc/boot/edrctl --journal /dev/edr/journal status > /dev/null 2>&1 && break
+    i=$((i + 1))
+done
+echo "=== edrctl status ==="
+/proc/boot/edrctl --journal /dev/edr/journal status
+echo "=== edrctl list ==="
+/proc/boot/edrctl --journal /dev/edr/journal list
+echo "=== what the journal logged ==="
+slog2info
 while true; do
     read _x
 done

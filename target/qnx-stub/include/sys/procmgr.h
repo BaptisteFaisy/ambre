@@ -37,15 +37,16 @@ int procmgr_daemon(int status, unsigned flags);
 
 /* --- abilities (QNX-06, SEC-01) ------------------------------------------- */
 
-/* Operation codes of a procmgr_ability() request. */
-#define PROCMGR_AOP_ALLOW    0
-#define PROCMGR_AOP_DENY     1
-#define PROCMGR_AOP_SUBRANGE 2
+/* Operation codes of a procmgr_ability() request (real header, SDP 8.0:
+ * the operation and the domain are bits of the SAME word as the ability id). */
+#define PROCMGR_AOP_ALLOW    0x00020000u
+#define PROCMGR_AOP_DENY     0x00010000u
+#define PROCMGR_AOP_SUBRANGE 0x00040000u
 
 /* Which identity an ability request applies to. QNX names them
  * PROCMGR_ADN_ROOT / PROCMGR_ADN_NONROOT (ADN = "ability domain number"). */
-#define PROCMGR_ADN_ROOT    0
-#define PROCMGR_ADN_NONROOT 1
+#define PROCMGR_ADN_ROOT    0x10000000u
+#define PROCMGR_ADN_NONROOT 0x20000000u
 
 /* Ability class / inheritance / locking flags. */
 #define PROCMGR_AID_INHERIT  0x00000001u
@@ -58,9 +59,12 @@ int procmgr_daemon(int status, unsigned flags);
 #define PROCMGR_AID_MEM_PHYS       1u   /* map device / DMA memory */
 #define PROCMGR_AID_INTERRUPT      2u   /* InterruptAttachThread/Event (VIO-04) */
 #define PROCMGR_AID_PATHSPACE      3u   /* resmgr_attach() (QNX-01) */
-#define PROCMGR_AID_PUBLIC_CHANNEL 4u   /* ChannelCreate() without PRIVATE */
-/* End-of-list marker of a procmgr_ability() request (real header: PROCMGR_AID_MASK). */
-#define PROCMGR_AID_EOL        0x7fffffffu
+#define PROCMGR_AID_PUBLIC_CHANNEL 44u  /* name_attach() public channel */
+/* End-of-list marker of a procmgr_ability() request (real header: the ability
+ * mask, 0xffff: the identifier lives in the low 16 bits, the operation in the
+ * next byte, the domains in the two bytes above). */
+#define PROCMGR_AID_MASK       0xffffu
+#define PROCMGR_AID_EOL        PROCMGR_AID_MASK
 #define PROCMGR_AID_IO             5u   /* ThreadCtl(_NTO_TCTL_IO) */
 #define PROCMGR_AID_RLIMIT         6u   /* setrlimit() above the soft limit */
 #define PROCMGR_AID_TRACE          7u   /* kernel trace control (QNX-09) */

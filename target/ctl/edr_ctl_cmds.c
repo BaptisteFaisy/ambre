@@ -156,8 +156,8 @@ int ctl_run_status(const ctl_link_t *link, const ctl_args_t *args, FILE *out)
         return 1;
     }
     if (rc != AMBRE_PORT_OK) {
-        fprintf(out, "NAK: the journal service refused the request (code %d)\n",
-                (int)nak);
+        fprintf(out, "NAK: the journal service refused the request (rc=%d, code %d)\n",
+                (int)rc, (int)nak);
         return 1;
     }
     if (ctl_ipc_type(reply, got) != (uint8_t)AMBRE_MSG_STATUS_REPLY ||
@@ -205,8 +205,8 @@ int ctl_run_list(const ctl_link_t *link, const ctl_args_t *args, FILE *out)
         return 1;
     }
     if (rc != AMBRE_PORT_OK) {
-        fprintf(out, "NAK: the journal service refused the request (code %d)\n",
-                (int)nak);
+        fprintf(out, "NAK: the journal service refused the request (rc=%d, code %d)\n",
+                (int)rc, (int)nak);
         return 1;
     }
     if (ctl_ipc_type(reply, got) != (uint8_t)AMBRE_MSG_LIST_REPLY) {

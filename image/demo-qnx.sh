@@ -3,7 +3,7 @@
 #
 # demo-qnx.sh — the live demo, running INSIDE the QNX 8.0 guest.
 #
-# The recorder owns /dev/hd0, a raw device with no file system and no
+# The recorder owns /dev/hd0t177, a raw partition with no file system and no
 # partition table (STO-01). The capture feeds it from a replay of the drive;
 # when the impact passes the UN Regulation No. 160 threshold, the EMERG
 # record goes out in ONE contiguous write, the allocation table is committed
@@ -16,10 +16,12 @@
 # edrctl list shows what survived.
 #
 # The demo image has no file system and no coreutils: only the shell builtins
-# (echo, printf, read -t) and the five Ambre binaries are available.
+# (echo) and the five Ambre binaries are available. The wait is a poll on the
+# journal's own answer — every edrctl call is a round trip, so the loop costs
+# real time.
 
 JOURNAL=/dev/edr/journal
-DISK=/dev/hd0
+DISK=/dev/hd0t177
 CTL=/proc/boot/edrctl
 
 banner() {
@@ -29,37 +31,56 @@ banner() {
     echo '=============================================================='
 }
 
-# There is no sleep(1) in this image. The wait is a poll: every edrctl call is
-# a round trip to the journal, so the loop costs real time.
-nap() {
-    n="${1:-1}"
+# Wait until the journal answers (or give up after a bounded number of
+# round trips).
+wait_ready() {
     i=0
-    while [ "$i" -lt "$n" ]; do
-        $CTL --journal $JOURNAL status > /dev/null 2>&1
+    while [ "$i" -lt 400 ]; do
+        if $CTL --journal $JOURNAL status > /dev/null 2>&1; then
+            return 0
+        fi
         i=$((i + 1))
     done
+    return 1
+}
+
+# Wait until the journal lists an event.
+wait_event() {
+    i=0
+    while [ "$i" -lt 800 ]; do
+        if [ -n "$($CTL --journal $JOURNAL list 2>/dev/null)" ]; then
+            return 0
+        fi
+        i=$((i + 1))
+    done
+    return 1
 }
 
 banner "Ambre EDR — live on QNX 8.0"
-echo "journal device : $DISK  (raw block device, no file system)"
-echo "service path   : $JOURNAL"
+echo "journal partition : $DISK  (raw, no file system)"
+echo "service path      : $JOURNAL"
 
 banner "1. edr-journal starts: it opens the partition and runs the recovery (REP-01)"
 /proc/boot/edr-journal --disk $DISK --listen $JOURNAL --mode continuous --segment-limit 4 &
-nap 3
+wait_ready
 
 banner "2. edrctl status — the service answers"
 $CTL --journal $JOURNAL status
+echo "-- what the journal logged (slogger2 buffer):"
+slog2info
 
 BEFORE=$($CTL --journal $JOURNAL list 2>/dev/null)
 if [ -z "$BEFORE" ]; then
     banner "3. first boot: the partition is empty, so we drive the crash"
-    echo '-- edr-capture starts (priority 61) and listens for frames'
+    echo '-- edr-capture starts (priority 61) and listens for the frames'
     /proc/boot/edr-capture --journal $JOURNAL --listen /dev/edr/in --profile eu &
-    nap 2
+    i=0
+    while [ "$i" -lt 200 ]; do
+        i=$((i + 1))
+    done
     echo '-- edr-replay: 4 s of driving, frontal impact at 2.5 s'
     /proc/boot/edr-replay --capture /dev/edr/in --scenario /proc/boot/scenario.txt &
-    nap 8
+    wait_event
     banner "4. edrctl list — the event the recorder acquired"
     $CTL --journal $JOURNAL list
     banner "5. edrctl status after the impact"
@@ -75,7 +96,7 @@ else
 fi
 
 echo ''
-    echo '-- the demo stays alive; cut the power whenever you want.'
+echo '-- the demo stays alive; cut the power whenever you want.'
 while true; do
-    nap 5
+    read _x
 done

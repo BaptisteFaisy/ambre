@@ -31,6 +31,7 @@
 
 #define AMBRE_QNX_PATH_MAX 104u
 #define AMBRE_QNX_MAX_CONNS 32u
+#define AMBRE_QNX_NAME_ROOT "/dev/name/local/"
 
 /* name_attach() publishes a server under /dev/name/local/ and the registered
  * name cannot hold a leading slash, so a service path is flattened:
@@ -44,7 +45,6 @@
  * mapping, without having to become a full resource manager" (Library
  * Reference). The channel is created here with _NTO_CHF_DISCONNECT so a dead
  * producer is reported by the kernel (QNX-05) instead of being polled. */
-#define AMBRE_QNX_NAME_ROOT "/dev/name/local/"
 
 static void qnx_service_name(const char *path, char *out, size_t cap)
 {
@@ -99,8 +99,14 @@ int ambre_port_chan_open(const char *path, ambre_port_chan_t **out)
     }
     /* Publishing a name needs the public-channel ability on a secured system
      * (image/ambre.sec grants it); root already holds it. */
-    (void)procmgr_ability(0, PROCMGR_AID_PUBLIC_CHANNEL | PROCMGR_AOP_ALLOW,
-                          PROCMGR_AID_EOL, 0);
+    /* The ability word packs the identifier, the operation AND the domains it
+     * applies to (root and non-root); the list then ends with PROCMGR_AID_EOL.
+     * Without the domain flags the request applies to nobody and the channel
+     * stays private: a client then finds no server at all. */
+    (void)procmgr_ability(0,
+                          PROCMGR_AID_PUBLIC_CHANNEL | PROCMGR_AOP_ALLOW |
+                          PROCMGR_ADN_ROOT | PROCMGR_ADN_NONROOT,
+                          PROCMGR_AID_EOL);
     dpp = dispatch_create_channel(chid, 0u);
     attach = (dpp != NULL) ? name_attach(dpp, name, 0u) : NULL;
     if (attach == NULL) {
@@ -240,8 +246,15 @@ int ambre_port_conn_open(const char *path, ambre_port_conn_t **out)
         return AMBRE_PORT_ERR_PARAM;
     }
     qnx_service_name(path, name, sizeof(name));
+    /* name_open() takes the name as the server registered it. The server
+     * registered it under the LOCAL namespace (/dev/name/local/<name>), so the
+     * client asks for the same full path: the short form resolves to the
+     * system manager instead of our channel. */
     snprintf(full, sizeof(full), "%s%s", AMBRE_QNX_NAME_ROOT, name);
     coid = name_open(full, 0);
+    if (coid < 0) {
+        coid = name_open(name, 0);
+    }
     if (coid < 0) {
         return AMBRE_PORT_ERR_NOENT;
     }

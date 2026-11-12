@@ -5,7 +5,7 @@
 # Unlike image/ambre.build (the product image: five processes, a raw journal
 # partition, a Power-Safe archive partition, a security policy), this one
 # carries only what a demo needs and NOTHING else: the five Ambre binaries, a
-# shell, the block driver and the demo script. There is no file system at all
+# shell, the block stack and the demo script. There is no file system at all
 # on the journal disk - the recorder owns the raw device, which is the whole
 # point of the format (STO-01).
 #
@@ -14,6 +14,13 @@
 #   mkifs -v image/qemu.build build/qnx-vm/ifs.bin
 # The search path below is filled in by scripts/qnx-vm.sh (it points at the
 # local SDP and at the binaries `make qnx` produced).
+#
+# The start-up order is the one of the SDP quickstart image, which is the
+# configuration known to expose a QEMU disk on QNX 8.0:
+#   slogger2 -> pci-server -> devc-ser8250 -> random -> fsevmgr -> devb-eide
+# fsevmgr (the filesystem event manager) is what publishes the block device
+# node, and it needs the random daemon and its two libraries (libqh,
+# libfsnotify) to be there first.
 
 [search=@SEARCH@]
 
@@ -42,9 +49,12 @@
     procmgr_symlink /proc/boot/edrctl /usr/bin/edrctl
     procmgr_symlink /proc/boot/edr-archive /usr/bin/edr-archive
 
+    # The system logger: without it the processes' diagnostics are lost.
+    slogger2
+    waitfor /dev/slog 10
+
     # PCI services: on x86_64 the IDE controller is a PCI device, and the
-    # block driver reaches it through the PCI server (same order as the SDP
-    # quickstart image, which is the configuration known to work on QNX 8.0).
+    # block driver reaches it through the PCI server.
     PCI_HW_MODULE=pci_hw-Intel_x86.so
     PCI_BKWD_COMPAT_MODULE=pci_bkwd_compat.so
     PCI_SLOG_MODULE=pci_slog2.so
@@ -58,16 +68,17 @@
     devc-ser8250 -e
     waitfor /dev/ser2 10
 
+    # The random daemon must run before the filesystem event manager.
+    random
+    waitfor /dev/random 10
 
-    # The QNX 8.0 block stack: io-blk.so hosts the virtio-blk driver
-    # (devr-virtio.so) and exposes the raw device as /dev/hd0.
-    # The system logger: without it the processes' diagnostics are lost.
-    slogger2
+    # The filesystem event manager publishes the block device node.
+    fsevmgr
 
     # The block driver: devb-eide carries the QNX 8.0 block layer itself.
-    # The block driver: devb-ahci is the QNX 8.0 AHCI stack; the journal disk
-    # is the WHOLE raw device (no partition table, no file system).
-    devb-ahci
+    # The journal disk is the WHOLE raw device: no partition table, no file
+    # system (STO-01).
+    devb-eide cam user=20:20 blk cache=64M,auto=partition,vnode=2000,ncache=2000,commit=low
     waitfor /dev/hd0 10
 
     # A shell on the console, WITHOUT a login (the demo image has no
@@ -82,33 +93,15 @@ bin/pidin
 bin/slogger2
 bin/slog2info
 
-# --- the block driver and its modules ---------------------------------------
+# --- the services the block stack needs -------------------------------------
+sbin/pci-server
 sbin/devb-eide
 sbin/devc-ser8250
+sbin/fsevmgr
+usr/sbin/random
 lib/dll/io-blk.so
 lib/dll/cam-disk.so
 lib/dll/devr-virtio.so
-lib/dll/pci/pci_hw-Intel_x86.so
-lib/dll/pci/pci_slog2.so
-lib/dll/pci/pci_cap-0x01.so
-lib/dll/pci/pci_cap-0x05.so
-lib/dll/pci/pci_cap-0x10.so
-lib/dll/pci/pci_cap-0x11.so
-lib/dll/pci/pci_strings.so
-lib/dll/pci/pci_bkwd_compat.so
-lib/dll/pci/pci_debug2.so
-lib/libpci_hw_common.so.3.0
-sbin/pci-server
-
-# --- the C library the Ambre binaries are linked against --------------------
-ldqnx-64.so.2
-lib/libc.so.6
-lib/libm.so.3
-lib/libgcc_s.so.1
-lib/libslog2.so.1
-lib/libcam.so.2
-lib/libpci.so.3.0
-lib/libsecpol.so.1
 
 # --- the PCI configuration the block driver needs ---------------------------
 [perms=0444] pci_server.cfg = {
@@ -132,6 +125,43 @@ B3:D0:F0     B    19
 B3:D0:F0     C    16
 B3:D0:F0     D    17
 }
+
+# --- the PCI modules the server loads ---------------------------------------
+lib/dll/pci/pci_hw-Intel_x86.so
+lib/dll/pci/pci_slog2.so
+lib/dll/pci/pci_cap-0x01.so
+lib/dll/pci/pci_cap-0x05.so
+lib/dll/pci/pci_cap-0x10.so
+lib/dll/pci/pci_cap-0x11.so
+lib/dll/pci/pci_strings.so
+lib/dll/pci/pci_bkwd_compat.so
+lib/dll/pci/pci_debug2.so
+lib/libpci_hw_common.so.3.0
+
+# --- the C library the Ambre binaries are linked against --------------------
+ldqnx-64.so.2
+lib/libc.so.6
+lib/libm.so.3
+lib/libgcc_s.so.1
+lib/libslog2.so.1
+lib/libcam.so.2
+lib/libpci.so.3.0
+lib/libsecpol.so.1
+lib/libqh.so.1
+lib/libfsnotify.so.1
+lib/libjson.so.1
+lib/libregex.so.1
+lib/libslog2parse.so.1
+lib/libslog2shim.so.1
+usr/lib/libexpat.so.2
+# The entropy daemon (random) links the QNX crypto library; without it it
+# cannot start, /dev/random never appears, and fsevmgr (which publishes the
+# block device node) stays silent.
+usr/lib/libqcrypto.so.1.0
+usr/lib/libcrypto.so.3
+usr/lib/libz.so.2
+lib/libsocket.so.4
+lib/dll/qcrypto-openssl-3.so
 
 # --- the five Ambre processes and the demo ----------------------------------
 edr-journal

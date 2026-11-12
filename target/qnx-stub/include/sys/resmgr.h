@@ -61,6 +61,15 @@ typedef struct _resmgr_context {
     uint32_t flags;
 } resmgr_context_t;
 
+/* A resource manager's thread pool carries resmgr_context_t. The real
+ * sys/resmgr.h (SDP 8.0, lines 247-249) defines this before sys/dispatch.h
+ * declares thread_pool_attr_t; the stub mirrors it so that a TU which includes
+ * <sys/resmgr.h> before <sys/dispatch.h> — the order the real headers end up
+ * in through sys/dcmd_blk.h — typechecks the same way here. */
+#ifndef THREAD_POOL_PARAM_T
+# define THREAD_POOL_PARAM_T resmgr_context_t
+#endif
+
 typedef struct _resmgr_attr {
     uint32_t flags;
     uint32_t nparts_max;

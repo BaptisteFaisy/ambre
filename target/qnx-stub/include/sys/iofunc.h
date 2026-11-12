@@ -131,30 +131,36 @@ void iofunc_attr_init(iofunc_attr_t *attr, mode_t mode, iofunc_attr_t *dattr,
 int iofunc_attr_lock(iofunc_attr_t *attr);
 int iofunc_attr_unlock(iofunc_attr_t *attr);
 int iofunc_ocb_attach(resmgr_context_t *ctp, io_open_t *msg,
-                      iofunc_ocb_t *ocb, iofunc_attr_t *attr, void *extra);
+                      iofunc_ocb_t *ocb, iofunc_attr_t *attr,
+                      const resmgr_io_funcs_t *io_funcs);
 int iofunc_ocb_detach(resmgr_context_t *ctp, iofunc_ocb_t *ocb);
 
 int iofunc_open(resmgr_context_t *ctp, io_open_t *msg, iofunc_attr_t *attr,
                 iofunc_attr_t *dattr, _client_info *info);
 int iofunc_open_default(resmgr_context_t *ctp, io_open_t *msg,
                         iofunc_attr_t *attr, void *extra);
+/* NOTE (2026-11-12, corrected against the real SDP 8.0 headers): the
+ * iofunc_* helpers below take the FIXED iofunc_ocb_t *, not the project's
+ * IOFUNC_OCB_T. Only the resmgr handler prototypes (RESMGR_OCB_T) and
+ * ocb_calloc/ocb_free are parameterised by the custom OCB type; a resource
+ * manager with a custom OCB therefore casts when it calls a helper. */
 int iofunc_close_ocb_default(resmgr_context_t *ctp, void *reserved,
-                             IOFUNC_OCB_T *ocb);
-int iofunc_read_verify(resmgr_context_t *ctp, io_read_t *msg, IOFUNC_OCB_T *ocb,
-                       void *extra);
-int iofunc_write_verify(resmgr_context_t *ctp, io_write_t *msg, IOFUNC_OCB_T *ocb,
-                        void *extra);
-int iofunc_stat_default(resmgr_context_t *ctp, io_stat_t *msg, IOFUNC_OCB_T *ocb);
-int iofunc_lseek_default(resmgr_context_t *ctp, io_lseek_t *msg, IOFUNC_OCB_T *ocb);
-int iofunc_devctl_default(resmgr_context_t *ctp, io_devctl_t *msg, IOFUNC_OCB_T *ocb);
-int iofunc_sync_verify(resmgr_context_t *ctp, io_sync_t *msg, IOFUNC_OCB_T *ocb);
-int iofunc_space_verify(resmgr_context_t *ctp, io_space_t *msg, IOFUNC_OCB_T *ocb,
-                        void *extra);
-int iofunc_chmod(resmgr_context_t *ctp, io_chmod_t *msg, IOFUNC_OCB_T *ocb,
+                             iofunc_ocb_t *ocb);
+int iofunc_read_verify(resmgr_context_t *ctp, io_read_t *msg, iofunc_ocb_t *ocb,
+                       int *nonblock);
+int iofunc_write_verify(resmgr_context_t *ctp, io_write_t *msg, iofunc_ocb_t *ocb,
+                        int *nonblock);
+int iofunc_stat_default(resmgr_context_t *ctp, io_stat_t *msg, iofunc_ocb_t *ocb);
+int iofunc_lseek_default(resmgr_context_t *ctp, io_lseek_t *msg, iofunc_ocb_t *ocb);
+int iofunc_devctl_default(resmgr_context_t *ctp, io_devctl_t *msg, iofunc_ocb_t *ocb);
+int iofunc_sync_verify(resmgr_context_t *ctp, io_sync_t *msg, iofunc_ocb_t *ocb);
+int iofunc_space_verify(resmgr_context_t *ctp, io_space_t *msg, iofunc_ocb_t *ocb,
+                        int *nonblock);
+int iofunc_chmod(resmgr_context_t *ctp, io_chmod_t *msg, iofunc_ocb_t *ocb,
                  iofunc_attr_t *attr);
-int iofunc_chown(resmgr_context_t *ctp, io_chown_t *msg, IOFUNC_OCB_T *ocb,
+int iofunc_chown(resmgr_context_t *ctp, io_chown_t *msg, iofunc_ocb_t *ocb,
                  iofunc_attr_t *attr);
-int iofunc_utime(resmgr_context_t *ctp, io_utime_t *msg, IOFUNC_OCB_T *ocb,
+int iofunc_utime(resmgr_context_t *ctp, io_utime_t *msg, iofunc_ocb_t *ocb,
                  iofunc_attr_t *attr);
 int iofunc_time_update(iofunc_attr_t *attr);
 

@@ -202,9 +202,22 @@ int SchedSet(pid_t pid, int tid, int policy, const struct sched_param *param);
 
 /* --- clocks -------------------------------------------------------------- */
 
-/* ClockTime() returns nanoseconds for the given clock; CLOCK_MONOTONIC is the
- * project clock (pgw/time.h). ClockCycles() is the free-running counter. */
-uint64_t ClockTime(clockid_t id, uint64_t *new_time);
+/* QNX's own width typedefs (sys/platform.h on target); the stubs only need the
+ * unsigned ones plus _Int32t, which a few kernel calls use. */
+#ifndef _QNX_UINT_TYPES_DEFINED
+#define _QNX_UINT_TYPES_DEFINED
+typedef uint8_t  _Uint8t;
+typedef uint16_t _Uint16t;
+typedef uint32_t _Uint32t;
+typedef uint64_t _Uint64t;
+typedef int32_t  _Int32t;
+typedef int64_t  _Int64t;
+#endif
+
+/* Corrected 2026-11-12 against the real SDP 8.0 header (line 936): ClockTime()
+ * RETURNS A STATUS and hands the nanoseconds back through `old`. ClockCycles()
+ * is the free-running counter. */
+int ClockTime(clockid_t id, const _Uint64t *new_time, _Uint64t *old_time);
 uint64_t ClockCycles(void);
 uint64_t ClockPeriod(void);
 
@@ -335,10 +348,22 @@ int timer_delete(timer_t timerid);
  * Neutrino "timeouts" documentation for the _NTO_TIMEOUT_* flags.
  *   https://www.qnx.com/developers/docs/8.0/com.qnx.doc.neutrino.lib_ref/topic/t/timertimeout.html
  */
-#define _NTO_TIMEOUT_NEAREST 1   /* round the timeout to the nearest tick */
+/* Corrected 2026-11-12 against the real SDP 8.0 header (lines 120-127, 900):
+ * the flags select WHICH blocking state times out, and `ntime` is an ABSOLUTE
+ * deadline on clock_id (NULL cancels the timeout). There is no
+ * _NTO_TIMEOUT_NEAREST. */
+#define _NTO_TIMEOUT_FLAG(__state)  ((_Uint32t)1 << (__state))
+#define _NTO_TIMEOUT_RECEIVE        _NTO_TIMEOUT_FLAG(1)
+#define _NTO_TIMEOUT_SEND           _NTO_TIMEOUT_FLAG(2)
+#define _NTO_TIMEOUT_REPLY          _NTO_TIMEOUT_FLAG(3)
+#define _NTO_TIMEOUT_MQ_SEND        _NTO_TIMEOUT_FLAG(4)
+#define _NTO_TIMEOUT_MQ_RECEIVE     _NTO_TIMEOUT_FLAG(5)
+#define _NTO_TIMEOUT_SIGSUSPEND     _NTO_TIMEOUT_FLAG(6)
+#define _NTO_TIMEOUT_SIGWAITINFO    _NTO_TIMEOUT_FLAG(7)
 
-int TimerTimeout(clockid_t clock_id, int flags, struct timespec *nto,
-                 const uint64_t *bench, const uint64_t *nsecs);
+int TimerTimeout(clockid_t clock_id, _Uint32t flags,
+                 const struct sigevent *notify, const _Uint64t *ntime,
+                 _Uint64t *remaining);
 
 #endif /* PGW_STUB_SYS_NEUTRINO_H */
 

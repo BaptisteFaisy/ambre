@@ -38,14 +38,25 @@ typedef struct _dispatch dispatch_t;
 
 typedef struct _thread_pool thread_pool_t;
 
+/* Corrected 2026-11-12 against the real SDP 8.0 header (sys/dispatch.h
+ * lines 217-243): the pool callbacks are parameterised by THREAD_POOL_PARAM_T,
+ * which defaults to `void` here and is redefined to resmgr_context_t by
+ * sys/resmgr.h. That is why a resource manager may hand the pool its
+ * resmgr_context_alloc / resmgr_block / resmgr_handler. */
+#ifndef THREAD_POOL_PARAM_T
+# define THREAD_POOL_PARAM_T void
+#endif
+#ifndef THREAD_POOL_HANDLE_T
+# define THREAD_POOL_HANDLE_T dispatch_t
+#endif
+
 typedef struct _thread_pool_attr {
-    void *handle;
-    dispatch_context_t *(*context_alloc)(void *handle);
-    void (*context_free)(dispatch_context_t *ctp);
-    int (*block_func)(dispatch_context_t *ctp);
-    void (*unblock_func)(dispatch_context_t *ctp);
-    int (*handler_func)(dispatch_context_t *ctp);
-    void (*context_func)(dispatch_context_t *ctp);
+    THREAD_POOL_HANDLE_T *handle;
+    THREAD_POOL_PARAM_T *(*block_func)(THREAD_POOL_PARAM_T *ctp);
+    void (*unblock_func)(THREAD_POOL_PARAM_T *ctp);
+    int (*handler_func)(THREAD_POOL_PARAM_T *ctp);
+    THREAD_POOL_PARAM_T *(*context_alloc)(THREAD_POOL_HANDLE_T *handle);
+    void (*context_free)(THREAD_POOL_PARAM_T *ctp);
     int32_t lo_water;
     int32_t increment;
     int32_t hi_water;
@@ -66,6 +77,16 @@ void dispatch_context_free(dispatch_context_t *ctp);
 int dispatch_block(dispatch_context_t *ctp);
 int dispatch_handler(dispatch_context_t *ctp);
 void dispatch_unblock(dispatch_context_t *ctp);
+
+/* The resource-manager counterparts, added 2026-11-12 after reading the real
+ * $QNX_TARGET/usr/include/sys/dispatch.h (SDP 8.0, lines 104-108): a resmgr
+ * thread pool must use THESE, not the dispatch_* ones above, because
+ * resmgr_attach's handlers take a resmgr_context_t. */
+resmgr_context_t *resmgr_context_alloc(dispatch_t *dpp);
+resmgr_context_t *resmgr_block(resmgr_context_t *ctp);
+void resmgr_unblock(resmgr_context_t *ctp);
+int resmgr_handler(resmgr_context_t *ctp);
+void resmgr_context_free(resmgr_context_t *ctp);
 
 /* Let the kernel deliver a pulse to this process: used to wake the shutdown
  * thread and, for virtiofs, to route the FORGET/INTERRUPT queue (VFS-02). */

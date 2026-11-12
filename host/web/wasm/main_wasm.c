@@ -48,6 +48,11 @@ EMSCRIPTEN_KEEPALIVE const char *web_ops(double from, double count)
     return ambre_web_ops_json((uint32_t)from, (uint32_t)count);
 }
 
+EMSCRIPTEN_KEEPALIVE const char *web_samples(double from, double count)
+{
+    return ambre_web_samples_json((uint32_t)from, (uint32_t)count);
+}
+
 EMSCRIPTEN_KEEPALIVE const char *web_trace(void)
 {
     return ambre_web_trace_json();

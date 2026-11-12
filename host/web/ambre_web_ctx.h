@@ -10,6 +10,7 @@
 
 #include "ambre_explore_internal.h"
 #include "ambre_web.h"
+#include "ambre_web_json.h"
 #include <stdio.h>
 
 typedef struct {
@@ -33,5 +34,11 @@ ambre_web_ctx_t *ambre_web_ctx(void);
 /* Human name of a variant, and one line on what it does to the disk. */
 const char *ambre_web_variant_name(int variant);
 const char *ambre_web_variant_note(int variant);
+
+/* Class A points of an EMERG payload as a JSON array, scaled for a reader:
+ * [rel_time_ms, speed_kmh, throttle, brake, rpm, steer_deg, a_long, a_lat,
+ *  belt, airbag_lamp, abs, esc]. Used by the state answer and by the run
+ * summary, so both show the injected snapshot the same way. */
+void ambre_web_points_json(ambre_json_t *j, const ambre_emerg_t *e);
 
 #endif /* AMBRE_WEB_CTX_H */

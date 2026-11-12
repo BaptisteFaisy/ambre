@@ -194,7 +194,7 @@ static void image_fragment(ambre_json_t *out, const char *key,
 
 /* ------------------------------------------------------------------ event -- */
 
-static void event_points(ambre_json_t *j, const ambre_emerg_t *e)
+void ambre_web_points_json(ambre_json_t *j, const ambre_emerg_t *e)
 {
     char tmp[256];
     uint32_t n = e->point_count > 21u ? 21u : e->point_count;
@@ -223,7 +223,7 @@ static void event_emerg(ambre_json_t *j, const ambre_emerg_t *e)
     ambre_json_kv_u64(j, "locked", e->locked);
     ambre_json_kv_u64(j, "event_number", e->event_number);
     ambre_json_raw(j, ",\"points\":");
-    event_points(j, e);
+    ambre_web_points_json(j, e);
     ambre_json_raw(j, "}");
 }
 

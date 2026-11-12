@@ -54,8 +54,13 @@ const char *ambre_web_state_json(uint32_t prefix, int variant,
  * indices), and the constants the page needs to label things. */
 const char *ambre_web_info_json(void);
 
-/* A slice of the op trace: what the journal did, in order. */
+/* A slice of the op trace: what the journal did, in order. Each write carries
+ * the header of the block it wrote (record type, timestamp, sequence), so a
+ * page can animate the journal with the real clock and the real records. */
 const char *ambre_web_ops_json(uint32_t from, uint32_t count);
+
+/* A slice of the injected class B stream: [ts_us, a_long, a_lat] per ms. */
+const char *ambre_web_samples_json(uint32_t from, uint32_t count);
 
 /* What the trace costs: op count, longest single write, total bytes written.
  * The page shows it, and tests/test_web_api.c uses it to prove that every

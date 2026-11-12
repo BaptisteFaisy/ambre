@@ -125,9 +125,40 @@ static void info_event(ambre_json_t *j, const ambre_truth_event_t *te)
     ambre_json_kv_u64(&ev, "trig_ts_us", te->trig_ts_us);
     ambre_json_kv_u64(&ev, "trig_reason", te->emerg.trig_reason);
     ambre_json_kv_u64(&ev, "point_count", te->emerg.point_count);
+    ambre_json_raw(&ev, ",\"points\":");
+    ambre_web_points_json(&ev, &te->emerg);   /* byte-exact injected class A */
     ambre_json_raw(&ev, "}");
     ambre_json_embed(j, &ev);
     ambre_json_free(&ev);
+}
+
+/* The injected class B stream, one entry per millisecond: [ts_us, a_long,
+ * a_lat] in mm/s^2. The page draws the road and the acceleration curve from
+ * it, so the animation shows the data that was really injected. */
+const char *ambre_web_samples_json(uint32_t from, uint32_t count)
+{
+    ambre_web_ctx_t *c = ambre_web_ctx();
+    uint32_t total = c->truth.sample_count / 2u;   /* two signals per sample */
+    uint32_t end = from + count;
+    ambre_json_t j;
+    char tmp[128];
+
+    if (end > total || end < from) end = total;
+    ambre_json_init(&j);
+    snprintf(tmp, sizeof(tmp), "{\"from\":%u,\"count\":%u,\"total\":%u,\"samples\":[",
+             from, end > from ? end - from : 0u, total);
+    ambre_json_raw(&j, tmp);
+    for (uint32_t i = from; i < end; i++) {
+        const ambre_sample_t *s = &c->truth.samples[i * 2u];
+        snprintf(tmp, sizeof(tmp), "%s[%llu,%d,%d]", i > from ? "," : "",
+                 (unsigned long long)c->truth.sample_ts_us[i * 2u],
+                 s->value, (s + 1)->value);
+        ambre_json_raw(&j, tmp);
+    }
+    ambre_json_raw(&j, "]}");
+    const char *out = ambre_json_publish(&j);
+    ambre_json_free(&j);
+    return out;
 }
 
 const char *ambre_web_info_json(void)
@@ -159,13 +190,42 @@ const char *ambre_web_info_json(void)
     return ambre_json_publish(&j);
 }
 
-/* One op of the trace, compact: the page draws thousands of them. */
-static void ops_one(ambre_json_t *j, const ambre_op_t *op)
+/* Metadata of a logged write: the block header is still intact in the trace
+ * (the torn variants truncate it only when a state is materialised), so the
+ * page gets a real clock and a real record type for every write. */
+static void ops_block_meta(ambre_json_t *j, const ambre_simdisk_t *sd,
+                           const ambre_op_t *op)
 {
-    ambre_json_raw(j, "[");
-    ambre_json_raw(j, op->kind == AMBRE_OP_WRITE ? "1" :
-                      op->kind == AMBRE_OP_FLUSH ? "2" : "3");
-    char tmp[64];
+    const uint8_t *raw = sd->data_pool[op->data_id];
+    ambre_block_t b;
+    uint32_t magic = 0u;
+    char tmp[96];
+
+    memcpy(&magic, raw, sizeof(magic));
+    if (magic == AMBRE_MAGIC_TABLE) {
+        ambre_json_raw(j, ",0,9,0,0,1");
+        return;
+    }
+    if (magic != AMBRE_MAGIC_BLOCK) {
+        ambre_json_raw(j, ",0,0,0,0,0");
+        return;
+    }
+    ambre_block_unpack(raw, &b);
+    snprintf(tmp, sizeof(tmp), ",%llu,%u,%llu,%u,%u",
+             (unsigned long long)b.hdr.first_ts_us, b.hdr.rec_type,
+             (unsigned long long)b.hdr.seq, b.hdr.chunk_index, b.hdr.chunk_count);
+    ambre_json_raw(j, tmp);
+}
+
+/* One op of the trace, compact: the page draws thousands of them.
+ * [kind, off, len] then either the mark fields or the block metadata. */
+static void ops_one(ambre_json_t *j, const ambre_simdisk_t *sd,
+                    const ambre_op_t *op)
+{
+    char tmp[96];
+
+    ambre_json_raw(j, op->kind == AMBRE_OP_WRITE ? "[1" :
+                      op->kind == AMBRE_OP_FLUSH ? "[2" : "[3");
     snprintf(tmp, sizeof(tmp), ",%llu,%u", (unsigned long long)op->off, op->len);
     ambre_json_raw(j, tmp);
     if (op->kind == AMBRE_OP_MARK) {
@@ -173,6 +233,8 @@ static void ops_one(ambre_json_t *j, const ambre_op_t *op)
                  (unsigned long long)op->mark_value,
                  (unsigned long long)op->mark_aux);
         ambre_json_raw(j, tmp);
+    } else if (op->kind == AMBRE_OP_WRITE && op->len >= AMBRE_BLOCK_SIZE) {
+        ops_block_meta(j, sd, op);
     }
     ambre_json_raw(j, "]");
 }
@@ -229,7 +291,7 @@ const char *ambre_web_ops_json(uint32_t from, uint32_t count)
     ambre_json_raw(&j, tmp);
     for (uint32_t i = from; i < end; i++) {
         if (i > from) ambre_json_ch(&j, ',');
-        ops_one(&j, ambre_simdisk_op(&c->sd, i));
+        ops_one(&j, &c->sd, ambre_simdisk_op(&c->sd, i));
     }
     ambre_json_raw(&j, "]}");
     return ambre_json_publish(&j);

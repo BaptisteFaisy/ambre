@@ -98,6 +98,14 @@ input.emu-input {
 
 .emu-hint { color: var(--ink-dim); font-size: 0.9rem; margin: 0.35rem 0 0; }
 
+/* A label and its control on one line (the playback speed selector). */
+.emu-field.emu-inline { grid-template-columns: auto auto; align-items: center; gap: 0.5rem; }
+
+/* The animated stage is the centrepiece: it gets the full column and a
+ * slightly stronger frame than the other canvases. */
+.emu-canvas-wrap.emu-stage-wrap { padding: 0; border-color: var(--amber); overflow: hidden; }
+#emu-stage { display: block; width: 100%; background: #070a0f; }
+
 /* -------------------------------------------------------------- canvas --- */
 
 .emu-canvas-wrap {

@@ -59,39 +59,37 @@
   </noscript>
 </section>
 
-<!-- ------------------------------------------------------------ drive --- -->
-<section class="section shell" id="drive">
-  <h2 class="section-title">The drive</h2>
-  <p class="section-lede">A recorded run of the real journal over a synthetic 3-second drive with one frontal
-  impact. Nothing is faked: the journal writes, flushes and marks durability exactly as it does on the target,
-  and the explorer logs every operation in order.</p>
-  <p id="emu-drive">—</p>
-  <p id="emu-trace-summary">—</p>
-  <p class="note">Injected ground truth: <span id="emu-events-truth">—</span></p>
-</section>
-
-<!-- ---------------------------------------------------------- timeline --- -->
-<section class="section shell" id="timeline">
-  <h2 class="section-title">Where the power dies</h2>
-  <p class="section-lede">Every column of the strip below is one operation of the journal: a write, a flush,
-  or a durability mark. The red line is the cut — everything to its left reached the media, everything to its
-  right was lost with the 12 V rail.</p>
-  <div class="emu-canvas-wrap">
-    <canvas id="emu-timeline" class="emu-canvas" role="img"
-            aria-label="Timeline of the journal write stream, with the power cut marked"></canvas>
+<!-- ------------------------------------------------------------ stage --- -->
+<section class="section shell" id="stage">
+  <h2 class="section-title">The crash, frame by frame</h2>
+  <p class="section-lede">Press play. The drive is compressed, then the 120 ms around the impact play in slow
+  motion — because everything the project is about happens inside that window: the trigger fires, the EMERG
+  record goes out in one contiguous write, the table is committed, the flush is acknowledged, and the 12 V rail
+  dies where you decided it dies.</p>
+  <div class="emu-canvas-wrap emu-stage-wrap">
+    <canvas id="emu-stage" class="emu-canvas" role="img"
+            aria-label="Animated stage: the drive, the impact, the journal writing to the raw partition, the power cut and the recovery"></canvas>
   </div>
-  <ul class="emu-key">
-    <li><span class="k-dim"></span>write</li>
-    <li><span class="k-amber"></span>flush</li>
-    <li><span class="k-red"></span>EMERG record written</li>
-    <li><span class="k-green"></span>event acquired (durable)</li>
-    <li><span class="k-teal"></span>event sealed</li>
-    <li><span class="k-red"></span>power cut</li>
-  </ul>
+  <div class="emu-actions">
+    <button class="btn btn-primary" type="button" id="emu-play">Pause</button>
+    <button class="btn" type="button" id="emu-restart">Restart</button>
+    <label class="emu-field emu-inline">
+      <span>Speed</span>
+      <select id="emu-speed" class="emu-select">
+        <option value="0.25">0.25×</option>
+        <option value="0.5">0.5×</option>
+        <option value="1" selected>1×</option>
+        <option value="2">2×</option>
+        <option value="4">4×</option>
+      </select>
+    </label>
+    <button class="btn" type="button" id="emu-run">Re-run this cut</button>
+  </div>
+
   <div class="emu-controls">
     <label class="emu-field">
       <span>Cut after operation</span>
-      <input class="emu-range" type="range" id="emu-cut" min="0" max="0" value="0">
+      <input class="emu-range" type="range" id="emu-cut" min="1" max="100" value="1">
       <output id="emu-cut-value">—</output>
     </label>
     <div class="emu-field">
@@ -106,16 +104,9 @@
       <p class="emu-hint" id="emu-cut-where">—</p>
     </div>
   </div>
-</section>
 
-<!-- -------------------------------------------------------------- cut --- -->
-<section class="section shell" id="cut">
-  <h2 class="section-title">How the power dies</h2>
-  <p class="section-lede">A cut is not always a clean stop. The explorer knows six ways to lose the 12 V rail,
-  and each one is a different physics: a torn write, a volatile cache that never made it to the media, a bit
-  that decayed, an allocation table that did not survive, and a second cut in the middle of the recovery.</p>
   <fieldset class="emu-field">
-    <legend class="emu-legend">Variant</legend>
+    <legend class="emu-legend">How the power dies</legend>
     <ul class="emu-variants">
       <li><label><input type="radio" name="emu-variant" value="0" checked> plain cut</label></li>
       <li><label><input type="radio" name="emu-variant" value="1"> torn write</label></li>
@@ -129,7 +120,6 @@
   <div id="emu-params-torn" class="emu-field" hidden>
     <span>Sectors of the last write that reached the media (512 B each)</span>
     <input class="emu-range" type="range" id="emu-torn" min="1" max="8" value="1">
-    <output>the write is cut after that many sectors</output>
   </div>
 
   <div id="emu-params-cache" class="emu-field" hidden>
@@ -155,11 +145,38 @@
   <div id="emu-params-table" class="emu-field" hidden>
     <label><input type="checkbox" id="emu-table-both"> destroy both copies (forces the full-scan rebuild)</label>
   </div>
+  <p class="emu-hint" id="emu-variant-note"></p>
+</section>
 
-  <div class="emu-actions">
-    <button class="btn btn-primary" type="button" id="emu-run">Run the recovery</button>
-    <span class="emu-hint" id="emu-variant-note"></span>
+<!-- ------------------------------------------------------------ drive --- -->
+<section class="section shell" id="drive">
+  <h2 class="section-title">The drive</h2>
+  <p class="section-lede">A recorded run of the real journal over a synthetic 3-second drive with one frontal
+  impact. Nothing is faked: the journal writes, flushes and marks durability exactly as it does on the target,
+  and the explorer logs every operation in order.</p>
+  <p id="emu-drive">—</p>
+  <p id="emu-trace-summary">—</p>
+  <p class="note">Injected ground truth: <span id="emu-events-truth">—</span></p>
+</section>
+
+<!-- ---------------------------------------------------------- timeline --- -->
+<section class="section shell" id="timeline">
+  <h2 class="section-title">The whole trace at a glance</h2>
+  <p class="section-lede">Every column is one operation of the journal: a write, a flush, or a durability mark.
+  The red line is your cut — everything to its left reached the media, everything to its right was lost with
+  the 12 V rail.</p>
+  <div class="emu-canvas-wrap">
+    <canvas id="emu-timeline" class="emu-canvas" role="img"
+            aria-label="Timeline of the journal write stream, with the power cut marked"></canvas>
   </div>
+  <ul class="emu-key">
+    <li><span class="k-dim"></span>write</li>
+    <li><span class="k-amber"></span>flush</li>
+    <li><span class="k-red"></span>EMERG record written</li>
+    <li><span class="k-green"></span>event acquired (durable)</li>
+    <li><span class="k-teal"></span>event sealed</li>
+    <li><span class="k-red"></span>power cut</li>
+  </ul>
 </section>
 
 <!-- ----------------------------------------------------------- verdict --- -->
@@ -290,6 +307,10 @@
 
 <script src="assets/ambre-emu.js"></script>
 <script src="assets/emulator-draw.js"></script>
+<script src="assets/emu-play.js"></script>
+<script src="assets/emu-strip.js"></script>
+<script src="assets/emu-stage.js"></script>
+<script src="assets/emu-panels.js"></script>
 <script src="assets/emulator.js"></script>
 </body>
 </html>

@@ -1,21 +1,29 @@
 /* live.js — la page « Emulator » : l'invité QNX 8.0 en direct.
  *
- * Trois requêtes, pas plus :
  *   - /console : le journal série de l'invité (texte brut)
- *   - /stats   : l'état de la vitrine (invité connected, producer fps…)
+ *   - /stats   : l'état de la vitrine (invité connecté, img/s, âge du cadre)
  *   - /key     : injection d'une touche dans l'invité (sendkey du moniteur)
  *   - /type    : taper une ligne de commande, touche par touche
  *
  * La capture de l'écran VGA passe par <img src="…/stream"> : un flux
  * multipart, donc aucune JavaScript pour l'image elle-même.
+ *
+ * DEUX BANCS, UN SEUL VISIBLE. Le premier est le serveur r630 ; s'il ne
+ * répond pas (machine hors ligne, réseau coupé), la page bascule une fois sur
+ * le banc du PC et le dit dans l'état. Elle ne bascule jamais en silence.
  */
 (function () {
     "use strict";
 
-    var API = "https://r630-debian.tail3a8bdf.ts.net:8443/ambre";
+    var BANCS = [
+        { nom: "r630", api: "https://r630-debian.tail3a8bdf.ts.net:8443/ambre" },
+        { nom: "PC", api: "https://baptiste-ms-7d18.tail3a8bdf.ts.net:8443/ambre" }
+    ];
     var CONSOLE_TAIL = 24000;   /* caractères gardés : le journal grossit sans fin */
+    var courant = 0;
 
     function el(id) { return document.getElementById(id); }
+    function api() { return BANCS[courant].api; }
 
     /* Une requête bornée : si la vitrine ne répond pas, on veut le dire vite,
        pas laisser la page « en attente » pendant une minute. */
@@ -39,8 +47,18 @@
         p.textContent = texte;
     }
 
+    /* Bascule une seule fois vers le banc suivant ; rend false si aucun. */
+    function basculer() {
+        if (courant + 1 >= BANCS.length) { return false; }
+        courant += 1;
+        var img = el("live-screen-img");
+        if (img) { img.src = api() + "/stream?bascule=" + Date.now(); }
+        echec("bascule sur le banc « " + BANCS[courant].nom + " »");
+        return true;
+    }
+
     function majConsole() {
-        demande(API + "/console", "text")
+        demande(api() + "/console", "text")
             .then(function (t) {
                 var c = el("live-console");
                 if (!c) { return; }
@@ -52,11 +70,12 @@
     }
 
     function majStats() {
-        demande(API + "/stats", "json")
+        demande(api() + "/stats", "json")
             .then(function (s) {
                 var d = el("live-status-detail");
                 if (d) {
-                    d.textContent = "invité " + (s.invite_connecte ? "connecté" : "déconnecté")
+                    d.textContent = "banc « " + BANCS[courant].nom + " » · invité "
+                        + (s.invite_connecte ? "connecté" : "déconnecté")
                         + " · " + (s.producer_fps || 0).toFixed(1) + " img/s"
                         + " · cadre vieux de " + (s.frame_age_s === null ? "?" : s.frame_age_s) + " s";
                 }
@@ -64,19 +83,37 @@
                 else if (s.unite_active) { phase("boot", "démarrage de l'invité"); }
                 else { phase("off", "invité arrêté (la garde le relance à la visite)"); }
             })
-            .catch(function () { phase("off", "vitrine hors ligne"); });
+            .catch(function () {
+                if (basculer()) { majStats(); return; }
+                phase("off", "vitrine hors ligne");
+            });
     }
 
     function touche(cle) {
-        demande(API + "/key?k=" + encodeURIComponent(cle), "text")
+        demande(api() + "/key?k=" + encodeURIComponent(cle), "text")
             .catch(function () { echec("touche non envoyée"); });
     }
 
     function commande(texte, retour) {
-        var url = API + "/type?t=" + encodeURIComponent(texte) + "&ret=" + (retour ? "1" : "0");
+        var url = api() + "/type?t=" + encodeURIComponent(texte) + "&ret=" + (retour ? "1" : "0");
         demande(url, "text")
             .then(function (r) { echec(r); })
             .catch(function () { echec("commande non envoyée"); });
+    }
+
+    /* L'image peut échouer avant le premier /stats : même bascule, une fois. */
+    function surveillerEcran() {
+        var img = el("live-screen-img");
+        if (!img) { return; }
+        img.addEventListener("error", function () {
+            if (basculer()) { return; }
+            phase("off", "vitrine injoignable");
+            var n = el("live-screen-note");
+            if (n) {
+                n.textContent = "The live vitrine is unreachable right now (r630 and the PC "
+                    + "bench both down). The recorded proof of the same run is on the On QNX page.";
+            }
+        });
     }
 
     function brancher() {
@@ -95,19 +132,7 @@
         }
         var cc = el("live-ctrl-c");
         if (cc) { cc.addEventListener("click", function () { commande("\u0003", false); }); }
-        var img = el("live-screen-img");
-        if (img) {
-            /* Vitrine injoignable (serveur éteint, réseau coupé) : on le dit au
-               lieu de laisser une image cassée muette. */
-            img.addEventListener("error", function () {
-                phase("off", "vitrine injoignable");
-                var n = el("live-screen-note");
-                if (n) {
-                    n.textContent = "The live vitrine (r630) is unreachable right now. "
-                        + "The recorded proof of the same run is on the On QNX page.";
-                }
-            });
-        }
+        surveillerEcran();
     }
 
     function tick() {

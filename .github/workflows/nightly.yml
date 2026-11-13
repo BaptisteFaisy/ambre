@@ -23,7 +23,7 @@ concurrency:
 jobs:
   explore-full:
     name: exhaustive exploration (every reachable state)
-    runs-on: [self-hosted, Linux, X64, ambre-worker]
+    runs-on: ubuntu-latest
     # 30 min : `--states 1000000` is an upper bound; the reachable state space
     # of the reference 30 s scenario measures 64 591 states (334 s exploration,
     # 5 min 37 s wall including build, dev machine 2026-11-11). 30 min keeps a
@@ -61,7 +61,7 @@ jobs:
 
   crosscheck:
     name: C vs Python crosscheck (10 000 scenarios)
-    runs-on: [self-hosted, Linux, X64, ambre-worker]
+    runs-on: ubuntu-latest
     # 15 min : mesuré 2 min 32 s sur la machine de dev (2026-11-11) —
     # 10 000 scénarios, 2 744 840 lignes de décisions comparées, fichiers
     # .dec identiques octet pour octet. Marge >= 5x pour runners plus lents,

@@ -1,0 +1,30 @@
+# ambre-vitrine-web.service — la vitrine HTTP de la démo Ambre sur QNX 8.0.
+#
+# Le serveur HTTP est celui du paquet réutilisable ~/Bureau/qnx-emu (une seule
+# implémentation pour tous les projets QNX : écran VGA capturé par le
+# moniteur QEMU, journal de la console série, injection de touches).
+#
+# Les trois chemins ci-dessous DOIVENT être ceux de l'unité jumelle
+# (ambre-vitrine-qemu.service) : c'est le même QEMU, le même moniteur et le
+# même journal de console.
+#
+# NOTE — %h n'est PAS développé dans Environment= (systemd) : chemins absolus.
+[Unit]
+Description=Vitrine HTTP — Ambre (écran VGA, console série, touches)
+After=ambre-vitrine-qemu.service
+
+[Service]
+Type=simple
+Environment=QNX_EMS_SERIE=/home/baptiste/Bureau/ambre/build/qnx-vitrine/console.log
+Environment=QNX_EMS_MON=/home/baptiste/Bureau/ambre/build/qnx-vitrine/mon.sock
+Environment=QNX_EMS_PPM=/home/baptiste/Bureau/ambre/build/qnx-vitrine/web-vga.ppm
+Environment=QNX_EMS_PORT=8093
+Environment=QNX_EMS_BASE=/ambre
+Environment=QNX_EMS_TITRE=Ambre EDR — live on QNX 8.0
+Environment=QNX_EMS_NOTE=invité QNX 8.0 sous QEMU — écran VGA en direct, console série, touches injectées
+ExecStart=/usr/bin/python3 %h/Bureau/qnx-emu/web.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=default.target

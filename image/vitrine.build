@@ -1,0 +1,210 @@
+# SPDX-License-Identifier: Apache-2.0
+#
+# image/qemu.build - a MINIMAL QNX 8.0 boot image (IFS) for the live demo.
+#
+# Unlike image/ambre.build (the product image: five processes, a raw journal
+# partition, a Power-Safe archive partition, a security policy), this one
+# carries only what a demo needs and NOTHING else: the five Ambre binaries, a
+# shell, the block stack and the demo script. There is no file system at all
+# on the journal disk - the recorder owns the raw device, which is the whole
+# point of the format (STO-01).
+#
+# Built with:
+#   source ~/qnx800/qnxsdp-env.sh
+#   mkifs -v image/qemu.build build/qnx-vm/ifs.bin
+# The search path below is filled in by scripts/qnx-vm.sh (it points at the
+# local SDP and at the binaries `make qnx` produced).
+#
+# The start-up order is the one of the SDP quickstart image, which is the
+# configuration known to expose a QEMU disk on QNX 8.0:
+#   slogger2 -> pci-server -> devc-ser8250 -> pipe -> fsevmgr -> devb-eide
+# fsevmgr (the filesystem event manager) publishes the block device node.
+# pipe is the resource manager that creates /dev/pipe: without it the shell
+# cannot even do a command substitution ("can't create pipe"), which would
+# break the keys injected from the vitrine page.
+
+[search=@SEARCH@]
+
+# Same preamble as the SDP quickstart image: the permissions of the whole
+# image, and the two switches that let mkifs drop what it cannot find.
+[+dupignore]
+[+optional]
+[uid=0 gid=0 dperms=0555 perms=0555]
+
+[image=24m]
+[virtual=x86_64,multiboot] boot = {
+    startup-x86 -D8250..115200 -zz -f 0,0,1000M
+    PATH=/proc/boot
+    LD_LIBRARY_PATH=/proc/boot
+    [+keeplinked uid=0 gid=0 perms=0700] procnto-smp-instr -mr -d 022 -u 066 -F 2000
+}
+
+[+script] startup-script = {
+    procmgr_symlink /proc/boot/ksh /bin/ksh
+    procmgr_symlink /proc/boot/ksh /bin/sh
+    # The dynamic loader: every binary in this image is dynamically linked.
+    procmgr_symlink /proc/boot/ldqnx-64.so.2 /usr/lib/ldqnx-64.so.2
+    procmgr_symlink /proc/boot/edr-journal /usr/bin/edr-journal
+    procmgr_symlink /proc/boot/edr-capture /usr/bin/edr-capture
+    procmgr_symlink /proc/boot/edr-replay /usr/bin/edr-replay
+    procmgr_symlink /proc/boot/edrctl /usr/bin/edrctl
+    procmgr_symlink /proc/boot/edr-archive /usr/bin/edr-archive
+
+    # The system logger: without it the processes' diagnostics are lost.
+    slogger2
+    waitfor /dev/slog 10
+
+    # PCI services: on x86_64 the IDE controller is a PCI device, and the
+    # block driver reaches it through the PCI server.
+    PCI_HW_MODULE=pci_hw-Intel_x86.so
+    PCI_BKWD_COMPAT_MODULE=pci_bkwd_compat.so
+    PCI_SLOG_MODULE=pci_slog2.so
+    PCI_CAP_MODULE_DIR=/proc/boot
+    PCI_BASE_VERBOSITY=3
+    pci-server --aspace-enable --config=/proc/boot/pci_server.cfg
+    waitfor /dev/pci/server_id_1 10
+
+    # The VGA console: the vitrine captures it through the QEMU monitor
+    # (screendump) and injects keys into it (sendkey), so the demo narrates
+    # on the screen and the visitor can type at a real ksh prompt.
+    devc-con
+    waitfor /dev/con1 10
+
+    # The serial console: the kernel owns the first serial port (0x3f8), so
+    # the operator's terminal is the second one (0x2f8 = /dev/ser2).
+    devc-ser8250 -e
+    waitfor /dev/ser2 10
+
+    # The pipe module: without it the shell cannot create a pipe, and every
+    # command substitution fails ("can't create pipe").
+    pipe
+    waitfor /dev/pipe 10
+
+    # NOTE — the entropy daemon (random) is deliberately NOT started here.
+    # This SDP 8.0 target ships no library entropy source for x86_64 (no
+    # rand-*.so exporting entropy_source_init anywhere in the tree), so
+    # `random` always exits with "Random init failed" and /dev/random never
+    # appears; starting it only cost 10 s of boot and a red line in the
+    # serial log. Nothing in the demo reads /dev/random: the block device is
+    # published by devb-eide below, not by fsevmgr.
+
+    # The filesystem event manager publishes the block device node.
+    fsevmgr
+
+    # The block driver: devb-eide carries the QNX 8.0 block layer itself.
+    # The journal disk is the WHOLE raw device: no partition table, no file
+    # system (STO-01).
+    devb-eide cam user=20:20 blk cache=64M,auto=partition,vnode=2000,ncache=2000,commit=low
+    waitfor /dev/hd0 10
+
+    # A shell on the console, WITHOUT a login (the demo image has no
+    # /etc/passwd: there is no file system to hold one).
+    on -d -t /dev/ser2 /proc/boot/demo-qnx.sh
+
+    # A live ksh on the VGA console, so the keys injected from the page do
+    # something visible: type at the prompt and the answer lands on the screen.
+    on -d -t /dev/con1 -e HOME=/proc/boot /proc/boot/ksh -l
+}
+
+# --- the kernel and the shell ----------------------------------------------
+bin/ksh
+bin/on
+bin/pidin
+bin/slogger2
+bin/slog2info
+
+# --- the services the block stack needs -------------------------------------
+sbin/pci-server
+sbin/devb-eide
+sbin/devc-ser8250
+sbin/devc-con
+sbin/pipe
+sbin/fsevmgr
+lib/dll/io-blk.so
+lib/dll/cam-disk.so
+lib/dll/devr-virtio.so
+
+# --- the PCI configuration the block driver needs ---------------------------
+[perms=0444] pci_server.cfg = {
+[buscfg]
+DO_BUS_CONFIG=no
+
+[envars]
+PCI_DEBUG_MODULE=pci_debug2.so
+PCI_HW_MODULE=pci_hw-Intel_x86.so
+PCI_HW_CONFIG_FILE=/proc/boot/pci_hw.cfg
+}
+
+[perms=0444] pci_hw.cfg = {
+[interrupts]
+B0:D17:F0    A    18
+B0:D17:F0    B    19
+B0:D17:F0    C    16
+B0:D17:F0    D    17
+B3:D0:F0     A    18
+B3:D0:F0     B    19
+B3:D0:F0     C    16
+B3:D0:F0     D    17
+}
+
+# --- the PCI modules the server loads ---------------------------------------
+lib/dll/pci/pci_hw-Intel_x86.so
+lib/dll/pci/pci_slog2.so
+lib/dll/pci/pci_cap-0x01.so
+lib/dll/pci/pci_cap-0x05.so
+lib/dll/pci/pci_cap-0x10.so
+lib/dll/pci/pci_cap-0x11.so
+lib/dll/pci/pci_strings.so
+lib/dll/pci/pci_bkwd_compat.so
+lib/dll/pci/pci_debug2.so
+lib/libpci_hw_common.so.3.0
+
+# --- the C library the Ambre binaries are linked against --------------------
+ldqnx-64.so.2
+lib/libc.so.6
+lib/libm.so.3
+lib/libgcc_s.so.1
+lib/libslog2.so.1
+lib/libcam.so.2
+lib/libpci.so.3.0
+lib/libsecpol.so.1
+lib/libqh.so.1
+lib/libfsnotify.so.1
+lib/libjson.so.1
+lib/libregex.so.1
+lib/libslog2parse.so.1
+lib/libslog2shim.so.1
+usr/lib/libexpat.so.2
+# No entropy daemon: this SDP target has no entropy_source_init library for
+# x86_64, so /dev/random is unavailable (see the startup script note). The
+# crypto libraries it would need (libqcrypto, libcrypto, libz, libsocket,
+# qcrypto-openssl) are therefore omitted too - nothing in the demo reads
+# /dev/random.
+
+# --- the five Ambre processes and the demo ----------------------------------
+edr-journal
+edr-capture
+edr-replay
+edrctl
+edr-archive
+demo-qnx.sh
+diagnose.sh
+scenario.txt
+name_probe
+
+# --- a few applets, so the keys injected from the page are useful -----------
+# QNX 8.0 has no coreutils: toybox is a multi-applet binary and each applet
+# is a link placed AT THE ROOT of the IFS (/proc/boot), which is the PATH.
+toybox = usr/bin/toybox
+[type=link] /proc/boot/ls=/proc/boot/toybox
+[type=link] /proc/boot/cat=/proc/boot/toybox
+[type=link] /proc/boot/echo=/proc/boot/toybox
+[type=link] /proc/boot/ps=/proc/boot/toybox
+[type=link] /proc/boot/uname=/proc/boot/toybox
+[type=link] /proc/boot/hexdump=/proc/boot/toybox
+[type=link] /proc/boot/stat=/proc/boot/toybox
+[type=link] /proc/boot/head=/proc/boot/toybox
+[type=link] /proc/boot/tail=/proc/boot/toybox
+[type=link] /proc/boot/grep=/proc/boot/toybox
+[type=link] /proc/boot/sync=/proc/boot/toybox
+[type=link] /proc/boot/wc=/proc/boot/toybox

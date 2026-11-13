@@ -19,17 +19,32 @@
 # no sleep, no cat, and NO pipes (the shell reports "can't create pipe"), so
 # the wait is a poll loop and every captured output is staged through a RAM
 # file under /dev/shmem.
+#
+# The vitrine (scripts/qnx-vitrine.sh + a VGA buildfile) captures the VGA
+# console and injects keys into it. This script narrates to BOTH consoles:
+# the serial stream (the transcript you can read) and, when a VGA console
+# exists (/dev/con1), the screen you can watch.
 
 JOURNAL=/dev/edr/journal
 DISK=/dev/hd0t177
 CTL=/proc/boot/edrctl
 LST=/dev/shmem/ambre_lst
 
+# The vitrine shows the VGA console: mirror every line there when the image
+# carries a VGA console. Without /dev/con1 (the serial-only image) the mirror
+# is a no-op and the transcript is unchanged.
+say() {
+    echo "$*"
+    if [ -c /dev/con1 ]; then
+        echo "$*" > /dev/con1 2>/dev/null
+    fi
+}
+
 banner() {
-    echo ''
-    echo '=============================================================='
-    echo "== $*"
-    echo '=============================================================='
+    say ''
+    say '=============================================================='
+    say "== $*"
+    say '=============================================================='
 }
 
 # First line of "edrctl list", staged through a RAM file: the result lands in
@@ -64,8 +79,8 @@ wait_event() {
 }
 
 banner "Ambre EDR — live on QNX 8.0"
-echo "journal partition : $DISK  (raw, no file system)"
-echo "service path      : $JOURNAL"
+say "journal partition : $DISK  (raw, no file system)"
+say "service path      : $JOURNAL"
 
 banner "1. edr-journal starts: it opens the partition and runs the recovery (REP-01)"
 /proc/boot/edr-journal --disk $DISK --listen $JOURNAL --mode continuous --segment-limit 4 &
@@ -77,31 +92,33 @@ $CTL --journal $JOURNAL status
 list_first
 if [ -z "$LIST_LINE" ]; then
     banner "3. first boot: the partition is empty, so we drive the crash"
-    echo '-- edr-capture starts (priority 61) and listens for the frames'
+    say '-- edr-capture starts (priority 61) and listens for the frames'
     /proc/boot/edr-capture --journal $JOURNAL --listen /dev/edr/in --profile eu &
     i=0
     while [ "$i" -lt 300 ]; do
         i=$((i + 1))
     done
-    echo '-- edr-replay: 4 s of driving, frontal impact at 2.5 s'
+    say '-- edr-replay: 4 s of driving, frontal impact at 2.5 s'
     /proc/boot/edr-replay --capture /dev/edr/in --scenario /proc/boot/scenario.txt &
     wait_event
     banner "4. edrctl list — the event the recorder acquired"
     $CTL --journal $JOURNAL list
+    say "acquired: $LIST_LINE"
     banner "5. edrctl status after the impact"
     $CTL --journal $JOURNAL status
     banner "READY — the crash is on the media. The host now cuts the power (SIGKILL on QEMU)."
 else
     banner "3. AFTER THE POWER CUT — the journal recovered the partition at boot"
-    echo '-- what the black box still holds:'
+    say '-- what the black box still holds:'
     $CTL --journal $JOURNAL list
+    say "recovered: $LIST_LINE"
     banner "4. edrctl status after the recovery"
     $CTL --journal $JOURNAL status
     banner "THE EVENT SURVIVED THE POWER CUT"
 fi
 
-echo ''
-echo '-- the demo stays alive; cut the power whenever you want.'
+say ''
+say '-- the demo stays alive; cut the power whenever you want.'
 while true; do
     read _x
 done

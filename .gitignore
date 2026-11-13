@@ -21,3 +21,6 @@ __pycache__/
 .idea/
 *.swp
 .DS_Store
+
+# QNX symbol files (mkifs/procnto artefacts), never source
+*.sym

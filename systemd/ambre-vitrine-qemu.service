@@ -1,0 +1,25 @@
+# ambre-vitrine-qemu.service — l'invité QNX 8.0 de la vitrine Ambre.
+#
+# Le service lance la boucle de la démo (scripts/qnx-vitrine.sh) : boot ->
+# le choc est enregistré -> coupure d'alimentation (SIGKILL sur QEMU) ->
+# reboot -> la reprise affiche ce qui a survécu -> cycle suivant.
+#
+# Il ne faut pas lancer le script à la main en même temps : les deux
+# instances se disputeraient le disque du journal.
+#
+# NOTE — %h n'est PAS développé dans Environment= (systemd) : on ne l'utilise
+# que dans ExecStart, où la substitution a bien lieu.
+[Unit]
+Description=Invite QNX 8.0 — Ambre (QEMU + cycle coupure d'alimentation)
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/Bureau/ambre
+ExecStart=%h/Bureau/ambre/scripts/qnx-vitrine.sh run
+Restart=always
+RestartSec=10
+KillMode=mixed
+
+[Install]
+WantedBy=default.target

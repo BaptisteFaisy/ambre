@@ -27,7 +27,7 @@ concurrency:
 jobs:
   build-test:
     name: build + C unit tests
-    runs-on: [self-hosted, Linux, X64, ambre-worker]
+    runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
@@ -71,7 +71,7 @@ jobs:
 
   python-tests:
     name: Python twin tests
-    runs-on: [self-hosted, Linux, X64, ambre-worker]
+    runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
@@ -85,7 +85,7 @@ jobs:
 
   explore:
     name: power-cut exploration (10 000 states)
-    runs-on: [self-hosted, Linux, X64, ambre-worker]
+    runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
@@ -122,7 +122,7 @@ jobs:
 
   sizecheck:
     name: house rule (<500 lines / <50 lines)
-    runs-on: [self-hosted, Linux, X64, ambre-worker]
+    runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4

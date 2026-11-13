@@ -175,6 +175,10 @@ lib/libregex.so.1
 lib/libslog2parse.so.1
 lib/libslog2shim.so.1
 usr/lib/libexpat.so.2
+# toybox (et donc les applets ls/cat/grep/sleep…) est lié à zlib : il faut
+# libz.so.2 même sans le démon random. Les seules libs crypto retirées sont
+# celles du démon random (libqcrypto, libcrypto, libsocket, qcrypto-openssl).
+usr/lib/libz.so.2
 # No entropy daemon: this SDP target has no entropy_source_init library for
 # x86_64, so /dev/random is unavailable (see the startup script note). The
 # crypto libraries it would need (libqcrypto, libcrypto, libz, libsocket,
@@ -208,3 +212,4 @@ toybox = usr/bin/toybox
 [type=link] /proc/boot/grep=/proc/boot/toybox
 [type=link] /proc/boot/sync=/proc/boot/toybox
 [type=link] /proc/boot/wc=/proc/boot/toybox
+[type=link] /proc/boot/sleep=/proc/boot/toybox

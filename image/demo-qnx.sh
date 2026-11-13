@@ -15,10 +15,10 @@
 # same script runs again, the journal recovers the partition (REP-01) and
 # edrctl list shows what survived.
 #
-# The demo image has no file system and no shell utility beyond the builtins:
-# no sleep, no cat, and NO pipes (the shell reports "can't create pipe"), so
-# the wait is a poll loop and every captured output is staged through a RAM
-# file under /dev/shmem.
+# The demo image has no file system and no shell utility beyond the builtins
+# and the toybox applets the image links at the root of the IFS (ls, cat,
+# grep, sleep...): the wait is a poll loop and every captured output is
+# staged through a RAM file under /dev/shmem.
 #
 # The vitrine (scripts/qnx-vitrine.sh + a VGA buildfile) captures the VGA
 # console and injects keys into it. This script narrates to BOTH consoles:
@@ -55,12 +55,19 @@ list_first() {
 }
 
 # Wait until the journal answers, or give up after bounded round trips.
+# The pause between the polls matters: on a loaded machine (the r630 runs at
+# load 20+) each edrctl spawn is slow, and the journal needs a moment to
+# open the raw partition, run the recovery and publish its name. Without the
+# pause the loop spins through its 500 tries in a second and gives up before
+# the service exists — the demo then prints a fake "READY" with nothing
+# recorded on the media.
 wait_ready() {
     i=0
-    while [ "$i" -lt 500 ]; do
+    while [ "$i" -lt 60 ]; do
         $CTL --journal $JOURNAL status > /dev/null 2>&1
         [ "$?" -eq 0 ] && return 0
         i=$((i + 1))
+        sleep 1
     done
     return 1
 }
@@ -68,12 +75,13 @@ wait_ready() {
 # Wait until the journal lists at least one event.
 wait_event() {
     i=0
-    while [ "$i" -lt 1200 ]; do
+    while [ "$i" -lt 60 ]; do
         list_first
         if [ -n "$LIST_LINE" ]; then
             return 0
         fi
         i=$((i + 1))
+        sleep 1
     done
     return 1
 }
@@ -84,7 +92,14 @@ say "service path      : $JOURNAL"
 
 banner "1. edr-journal starts: it opens the partition and runs the recovery (REP-01)"
 /proc/boot/edr-journal --disk $DISK --listen $JOURNAL --mode continuous --segment-limit 4 &
-wait_ready
+if ! wait_ready; then
+    # No journal, no crash on the media: say so instead of faking a READY.
+    banner "the journal did not answer — nothing was recorded"
+    say "the demo stops here: the crash would NOT be on the media"
+    while true; do
+        read _x
+    done
+fi
 
 banner "2. edrctl status — the service answers"
 $CTL --journal $JOURNAL status
@@ -94,10 +109,10 @@ if [ -z "$LIST_LINE" ]; then
     banner "3. first boot: the partition is empty, so we drive the crash"
     say '-- edr-capture starts (priority 61) and listens for the frames'
     /proc/boot/edr-capture --journal $JOURNAL --listen /dev/edr/in --profile eu &
-    i=0
-    while [ "$i" -lt 300 ]; do
-        i=$((i + 1))
-    done
+    # The capture must be subscribed before the replay sends the first frame,
+    # or the frames are lost (on a loaded machine, the subscription is not
+    # ready the instant the process is forked).
+    sleep 2
     say '-- edr-replay: 4 s of driving, frontal impact at 2.5 s'
     /proc/boot/edr-replay --capture /dev/edr/in --scenario /proc/boot/scenario.txt &
     wait_event

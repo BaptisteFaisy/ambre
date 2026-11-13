@@ -89,9 +89,17 @@ fresh_disk() {
     # A blank 64 MiB raw disk with ONE partition of type 177 (B1) and no file
     # system: the recorder owns the raw partition (STO-01). Truncating to the
     # same size erases nothing, hence the truncate to 0 first.
+    #
+    # The partition table is written by scripts/qnx-mbr.py (stdlib only), NOT
+    # by sfdisk: sfdisk is ABSENT on the r630, and a disk with no table gives
+    # no /dev/hd0t177 — the journal never starts and the demo plays a fake
+    # "READY" with nothing recorded on the media.
     truncate -s 0 "$DISK"
     truncate -s 64M "$DISK"
-    printf '2048,,B1\n' | sfdisk --no-reread "$DISK" >/dev/null 2>&1 || true
+    python3 "$ROOT/scripts/qnx-mbr.py" "$DISK" 64M 2048 0xB1 || {
+        echo "vitrine: table de partitions impossible — arrêt (rien ne serait enregistré)" >&2
+        return 1
+    }
 }
 
 build() {
@@ -126,7 +134,7 @@ run() {
         kill_stale
         # A fresh journal for every cycle, so the crash is re-acquired each
         # time, and a single console.log that spans boot1-cut-boot2.
-        fresh_disk
+        fresh_disk || exit 1
         : > "$LOG"
         mark "cycle $cycle — boot 1: drive the crash"
         boot

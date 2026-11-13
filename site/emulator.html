@@ -1,24 +1,41 @@
 <!DOCTYPE html>
+<!--
+  emulator.html — l'émulateur : l'invité QNX 8.0, en direct.
+
+  Ce que voit le visiteur est l'écran VGA d'un invité QNX 8.0 réel, dans un
+  QEMU, sur le serveur r630 : la capture vient de la commande `screendump` du
+  moniteur QEMU, le journal vient de la console série de l'invité, et les
+  touches sont injectées dans l'invité (sendkey). Rien n'est rejoué ni simulé
+  sur cette page.
+
+  La page a droit à deux ressources de plus que le reste du site (assets/live.css
+  et assets/live.js) : elle parle au serveur de l'invité et rafraîchit la
+  console. Sans JavaScript, l'écran reste affiché (c'est un <img>).
+-->
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>The emulator, in your browser — Ambre</title>
-<meta name="description" content="Cut the 12 V rail anywhere in the journal write stream: the real Ambre recovery code runs in this tab and the eight invariants are checked against what was injected.">
+<title>The emulator — Ambre running on QNX 8.0, live</title>
+<meta name="description" content="A real QNX 8.0 guest under QEMU, on the r630: the crash is recorded, the power is cut, the guest reboots and recovers. Watch its VGA screen and type in it.">
 <meta name="color-scheme" content="dark light">
 <link rel="stylesheet" href="assets/ambre.css">
-<link rel="stylesheet" href="assets/emulator.css">
+<link rel="stylesheet" href="assets/live.css">
 </head>
 <body>
 
 <header class="site-header">
   <div class="shell">
-    <a class="brand" href="index.html"><span class="brand-mark" aria-hidden="true"></span> Ambre <small> QNX 8.0 event data recorder
-    </small></a>
+    <a class="brand" href="index.html">
+      <span class="brand-mark" aria-hidden="true"></span>
+      Ambre <small>QNX 8.0 event data recorder</small>
+    </a>
     <nav class="site-nav" aria-label="Main">
       <ul>
         <li><a href="index.html">Overview</a></li>
         <li><a href="emulator.html" aria-current="page">Emulator</a></li>
+        <li><a href="explorer.html">Explorer</a></li>
+        <li><a href="on-target.html">On QNX</a></li>
         <li><a href="validation.html">Validation</a></li>
         <li><a href="tutorial.html">Tutorial</a></li>
         <li><a href="report/index.html">Sample report</a></li>
@@ -32,261 +49,127 @@
 
 <!-- ------------------------------------------------------------- hero --- -->
 <div class="shell hero">
-  <p class="kicker">Live — the project's own explorer, compiled to WebAssembly</p>
-  <h1>Cut the power <em>anywhere</em></h1>
-  <p class="hero-lede">This page runs the Ambre power-cut explorer inside your browser: the same C sources as
-  <code>ambre-explore</code> (<code>fmt/</code>, <code>host/explore/</code>, <code>host/simdisk/</code>),
-  compiled to WebAssembly — no re-implementation, no server, no dependency.
-  You choose the instant the 12 V rail dies and how it dies; the real recovery code runs on the real
-  journal image, and the eight invariants are checked against what was really injected.</p>
+  <p class="kicker">Live — a QNX 8.0 guest under QEMU, on the r630</p>
+  <h1>The emulator, <em>live</em></h1>
+  <p class="hero-lede">This is not a recording and not a simulation: it is a QNX 8.0 guest, booted from an
+  image built with the real SDP, running the five Ambre processes on a raw partition. The frame below is its
+  VGA screen, captured through the QEMU monitor; the panel on the right is its serial console. The crash is
+  driven inside the guest, and the power cut is a real <code>SIGKILL</code> on QEMU — the volatile cache goes
+  with it. Then the guest reboots on the same disk and recovers what was left on the platter.</p>
   <div class="hero-actions">
-    <a class="btn btn-primary" href="#cut">Cut it now</a>
-    <a class="btn" href="#proof">How this is proven</a>
+    <a class="btn btn-primary" href="#stage">Watch the guest</a>
+    <a class="btn" href="on-target.html">The transcript and the proof</a>
   </div>
 </div>
 
-<!-- ----------------------------------------------------------- status --- -->
-<section class="section shell">
-  <div id="emu-status" class="emu-status" data-state="busy">
-    <strong id="emu-status-msg">Loading the compiled explorer…</strong>
-    <span class="emu-status-detail" id="emu-status-detail"></span>
-  </div>
-  <noscript>
-    <p class="note note-honesty">This page needs JavaScript for the emulator itself: the module is a compiled
-    binary that has to be loaded and driven. Every number it produces comes from the C code — the rest of the
-    site reads fine without JavaScript, and the <a href="validation.html">validation page</a> carries the
-    campaign of record.</p>
-  </noscript>
-</section>
-
 <!-- ------------------------------------------------------------ stage --- -->
 <section class="section shell" id="stage">
-  <h2 class="section-title">The crash, frame by frame</h2>
-  <p class="section-lede">Press play. The drive is compressed, then the 120 ms around the impact play in slow
-  motion — because everything the project is about happens inside that window: the trigger fires, the EMERG
-  record goes out in one contiguous write, the table is committed, the flush is acknowledged, and the 12 V rail
-  dies where you decided it dies.</p>
-  <div class="emu-canvas-wrap emu-stage-wrap">
-    <canvas id="emu-stage" class="emu-canvas" role="img"
-            aria-label="Animated stage: the drive, the impact, the journal writing to the raw partition, the power cut and the recovery"></canvas>
-  </div>
-  <div class="emu-actions">
-    <button class="btn btn-primary" type="button" id="emu-play">Pause</button>
-    <button class="btn" type="button" id="emu-restart">Restart</button>
-    <label class="emu-field emu-inline">
-      <span>Speed</span>
-      <select id="emu-speed" class="emu-select">
-        <option value="0.25">0.25×</option>
-        <option value="0.5">0.5×</option>
-        <option value="1" selected>1×</option>
-        <option value="2">2×</option>
-        <option value="4">4×</option>
-      </select>
-    </label>
-    <button class="btn" type="button" id="emu-run">Re-run this cut</button>
-  </div>
+  <h2 class="section-title">The guest, right now</h2>
+  <p class="section-lede">The loop never stops: the guest boots, drives the crash, the host cuts the power, the
+  guest reboots and recovers — then it starts again. The buttons type into the guest: they are injected as real
+  keystrokes (QEMU <code>sendkey</code>), so the answer appears on its screen, not here.</p>
 
-  <div class="emu-controls">
-    <label class="emu-field">
-      <span>Cut after operation</span>
-      <input class="emu-range" type="range" id="emu-cut" min="1" max="100" value="1">
-      <output id="emu-cut-value">—</output>
-    </label>
-    <div class="emu-field">
-      <span>Jump to</span>
-      <div class="emu-actions">
-        <button class="btn" type="button" data-cut="start">start</button>
-        <button class="btn" type="button" data-cut="emerg">the EMERG write</button>
-        <button class="btn" type="button" data-cut="acquired">the flush that makes it durable</button>
-        <button class="btn" type="button" data-cut="sealed">the seal</button>
-        <button class="btn" type="button" data-cut="end">the end of the trace</button>
+  <div class="live-stage">
+    <figure class="live-screen">
+      <img id="live-screen-img" src="https://r630-debian.tail3a8bdf.ts.net:8443/ambre/stream"
+           alt="The VGA screen of the running QNX 8.0 guest, captured live through the QEMU monitor">
+      <figcaption id="live-screen-note">The guest's VGA console, captured with <code>screendump</code> and streamed as it changes.</figcaption>
+    </figure>
+    <div>
+      <pre class="live-console" id="live-console">connexion…</pre>
+      <div class="live-bar">
+        <button type="button" data-k="ret">Entrée</button>
+        <button type="button" data-k="spc">Espace</button>
+        <button type="button" data-k="up">↑</button>
+        <button type="button" data-k="down">↓</button>
+        <button type="button" data-k="tab">Tab</button>
+        <button type="button" id="live-ctrl-c">Ctrl-C</button>
       </div>
-      <p class="emu-hint" id="emu-cut-where">—</p>
+      <form class="live-bar" id="live-cmd" autocomplete="off">
+        <input name="cmd" placeholder="ls /dev/shmem" spellcheck="false" aria-label="Command to type in the guest">
+        <button type="submit">Type it ⏎</button>
+      </form>
+      <p class="live-status">
+        <span class="live-phase" id="live-phase" data-state="boot">…</span>
+        <span id="live-status-detail">—</span>
+        <span id="live-status-msg"></span>
+      </p>
     </div>
   </div>
 
-  <fieldset class="emu-field">
-    <legend class="emu-legend">How the power dies</legend>
-    <ul class="emu-variants">
-      <li><label><input type="radio" name="emu-variant" value="0" checked> plain cut</label></li>
-      <li><label><input type="radio" name="emu-variant" value="1"> torn write</label></li>
-      <li><label><input type="radio" name="emu-variant" value="2"> volatile cache</label></li>
-      <li><label><input type="radio" name="emu-variant" value="3"> flipped bit</label></li>
-      <li><label><input type="radio" name="emu-variant" value="4"> table destroyed</label></li>
-      <li><label><input type="radio" name="emu-variant" value="5"> cut during recovery</label></li>
-    </ul>
-  </fieldset>
+  <noscript>
+    <p class="note note-honesty">Without JavaScript the guest's screen still shows — it is a plain image, streamed
+    as it changes — but the serial console and the key injection need JavaScript. The recorded proof of the same
+    run is on the <a href="on-target.html">On QNX</a> page.</p>
+  </noscript>
 
-  <div id="emu-params-torn" class="emu-field" hidden>
-    <span>Sectors of the last write that reached the media (512 B each)</span>
-    <input class="emu-range" type="range" id="emu-torn" min="1" max="8" value="1">
+  <div class="note note-honesty">
+    <p><strong>The guest may be asleep.</strong> The r630 hosts several QNX guests, so this one is stopped after
+    a few minutes without a visitor and started again on the next request — the boot takes about a minute. The
+    screen then shows the guest booting from scratch. It is the same guest, the same image and the same disk.</p>
   </div>
-
-  <div id="emu-params-cache" class="emu-field" hidden>
-    <span>Which writes not yet flushed survived</span>
-    <select id="emu-mask" class="emu-select">
-      <option value="0">none — the cache is lost entirely</option>
-      <option value="1">only the first one</option>
-      <option value="1431655765">one in two (0x5555…)</option>
-      <option value="all">all of them</option>
-    </select>
-  </div>
-
-  <div id="emu-params-bitflip" class="emu-field" hidden>
-    <span>Offset of the flipped bit (512 B blocks)</span>
-    <input class="emu-range" type="range" id="emu-offset" min="1024" max="4194304" value="1024" step="512">
-    <select id="emu-bit" class="emu-select">
-      <option value="0">bit 0</option><option value="1">bit 1</option><option value="2">bit 2</option>
-      <option value="3">bit 3</option><option value="4">bit 4</option><option value="5">bit 5</option>
-      <option value="6">bit 6</option><option value="7">bit 7</option>
-    </select>
-  </div>
-
-  <div id="emu-params-table" class="emu-field" hidden>
-    <label><input type="checkbox" id="emu-table-both"> destroy both copies (forces the full-scan rebuild)</label>
-  </div>
-  <p class="emu-hint" id="emu-variant-note"></p>
 </section>
 
-<!-- ------------------------------------------------------------ drive --- -->
-<section class="section shell" id="drive">
-  <h2 class="section-title">The drive</h2>
-  <p class="section-lede">A recorded run of the real journal over a synthetic 3-second drive with one frontal
-  impact. Nothing is faked: the journal writes, flushes and marks durability exactly as it does on the target,
-  and the explorer logs every operation in order.</p>
-  <p id="emu-drive">—</p>
-  <p id="emu-trace-summary">—</p>
-  <p class="note">Injected ground truth: <span id="emu-events-truth">—</span></p>
-</section>
-
-<!-- ---------------------------------------------------------- timeline --- -->
-<section class="section shell" id="timeline">
-  <h2 class="section-title">The whole trace at a glance</h2>
-  <p class="section-lede">Every column is one operation of the journal: a write, a flush, or a durability mark.
-  The red line is your cut — everything to its left reached the media, everything to its right was lost with
-  the 12 V rail.</p>
-  <div class="emu-canvas-wrap">
-    <canvas id="emu-timeline" class="emu-canvas" role="img"
-            aria-label="Timeline of the journal write stream, with the power cut marked"></canvas>
+<!-- ----------------------------------------------------------- cycle --- -->
+<section class="section shell" id="cycle">
+  <h2 class="section-title">What the loop does, inside the guest</h2>
+  <div class="cards">
+    <div class="card">
+      <p class="card-figure">1</p>
+      <p class="card-label"><code>edr-journal</code> opens the raw partition <code>/dev/hd0t177</code> — no file
+      system on it — and runs the recovery before anything else</p>
+      <p class="card-note">the recorder owns the medium, byte for byte</p>
+    </div>
+    <div class="card">
+      <p class="card-figure">2</p>
+      <p class="card-label"><code>edr-capture</code> listens, <code>edr-replay</code> replays the scenario:
+      4 s of driving, frontal impact at 2.5 s</p>
+      <p class="card-note">the trigger fires inside the guest, on the guest's own clock</p>
+    </div>
+    <div class="card">
+      <p class="card-figure good">3</p>
+      <p class="card-label">the impact is acquired: <code>event 1 sealed locked=yes complete_file=yes</code>, then
+      the host cuts the power</p>
+      <p class="card-note"><code>kill -9</code> on QEMU — the 12 V rail and the volatile cache are gone</p>
+    </div>
+    <div class="card">
+      <p class="card-figure good">4</p>
+      <p class="card-label">the guest reboots on the same disk: the recovery scans it and the event comes back
+      sealed and locked</p>
+      <p class="card-note">the event survived the power cut — the console says so, live</p>
+    </div>
   </div>
-  <ul class="emu-key">
-    <li><span class="k-dim"></span>write</li>
-    <li><span class="k-amber"></span>flush</li>
-    <li><span class="k-red"></span>EMERG record written</li>
-    <li><span class="k-green"></span>event acquired (durable)</li>
-    <li><span class="k-teal"></span>event sealed</li>
-    <li><span class="k-red"></span>power cut</li>
-  </ul>
 </section>
 
-<!-- ----------------------------------------------------------- verdict --- -->
-<section class="section shell" id="verdict">
-  <h2 class="section-title">The verdict</h2>
-  <p class="section-lede">The recovery runs, then the invariant checker compares the result with the injected
-  ground truth. Events acquired before the cut must come back byte-identical; nothing may be invented; a
-  locked event must stay locked; the "complete file" flag must tell the truth; and running the recovery twice
-  must give the same table.</p>
-  <p class="card-figure" id="emu-verdict-headline">—</p>
-  <ul class="emu-verdict" id="emu-verdict"></ul>
-  <p class="emu-detail" id="emu-detail">—</p>
-  <p>Events already durable when the power died: <strong id="emu-acquired">—</strong></p>
+<!-- --------------------------------------------------------- honesty --- -->
+<section class="section shell" id="honesty">
+  <h2 class="section-title">What this page is, exactly</h2>
   <table class="data">
-    <caption>What the recovery reported (real counters, from the C module)</caption>
-    <tbody id="emu-recovery"></tbody>
-  </table>
-</section>
-
-<!-- ---------------------------------------------------------- blackbox --- -->
-<section class="section shell" id="blackbox">
-  <h2 class="section-title">What the black box holds</h2>
-  <p class="section-lede">Read back through the real read path (<code>ambre_journal_read_event()</code>, the one
-  <code>edrctl</code> uses). This is the regulatory payload: the pre-crash Class A points, the belt and airbag
-  states, and whether the file is complete.</p>
-  <div class="emu-grid-2" id="emu-events"></div>
-</section>
-
-<!-- -------------------------------------------------------------- disk --- -->
-<section class="section shell" id="disk">
-  <h2 class="section-title">The platter</h2>
-  <p class="section-lede">The journal is a raw partition: no file system, 512-byte blocks, an allocation table
-  in two alternating copies. Left: the image the cut left behind. Right: the same image after
-  <code>edr-journal</code> recovered it at boot.</p>
-  <div class="emu-canvas-wrap">
-    <canvas id="emu-disk-before" class="emu-canvas" role="img" aria-label="Block map of the journal image at the cut"></canvas>
-  </div>
-  <div class="emu-canvas-wrap">
-    <canvas id="emu-disk-after" class="emu-canvas" role="img" aria-label="Block map of the journal image after recovery"></canvas>
-  </div>
-  <ul class="emu-key">
-    <li><span class="k-dim"></span>Class B sample (DATA)</li>
-    <li><span class="k-red"></span>EMERG — the regulatory snapshot</li>
-    <li><span class="k-amber"></span>CONT — during-crash continuation</li>
-    <li><span class="k-green"></span>SEAL — end of event</li>
-    <li><span class="k-teal"></span>GAP — capture interruption</li>
-    <li><span class="k-red"></span>written but invalid (torn, flipped)</li>
-  </ul>
-</section>
-
-<!-- ------------------------------------------------------------- sweep --- -->
-<section class="section shell" id="sweep">
-  <h2 class="section-title">Explore every cut point</h2>
-  <p class="section-lede">The claim of the project is not that one lucky reboot survived. It is that
-  <em>every</em> reachable power-cut state survives. Run the whole state space of this drive in this tab:
-  the same generator, the same recovery, the same checker.</p>
-  <div class="emu-actions">
-    <select id="emu-sweep-mode" class="emu-select">
-      <option value="quick">2 000 states (a few seconds)</option>
-      <option value="full">every reachable state of this drive</option>
-    </select>
-    <button class="btn btn-primary" type="button" id="emu-sweep-run">Run the exploration</button>
-  </div>
-  <div class="emu-progress"><i id="emu-sweep-bar"></i></div>
-  <p class="emu-hint" id="emu-sweep-note">Not run yet.</p>
-  <table class="data">
-    <caption>Counters of the exploration running in this tab</caption>
-    <tbody id="emu-sweep-counters"></tbody>
-  </table>
-</section>
-
-<!-- ------------------------------------------------------------- proof --- -->
-<section class="section shell" id="proof">
-  <h2 class="section-title">Proof, and limits</h2>
-  <p class="section-lede">A demo in a browser is worth nothing if it is a re-implementation. This one is the
-  project's own code, and the equivalence is checked by machine.</p>
-  <table class="data">
-    <caption>Same exploration, run twice: the WebAssembly module of this page and the native binary</caption>
+    <caption>Every claim on this page, and where it comes from.</caption>
     <thead>
-      <tr><th scope="col">Counter</th><th scope="col" class="num">Browser (WebAssembly)</th><th scope="col" class="num">Native (<code>ambre-explore</code>)</th></tr>
+      <tr><th scope="col">What you see</th><th scope="col">Where it comes from</th></tr>
     </thead>
     <tbody>
-      <tr><th scope="row">states explored</th><td class="num">27 959</td><td class="num">27 959</td></tr>
-      <tr><th scope="row">violations</th><td class="num">0</td><td class="num">0</td></tr>
-      <tr><th scope="row">acquired-event observations</th><td class="num">72 099</td><td class="num">72 099</td></tr>
-      <tr><th scope="row">plain cuts / torn / cache / bit flip / table / nested</th>
-          <td class="num">2 347 / 7 168 / 9 056 / 2 347 / 4 694 / 2 347</td>
-          <td class="num">2 347 / 7 168 / 9 056 / 2 347 / 4 694 / 2 347</td></tr>
-      <tr><th scope="row">wall clock, one thread</th><td class="num">53.6 s</td><td class="num">50.3 s</td></tr>
+      <tr><th scope="row">The screen</th><td><code>screendump</code> on the QEMU monitor of the running guest — the VGA framebuffer, not a rendering</td></tr>
+      <tr><th scope="row">The console</th><td>the guest's serial port, byte for byte</td></tr>
+      <tr><th scope="row">The keys</th><td><code>sendkey</code> on the QEMU monitor: real keystrokes in the guest's VGA keyboard</td></tr>
+      <tr><th scope="row">The crash</th><td>driven by <code>edr-replay</code> inside the guest, from the scenario file that is in its image</td></tr>
+      <tr><th scope="row">The power cut</th><td>a <code>SIGKILL</code> on QEMU from the host: the guest's cache is gone</td></tr>
+      <tr><th scope="row">The recovery</th><td>the guest's own recovery code, on the same disk, after the reboot</td></tr>
     </tbody>
   </table>
-  <p>Reproduce it: <code>make all &amp;&amp; node scripts/web-conformance.mjs --states 0 --nested</code>.
-  The machine-checked result is committed in
-  <a href="https://github.com/Tradoooo/ambre/blob/main/docs/results/web-emulator-conformance.json">docs/results/web-emulator-conformance.json</a>;
-  it compares every counter and fails on a single difference.</p>
-  <p>The module loaded by this page: <code>site/assets/ambre-emu.js</code>, 154 615 bytes,
-  sha256 <code id="emu-sha256">—</code>. It is built by
-  <code>scripts/build-web.sh</code> (Emscripten) from the sources of the commit that published it; the
-  module verifies its own CRC-32C against the normative check value
-  <code>0xE3069283</code> before it shows anything.</p>
 
-  <p class="note note-honesty"><strong>What this page does not prove.</strong> The journal runs on the
-  simulated disk of the PC host, not on QNX 8.0 and not on real media: the timing figures of the
-  <a href="validation.html">validation page</a> come from the PC campaigns, and the QNX target itself stays
-  <code>BLOCKED(no QNX SDP)</code>. A browser tab is also not a real-time environment — the wall-clock numbers
-  above are only a cost of computing, never a latency claim.</p>
+  <div class="note note-honesty">
+    <p><strong>QEMU is emulation, not hardware.</strong> The operating system is really QNX 8.0 and the cut is
+    a real process-level cut, but the machine is <code>qemu-system-x86_64</code>, not an ECU: the latencies the
+    guest prints are emulator numbers and must not be read as target performance. Real hardware (a Raspberry
+    Pi 5, SD then NVMe) is still <code>BLOCKED</code>.</p>
+  </div>
 
-  <p class="note">The campaign of record remains the PC one: 1 379 264 power-cut states over 18 scenarios,
-  0 violations of I1..I8 — <a href="validation.html">see the validation page</a> for every figure and the
-  command that reproduces it.</p>
+  <p class="section-lede">There is a second, different tool on this site: the
+  <a href="explorer.html">explorer</a> runs the same recovery code compiled to WebAssembly <em>inside your
+  browser</em>, on the PC backend, and lets you cut the 12 V rail anywhere in the write stream. It is a tool, not
+  the target — this page is the target.</p>
 </section>
 
 </main>
@@ -305,12 +188,6 @@
   </div>
 </footer>
 
-<script src="assets/ambre-emu.js"></script>
-<script src="assets/emulator-draw.js"></script>
-<script src="assets/emu-play.js"></script>
-<script src="assets/emu-strip.js"></script>
-<script src="assets/emu-stage.js"></script>
-<script src="assets/emu-panels.js"></script>
-<script src="assets/emulator.js"></script>
+<script src="assets/live.js"></script>
 </body>
 </html>

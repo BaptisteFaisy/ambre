@@ -1,0 +1,114 @@
+/* ------------------------------------------------------------------ live ---
+   Feuille de la page « Emulator » (l'invité QNX 8.0 en direct).
+   Deuxième feuille autorisée pour cette page : la feuille principale
+   (assets/ambre.css) est proche de la limite de 500 lignes de la règle maison.
+
+   .live-stage   la grille : l'écran VGA à gauche, la console à droite
+   .live-screen  la capture VGA, rafraîchie en continu (flux multipart)
+   .live-console le journal série de l'invité
+   .live-bar     la rangée de boutons d'injection de touches
+   .live-status  l'état de l'invité (vivant, en boot, arrêté par la garde)
+-------------------------------------------------------------------------- */
+
+.live-stage {
+    display: grid;
+    grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
+    gap: 1rem;
+    margin: 1.5rem 0 0;
+}
+
+@media (max-width: 860px) {
+    .live-stage { grid-template-columns: 1fr; }
+}
+
+.live-screen {
+    margin: 0;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    overflow: hidden;
+    background: #0e1016;
+}
+
+.live-screen img {
+    display: block;
+    width: 100%;
+    height: auto;
+    min-height: 240px;
+}
+
+.live-screen figcaption {
+    padding: 0.55rem 0.8rem;
+    font-size: 0.85rem;
+    color: var(--ink-dim);
+    border-top: 1px solid var(--line);
+}
+
+.live-console {
+    margin: 0;
+    padding: 0.7rem 0.85rem;
+    background: var(--bg-card);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+    color: #c7e7c0;
+    height: 460px;
+    overflow: auto;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+
+.live-bar {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    margin: 0.8rem 0 0;
+    align-items: center;
+}
+
+.live-bar button {
+    background: #232a3c;
+    color: var(--ink);
+    border: 1px solid #38415a;
+    border-radius: 6px;
+    padding: 0.35rem 0.6rem;
+    font: inherit;
+    font-size: 0.9rem;
+    cursor: pointer;
+}
+
+.live-bar button:hover { background: #2d3852; }
+
+.live-bar input {
+    flex: 1;
+    min-width: 12rem;
+    background: #0e1016;
+    color: var(--ink);
+    border: 1px solid #38415a;
+    border-radius: 6px;
+    padding: 0.35rem 0.55rem;
+    font: 13px/1.3 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.live-bar input:focus { outline: 1px solid var(--teal); }
+
+.live-status {
+    margin: 0.9rem 0 0;
+    font-size: 0.9rem;
+    color: var(--ink-soft);
+}
+
+.live-status b { color: var(--ink); }
+
+.live-phase {
+    display: inline-block;
+    padding: 0.1rem 0.5rem;
+    border-radius: 999px;
+    font-size: 0.82rem;
+    border: 1px solid var(--line);
+    background: var(--bg-card);
+    color: var(--ink-soft);
+}
+
+.live-phase[data-state="live"] { color: var(--green); border-color: var(--green); }
+.live-phase[data-state="boot"] { color: var(--amber); border-color: var(--amber); }
+.live-phase[data-state="off"] { color: var(--red); border-color: var(--red); }

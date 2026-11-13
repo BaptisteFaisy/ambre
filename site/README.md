@@ -11,7 +11,9 @@ so what is in `site/` is exactly what is served.
 ```
 site/
 ├── index.html            the pitch, the problem, the three ideas, the proof
-├── emulator.html         the live emulator: cut the power in your browser
+├── emulator.html         THE emulator: a real QNX 8.0 guest under QEMU, live
+│                          (VGA screen, serial console, injected keys)
+├── explorer.html         the explorer in your browser (WebAssembly, PC backend)
 ├── on-target.html         the target demo: QNX 8.0 under QEMU, a real SIGKILL
 │                          power cut, and the event surviving the reboot
 ├── validation.html       every measured number, and everything not measured
@@ -19,8 +21,10 @@ site/
 ├── 404.html              served by Pages for any unknown path
 ├── report/index.html     a REAL expert report, generated (see below)
 ├── assets/ambre.css      the design system of every page
-├── assets/emulator.css   the emulator page only (house rule: < 500 lines/sheet)
-├── assets/emulator.js    drives the WebAssembly module (the only page with JS)
+├── assets/emulator.css   the explorer page only (house rule: < 500 lines/sheet)
+├── assets/emulator.js    drives the WebAssembly module (explorer page)
+├── assets/live.css       the live emulator page only
+├── assets/live.js        polls the guest's console, injects keys (emulator page)
 ├── assets/emulator-draw.js  canvas drawing: op trace and block maps
 ├── assets/ambre-emu.js   GENERATED: the explorer compiled to WebAssembly
 ├── assets/ambre-emu.js.sha256  GENERATED: checksum of the module above
@@ -40,9 +44,9 @@ The site opens offline and works with JavaScript disabled.
 1. Copy the skeleton from `_template.html`; do not invent a new header.
 2. Use the classes of `assets/ambre.css`; never add a `<style>` block or an
    inline `style=` attribute. If a class is missing, add it to the stylesheet.
-   The emulator page is the one exception allowed a second sheet
-   (`assets/emulator.css`), because the house rule caps every file at 500
-   lines and `ambre.css` is already close to it.
+   Two pages carry a second sheet, because the house rule caps every file at
+   500 lines and `ambre.css` is already close to it: `assets/emulator.css`
+   (explorer) and `assets/live.css` (live emulator).
 3. **No invented number.** Every figure must exist in `docs/CAMPAIGN.md`,
    `docs/CAMPAIGN-LATENCY.md`, `docs/results/` or in a report you just ran.
 4. Keep the honesty sections. Anything that needs the QNX target is labelled
@@ -75,11 +79,17 @@ output of `host/report/expert_report.py`, which is the point of publishing it.
 
 ## The emulator page
 
-`emulator.html` is the only page with JavaScript, and its JavaScript is not a
-model of the project: `assets/ambre-emu.js` is the explorer itself
+Two pages carry JavaScript, and neither is a model of the project.
+
+`explorer.html` runs `assets/ambre-emu.js`, which is the explorer itself
 (`fmt/`, `host/explore/`, `host/simdisk/`, plus the JSON API of `host/web/`)
-compiled to WebAssembly. The page feeds it a scenario, a cut point and a cut
-variant, and draws the answers.
+compiled to WebAssembly (PC backend, in your browser — not the target). The page
+feeds it a scenario, a cut point and a cut variant, and draws the answers.
+
+`emulator.html` is the live one: `assets/live.js` polls the serial console of the
+QNX 8.0 guest running on the r630, injects keys into it, and shows the guest's VGA
+screen as a plain `<img>` fed by a multipart stream. Its base URL is written in
+`assets/live.js` (`API`); if the vitrine moves, that constant moves with it.
 
 The two generated files are never hand-edited:
 

@@ -81,6 +81,8 @@
     }
 
     /* Les vraies mesures, lues dans ce que l'invité a écrit lui-même. */
+    var dernierLot = null;
+
     function majChiffres(texte) {
         var lignes = texte.split("\n");
         var status = null;
@@ -97,7 +99,11 @@
         }
         var perf = /mean (\d+) ns/.exec(texte);
         var verdict = /verdict: (.+)/.exec(texte);
-        majTableau(status, evenements, perf, verdict);
+        if (status) {
+            dernierLot = { status: status, evenements: evenements, perf: perf,
+                verdict: verdict, recu: Date.now() };
+        }
+        majTableau(dernierLot);
     }
 
     function champ(nom, valeur, note) {
@@ -107,17 +113,20 @@
             + "</div>";
     }
 
-    function majTableau(status, evenements, perf, verdict) {
+    function majTableau(lot) {
         var hote = el("live-chiffres");
         if (!hote) { return; }
-        if (!status) {
+        if (!lot) {
             hote.innerHTML = '<p class="live-note">Waiting for the guest to publish its '
                 + "measurements (they arrive with each cycle).</p>";
             return;
         }
+        var status = lot.status;
+        var evenements = lot.evenements;
+        var age = Math.round((Date.now() - lot.recu) / 1000);
         var html = "";
         html += champ("backend", status.backend, "the target, not the PC backend");
-        html += champ("health", status.health, "");
+        html += champ("health", status.health, "published by the guest " + age + " s ago");
         html += champ("events", status.sealed_events + " sealed / "
             + status.acquired_events + " acquired", "the crash and its triggers");
         html += champ("bytes written", status.bytes_written, "on the raw partition");
@@ -130,9 +139,9 @@
                 "locked=" + e.locked + " · file_complete=" + e.file_complete
                 + " · age " + e.age_ms + " ms");
         }
-        if (perf) {
-            html += champ("send round trip (PERF-05)", Math.round(perf[1] / 1000) + " µs mean",
-                verdict ? verdict[1].trim() : "");
+        if (lot.perf) {
+            html += champ("send round trip (PERF-05)", Math.round(lot.perf[1] / 1000) + " µs mean",
+                lot.verdict ? lot.verdict[1].trim() : "");
         }
         hote.innerHTML = html;
     }

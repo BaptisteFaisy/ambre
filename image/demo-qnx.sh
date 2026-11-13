@@ -29,6 +29,8 @@ JOURNAL=/dev/edr/journal
 DISK=/dev/hd0t177
 CTL=/proc/boot/edrctl
 LST=/dev/shmem/ambre_lst
+STF=/dev/shmem/ambre_st
+LSF=/dev/shmem/ambre_ls
 
 # The vitrine shows the VGA console: mirror every line there when the image
 # carries a VGA console. Without /dev/con1 (the serial-only image) the mirror
@@ -52,6 +54,24 @@ banner() {
 list_first() {
     $CTL --journal $JOURNAL list --json > "$LST" 2>/dev/null
     read LIST_LINE < "$LST"
+}
+
+# Publish this run's REAL figures, machine-readable, on the serial console.
+# They are the guest's own numbers (edrctl --json runs INSIDE the guest), not a
+# copy from elsewhere: the site's live page reads them from there.
+pub() {
+    $CTL --journal $JOURNAL status --json > "$STF" 2>/dev/null
+    read st < "$STF"
+    if [ -n "$st" ]; then
+        echo "AMBRE-STATUS $st"
+    fi
+    $CTL --journal $JOURNAL list --json > "$LSF" 2>/dev/null
+    while read ev; do
+        if [ -n "$ev" ]; then
+            echo "AMBRE-EVENT $ev"
+        fi
+    done < "$LSF"
+    echo "AMBRE-END"
 }
 
 # Wait until the journal answers, or give up after bounded round trips.
@@ -103,6 +123,7 @@ fi
 
 banner "2. edrctl status — the service answers"
 $CTL --journal $JOURNAL status
+pub
 
 list_first
 if [ -z "$LIST_LINE" ]; then
@@ -121,6 +142,7 @@ if [ -z "$LIST_LINE" ]; then
     say "acquired: $LIST_LINE"
     banner "5. edrctl status after the impact"
     $CTL --journal $JOURNAL status
+    pub
     banner "READY — the crash is on the media. The host now cuts the power (SIGKILL on QEMU)."
 else
     banner "3. AFTER THE POWER CUT — the journal recovered the partition at boot"
@@ -129,6 +151,7 @@ else
     say "recovered: $LIST_LINE"
     banner "4. edrctl status after the recovery"
     $CTL --journal $JOURNAL status
+    pub
     banner "THE EVENT SURVIVED THE POWER CUT"
 fi
 

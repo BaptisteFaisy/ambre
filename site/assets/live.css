@@ -128,3 +128,46 @@
     margin: 0;
     color: var(--ink-dim);
 }
+
+/* ------------------------------------------------------- les vrai chiffres --- */
+
+.live-chiffres {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 0.6rem;
+    margin: 1.25rem 0 0;
+}
+
+.live-fig {
+    background: var(--bg-card);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 0.6rem 0.75rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.15rem;
+}
+
+.live-fig-n {
+    font-size: 0.78rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--ink-dim);
+}
+
+.live-fig-v {
+    font-size: 1.15rem;
+    color: var(--ink);
+    font-family: var(--mono);
+}
+
+.live-fig-s {
+    font-size: 0.8rem;
+    color: var(--ink-soft);
+}
+
+.live-note {
+    margin: 0;
+    color: var(--ink-soft);
+    font-size: 0.92rem;
+}

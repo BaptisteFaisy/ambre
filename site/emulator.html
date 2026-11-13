@@ -69,6 +69,14 @@
   guest reboots and recovers — then it starts again. The buttons type into the guest: they are injected as real
   keystrokes (QEMU <code>sendkey</code>), so the answer appears on its screen, not here.</p>
 
+  <h3>The real figures, measured on the target</h3>
+  <p class="section-lede">The guest publishes its own measurements (<code>edrctl --json</code> run inside the
+  guest, on its serial console); the page reads them from there. One batch per cycle — these are the
+  target's numbers, not the PC backend's.</p>
+  <div class="live-chiffres" id="live-chiffres">
+    <p class="live-note">Waiting for the guest to publish its measurements…</p>
+  </div>
+
   <div class="live-stage">
     <figure class="live-screen">
       <img id="live-screen-img" src="https://r630-debian.tail3a8bdf.ts.net:8443/ambre/stream"

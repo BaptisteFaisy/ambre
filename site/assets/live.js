@@ -8,6 +8,15 @@
  * La capture de l'écran VGA passe par <img src="…/stream"> : un flux
  * multipart, donc aucune JavaScript pour l'image elle-même.
  *
+ * LES VRAIS CHIFFRES. L'invité publie lui-même ses mesures sur sa console
+ * série, en JSON lisible par une machine (edrctl --json exécuté DANS le
+ * guest) :
+ *   AMBRE-STATUS {…}  l'état du journal (événements, octets, flushs, freezes)
+ *   AMBRE-EVENT  {…}  un événement, un par ligne
+ *   AMBRE-END         fin d'un lot
+ * La page les relit et les affiche : ce sont les mesures de la cible, pas
+ * celles du backend PC.
+ *
  * DEUX BANCS, UN SEUL VISIBLE. Le premier est le serveur r630 ; s'il ne
  * répond pas (machine hors ligne, réseau coupé), la page bascule une fois sur
  * le banc du PC et le dit dans l'état. Elle ne bascule jamais en silence.
@@ -61,12 +70,69 @@
         demande(api() + "/console", "text")
             .then(function (t) {
                 var c = el("live-console");
-                if (!c) { return; }
-                if (t.length > CONSOLE_TAIL) { t = t.slice(-CONSOLE_TAIL); }
-                c.textContent = t;
-                c.scrollTop = c.scrollHeight;
+                if (c) {
+                    if (t.length > CONSOLE_TAIL) { t = t.slice(-CONSOLE_TAIL); }
+                    c.textContent = t;
+                    c.scrollTop = c.scrollHeight;
+                }
+                majChiffres(t);
             })
             .catch(function () { echec("console inaccessible"); });
+    }
+
+    /* Les vraies mesures, lues dans ce que l'invité a écrit lui-même. */
+    function majChiffres(texte) {
+        var lignes = texte.split("\n");
+        var status = null;
+        var evenements = [];
+        for (var i = 0; i < lignes.length; i += 1) {
+            var l = lignes[i].trim();
+            if (l.indexOf("AMBRE-STATUS ") === 0) {
+                try { status = JSON.parse(l.slice(13)); } catch (e) { status = null; }
+            } else if (l.indexOf("AMBRE-EVENT ") === 0) {
+                try { evenements.push(JSON.parse(l.slice(12))); } catch (e) { /* ligne tronquée */ }
+            }
+        }
+        var perf = /mean (\d+) ns/.exec(texte);
+        var verdict = /verdict: (.+)/.exec(texte);
+        majTableau(status, evenements, perf, verdict);
+    }
+
+    function champ(nom, valeur, note) {
+        return '<div class="live-fig"><span class="live-fig-n">' + nom + "</span>"
+            + '<span class="live-fig-v">' + valeur + "</span>"
+            + (note ? '<span class="live-fig-s">' + note + "</span>" : "")
+            + "</div>";
+    }
+
+    function majTableau(status, evenements, perf, verdict) {
+        var hote = el("live-chiffres");
+        if (!hote) { return; }
+        if (!status) {
+            hote.innerHTML = '<p class="live-note">Waiting for the guest to publish its '
+                + "measurements (they arrive with each cycle).</p>";
+            return;
+        }
+        var html = "";
+        html += champ("backend", status.backend, "the target, not the PC backend");
+        html += champ("health", status.health, "");
+        html += champ("events", status.sealed_events + " sealed / "
+            + status.acquired_events + " acquired", "the crash and its triggers");
+        html += champ("bytes written", status.bytes_written, "on the raw partition");
+        html += champ("flushes", status.flush_count, "durable writes");
+        html += champ("worst freeze", status.worst_freeze_us + " µs",
+            "last: " + status.last_freeze_us + " µs");
+        if (evenements.length) {
+            var e = evenements[0];
+            html += champ("event 1", e.state + " · " + e.trig_reason,
+                "locked=" + e.locked + " · file_complete=" + e.file_complete
+                + " · age " + e.age_ms + " ms");
+        }
+        if (perf) {
+            html += champ("send round trip (PERF-05)", Math.round(perf[1] / 1000) + " µs mean",
+                verdict ? verdict[1].trim() : "");
+        }
+        hote.innerHTML = html;
     }
 
     function majStats() {

@@ -88,6 +88,8 @@
         for (var i = 0; i < lignes.length; i += 1) {
             var l = lignes[i].trim();
             if (l.indexOf("AMBRE-STATUS ") === 0) {
+                /* Un nouveau lot : les événements qui suivent lui appartiennent. */
+                evenements = [];
                 try { status = JSON.parse(l.slice(13)); } catch (e) { status = null; }
             } else if (l.indexOf("AMBRE-EVENT ") === 0) {
                 try { evenements.push(JSON.parse(l.slice(12))); } catch (e) { /* ligne tronquée */ }

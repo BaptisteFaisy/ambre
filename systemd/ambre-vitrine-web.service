@@ -20,8 +20,8 @@ Environment=QNX_EMS_MON=/home/baptiste/Bureau/ambre/build/qnx-vitrine/mon.sock
 Environment=QNX_EMS_PPM=/home/baptiste/Bureau/ambre/build/qnx-vitrine/web-vga.ppm
 Environment=QNX_EMS_PORT=8093
 Environment=QNX_EMS_BASE=/ambre
-Environment=QNX_EMS_TITRE=Ambre EDR — live on QNX 8.0
-Environment=QNX_EMS_NOTE=invité QNX 8.0 sous QEMU — écran VGA en direct, console série, touches injectées
+Environment="QNX_EMS_TITRE=Ambre EDR — live on QNX 8.0"
+Environment="QNX_EMS_NOTE=invité QNX 8.0 sous QEMU — écran VGA en direct, console série, touches injectées"
 ExecStart=/usr/bin/python3 %h/Bureau/qnx-emu/web.py
 Restart=always
 RestartSec=5

@@ -66,22 +66,22 @@
 <section class="section" id="live">
   <div class="shell">
     <h2 class="section-title">Watch it live</h2>
-    <p class="section-lede">The same bench is running on the development machine <em>right now</em>: a
+    <p class="section-lede">The same bench is running on the <strong>r630 server</strong> <em>right now</em>: a
     QNX 8.0 guest under QEMU drives the crash, the host cuts the power (<code>SIGKILL</code>), the guest
     reboots and recovers — in a loop. The frame below is the guest's VGA console, captured straight
     through the QEMU monitor; the guest narrates the same story it writes to its serial transcript.</p>
     <figure class="live-frame">
-      <img src="https://baptiste-ms-7d18.tail3a8bdf.ts.net:8443/ambre/stream"
+      <img src="https://r630-debian.tail3a8bdf.ts.net:8091/ambre/stream"
            alt="The QNX 8.0 guest's VGA screen, captured live through the QEMU monitor">
     </figure>
     <p class="live-actions">
-      <a class="btn btn-primary" href="https://baptiste-ms-7d18.tail3a8bdf.ts.net:8443/ambre">Open the full live vitrine</a>
+      <a class="btn btn-primary" href="https://r630-debian.tail3a8bdf.ts.net:8091/ambre">Open the full live vitrine</a>
       <span class="note">serial console, and keys you can inject into the running guest</span>
     </p>
     <p class="note">The stream is served by <code>scripts/qnx-vitrine.sh</code> and the shared
-    <code>qnx-emu</code> HTTP vitrine (two <code>systemd</code> user units), exposed over HTTPS with
-    Tailscale Funnel. It is live only while that machine is up — the transcript below is the recorded
-    proof the page does not depend on.</p>
+    <code>qnx-emu</code> HTTP vitrine (two <code>systemd</code> user units on the r630), exposed over
+    HTTPS with Tailscale Funnel. It is live only while that server is up — the transcript below is the
+    recorded proof the page does not depend on.</p>
   </div>
 </section>
 
@@ -192,16 +192,18 @@ THE EVENT SURVIVED THE POWER CUT</pre>
 
 <section class="section" id="reproduce">
   <div class="shell">
-    <h2 class="section-title">Reproduce it on this machine</h2>
+    <h2 class="section-title">Reproduce it</h2>
     <pre class="code">source ~/qnx800/qnxsdp-env.sh        # the SDP 8.0 installed on the development machine
 make qnx                             # the five binaries, real qcc, -Werror
 # the boot image (kernel, ksh, the block stack, the five processes, the demo):
-scripts/qnx-vm.sh build-image        # mkifs image/qemu.build → build/qnx-vm/ifs.bin
-scripts/qnx-demo.sh                  # boot → crash → SIGKILL → reboot → verdict</pre>
-    <p class="note">The bench is <code>scripts/qnx-vm.sh</code> (start, run, powercut, stop) with the console
+scripts/qnx-vitrine.sh build         # mkifs image/vitrine.build → build/qnx-vitrine/ifs.bin
+scripts/qnx-vitrine.sh run           # the loop: boot → crash → SIGKILL → reboot → verdict</pre>
+    <p class="note">The bench is <code>scripts/qnx-vitrine.sh</code> (build + the loop) with the console
     helpers <code>qnx_console.py</code> and <code>qnx_bridge.py</code>. The journal disk is a 64 MiB raw
     file with one partition of type 177 and <code>cache=none</code>, so a flush reaches the host file and a
-    kill is an honest power cut.</p>
+    kill is an honest power cut. The live guest runs on the <strong>r630</strong> as two <code>systemd</code>
+    user units — <code>ambre-vitrine-qemu.service</code> (the loop) and <code>ambre-vitrine-web.service</code>
+    (the HTTP vitrine) — and the funnel exposes it under <code>/ambre</code>.</p>
   </div>
 </section>
 

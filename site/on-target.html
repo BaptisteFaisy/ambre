@@ -68,15 +68,18 @@
     <h2 class="section-title">Watch it live</h2>
     <p class="section-lede">The same bench is running on the development machine <em>right now</em>: a
     QNX 8.0 guest under QEMU drives the crash, the host cuts the power (<code>SIGKILL</code>), the guest
-    reboots and recovers — in a loop. The frame is the guest's VGA console captured through the QEMU
-    monitor; the side panel is its serial console. The buttons inject real keys into the running guest.</p>
-    <div class="live-frame">
-      <iframe src="https://baptiste-ms-7d18.tail3a8bdf.ts.net:8443/ambre"
-              title="Ambre EDR — live on QNX 8.0" loading="lazy"
-              referrerpolicy="no-referrer"></iframe>
-    </div>
-    <p class="note">The feed is served by <code>scripts/qnx-vitrine.sh</code> and the shared
-    <code>qnx-emu</code> HTTP vitrine (two <code>systemd</code> user units), and exposed over HTTPS with
+    reboots and recovers — in a loop. The frame below is the guest's VGA console, captured straight
+    through the QEMU monitor; the guest narrates the same story it writes to its serial transcript.</p>
+    <figure class="live-frame">
+      <img src="https://baptiste-ms-7d18.tail3a8bdf.ts.net:8443/ambre/stream"
+           alt="The QNX 8.0 guest's VGA screen, captured live through the QEMU monitor">
+    </figure>
+    <p class="live-actions">
+      <a class="btn btn-primary" href="https://baptiste-ms-7d18.tail3a8bdf.ts.net:8443/ambre">Open the full live vitrine</a>
+      <span class="note">serial console, and keys you can inject into the running guest</span>
+    </p>
+    <p class="note">The stream is served by <code>scripts/qnx-vitrine.sh</code> and the shared
+    <code>qnx-emu</code> HTTP vitrine (two <code>systemd</code> user units), exposed over HTTPS with
     Tailscale Funnel. It is live only while that machine is up — the transcript below is the recorded
     proof the page does not depend on.</p>
   </div>

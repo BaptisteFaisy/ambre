@@ -68,42 +68,49 @@
 
     function majConsole() {
         demande(api() + "/console", "text")
-            .then(function (t) {
+            .then(function (brut) {
+                majChiffres(brut);
                 var c = el("live-console");
-                if (c) {
-                    if (t.length > CONSOLE_TAIL) { t = t.slice(-CONSOLE_TAIL); }
-                    c.textContent = t;
-                    c.scrollTop = c.scrollHeight;
-                }
-                majChiffres(t);
+                if (!c) { return; }
+                /* Les marqueurs machine (AMBRE-*) sont consommés par le
+                   tableau de chiffres : on les retire de la transcription
+                   pour qu'elle reste lisible. */
+                var t = brut.split("\n").filter(function (l) {
+                    return l.indexOf("AMBRE-") !== 0;
+                }).join("\n");
+                if (t.length > CONSOLE_TAIL) { t = t.slice(-CONSOLE_TAIL); }
+                c.textContent = t;
+                c.scrollTop = c.scrollHeight;
             })
             .catch(function () { echec("console inaccessible"); });
     }
 
-    /* Les vraies mesures, lues dans ce que l'invité a écrit lui-même. */
-    var dernierLot = null;
+    /* Les vraies mesures, lues dans ce que l'invité a écrit lui-même.
+       - AMBRE-STATUS : l'état du journal, publié toutes les 2 s (temps réel)
+       - AMBRE-EVENT  : un événement, publié au moment où il compte
+       - AMBRE-END     : fin d'un lot d'événements */
+    var mesures = { status: null, statusRecu: 0, evenements: [], lot: [], lotRecu: 0 };
 
     function majChiffres(texte) {
         var lignes = texte.split("\n");
-        var status = null;
-        var evenements = [];
+        var lotCourant = mesures.lot;
+        mesures.texte = texte;
         for (var i = 0; i < lignes.length; i += 1) {
             var l = lignes[i].trim();
             if (l.indexOf("AMBRE-STATUS ") === 0) {
-                /* Un nouveau lot : les événements qui suivent lui appartiennent. */
-                evenements = [];
-                try { status = JSON.parse(l.slice(13)); } catch (e) { status = null; }
+                try {
+                    mesures.status = JSON.parse(l.slice(13));
+                    mesures.statusRecu = Date.now();
+                } catch (e) { /* ligne tronquée */ }
             } else if (l.indexOf("AMBRE-EVENT ") === 0) {
-                try { evenements.push(JSON.parse(l.slice(12))); } catch (e) { /* ligne tronquée */ }
+                try { lotCourant.push(JSON.parse(l.slice(12))); } catch (e) { /* ligne tronquée */ }
+            } else if (l === "AMBRE-END") {
+                mesures.lot = lotCourant;
+                mesures.lotRecu = Date.now();
+                lotCourant = [];
             }
         }
-        var perf = /mean (\d+) ns/.exec(texte);
-        var verdict = /verdict: (.+)/.exec(texte);
-        if (status) {
-            dernierLot = { status: status, evenements: evenements, perf: perf,
-                verdict: verdict, recu: Date.now() };
-        }
-        majTableau(dernierLot);
+        majTableau(mesures);
     }
 
     function champ(nom, valeur, note) {
@@ -113,35 +120,39 @@
             + "</div>";
     }
 
-    function majTableau(lot) {
+    function majTableau(m) {
         var hote = el("live-chiffres");
         if (!hote) { return; }
-        if (!lot) {
+        if (!m.status) {
             hote.innerHTML = '<p class="live-note">Waiting for the guest to publish its '
                 + "measurements (they arrive with each cycle).</p>";
             return;
         }
-        var status = lot.status;
-        var evenements = lot.evenements;
-        var age = Math.round((Date.now() - lot.recu) / 1000);
+        var status = m.status;
+        var age = Math.round((Date.now() - m.statusRecu) / 1000);
         var html = "";
         html += champ("backend", status.backend, "the target, not the PC backend");
         html += champ("health", status.health, "published by the guest " + age + " s ago");
+        html += champ("uptime", (status.uptime_ms / 1000).toFixed(1) + " s",
+            "the journal has been running for that long");
         html += champ("events", status.sealed_events + " sealed / "
             + status.acquired_events + " acquired", "the crash and its triggers");
         html += champ("bytes written", status.bytes_written, "on the raw partition");
         html += champ("flushes", status.flush_count, "durable writes");
         html += champ("worst freeze", status.worst_freeze_us + " µs",
             "last: " + status.last_freeze_us + " µs");
-        if (evenements.length) {
-            var e = evenements[0];
+        if (m.lot.length) {
+            var e = m.lot[0];
+            var ageLot = Math.round((Date.now() - m.lotRecu) / 1000);
             html += champ("event 1", e.state + " · " + e.trig_reason,
                 "locked=" + e.locked + " · file_complete=" + e.file_complete
-                + " · age " + e.age_ms + " ms");
+                + " · age " + e.age_ms + " ms · " + ageLot + " s ago");
         }
-        if (lot.perf) {
-            html += champ("send round trip (PERF-05)", Math.round(lot.perf[1] / 1000) + " µs mean",
-                lot.verdict ? lot.verdict[1].trim() : "");
+        var perf = /mean (\d+) ns/.exec(m.texte || "");
+        var verdict = /verdict: (.+)/.exec(m.texte || "");
+        if (perf) {
+            html += champ("send round trip (PERF-05)", Math.round(perf[1] / 1000) + " µs mean",
+                verdict ? verdict[1].trim() : "");
         }
         hote.innerHTML = html;
     }

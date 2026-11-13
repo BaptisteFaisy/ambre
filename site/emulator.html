@@ -71,8 +71,9 @@
 
   <h3>The real figures, measured on the target</h3>
   <p class="section-lede">The guest publishes its own measurements (<code>edrctl --json</code> run inside the
-  guest, on its serial console); the page reads them from there. One batch per cycle — these are the
-  target's numbers, not the PC backend's.</p>
+  guest, on its serial console) and the page reads them from there: its state every <strong>2 s</strong>,
+  its events at the moment they happen. These are the target's numbers, not the PC backend's — and the
+  console panel below shows the guest's own words, the machine markers aside.</p>
   <div class="live-chiffres" id="live-chiffres">
     <p class="live-note">Waiting for the guest to publish its measurements…</p>
   </div>

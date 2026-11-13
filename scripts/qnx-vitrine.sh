@@ -29,6 +29,19 @@ mkdir -p "$VM"
 
 mark() { printf '\n=== %s — %s ===\n' "$(date +%H:%M:%S)" "$*" >> "$LOG"; }
 
+# The QEMU is started with setsid, so it survives our own death: a restart
+# used to leave an orphan holding the journal disk, and the next guest then
+# failed to open it ("the journal did not answer"). On exit we kill the one
+# we started.
+kill_qemu() {
+    if [ -f "$VM/qemu.pid" ]; then
+        kill -9 "$(cat "$VM/qemu.pid")" 2>/dev/null
+    fi
+}
+
+trap 'kill_qemu; exit 0' TERM INT
+trap 'kill_qemu' EXIT
+
 # Kill any QEMU still holding the vitrine journal (its write lock would stop
 # the next boot). Matched on /proc, never on a command-line pattern, so this
 # script never matches itself.

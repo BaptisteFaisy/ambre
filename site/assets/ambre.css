@@ -441,21 +441,6 @@ pre.code code { background: none; border: 0; padding: 0; }
 
 /* ---------------------------------------------------------------- live --- */
 
-.live-frame {
-    border: 1px solid var(--line);
-    border-radius: 8px;
-    overflow: hidden;
-    background: #0e1016;
-    margin: 1.5rem 0 0.75rem;
-}
-
-.live-frame img {
-    display: block;
-    width: 100%;
-    height: auto;
-    min-height: 240px;
-}
-
 .live-actions {
     display: flex;
     flex-wrap: wrap;

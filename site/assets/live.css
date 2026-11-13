@@ -112,3 +112,19 @@
 .live-phase[data-state="live"] { color: var(--green); border-color: var(--green); }
 .live-phase[data-state="boot"] { color: var(--amber); border-color: var(--amber); }
 .live-phase[data-state="off"] { color: var(--red); border-color: var(--red); }
+
+.live-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+    align-items: baseline;
+    margin: 0 0 1rem;
+}
+
+.live-actions .note {
+    border: 0;
+    background: none;
+    padding: 0;
+    margin: 0;
+    color: var(--ink-dim);
+}

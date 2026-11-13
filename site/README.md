@@ -44,9 +44,9 @@ The site opens offline and works with JavaScript disabled.
 1. Copy the skeleton from `_template.html`; do not invent a new header.
 2. Use the classes of `assets/ambre.css`; never add a `<style>` block or an
    inline `style=` attribute. If a class is missing, add it to the stylesheet.
-   Two pages carry a second sheet, because the house rule caps every file at
-   500 lines and `ambre.css` is already close to it: `assets/emulator.css`
-   (explorer) and `assets/live.css` (live emulator).
+   Some pages carry a second sheet, because the house rule caps every file
+   at 500 lines and `ambre.css` is already close to it: `assets/emulator.css`
+   (explorer) and `assets/live.css` (the pages that talk to the live vitrine).
 3. **No invented number.** Every figure must exist in `docs/CAMPAIGN.md`,
    `docs/CAMPAIGN-LATENCY.md`, `docs/results/` or in a report you just ran.
 4. Keep the honesty sections. Anything that needs the QNX target is labelled

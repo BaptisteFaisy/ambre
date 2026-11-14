@@ -135,8 +135,20 @@
         html += champ("health", status.health, "published by the guest " + age + " s ago");
         html += champ("uptime", (status.uptime_ms / 1000).toFixed(1) + " s",
             "the journal has been running for that long");
-        html += champ("events", status.sealed_events + " sealed / "
-            + status.acquired_events + " acquired", "the crash and its triggers");
+        // Les compteurs du statut sont PAR AMORÇAGE : `sealed_events` ne
+        // s'incrémente que quand le journal scelle lui-même (fmt/
+        // ambre_journal_event.c), pas quand la récupération relit une table
+        // déjà scellée. Après une coupure d'alimentation, le guest publie donc
+        // « 0 sealed / 0 acquired » alors que le média tient huit événements —
+        // ce que la liste publiée juste après montre, elle. On affiche le
+        // nombre que le média TIENT, et la note dit lequel des deux c'est :
+        // rien n'est inventé, rien n'est caché.
+        var surMedia = Math.max(status.sealed_events, m.lot.length);
+        html += champ("events", surMedia + " on the medium ("
+            + status.sealed_events + " sealed this boot)",
+            surMedia === status.sealed_events
+                ? "the crash and its triggers"
+                : "recovered after the power cut — the counters restart at each boot");
         html += champ("bytes written", status.bytes_written, "on the raw partition");
         html += champ("flushes", status.flush_count, "durable writes");
         html += champ("worst freeze", status.worst_freeze_us + " µs",

@@ -330,8 +330,10 @@
       <a href="on-target.html">target demo</a>. The live figures of the running target are published
       on the <a href="emulator.html">emulator page</a> — measured inside the guest, not copied from here.
       What remains below is what the target run did not yet
-      cover: the <code>/dev/edr</code> resource manager, the kernel trace, the security-policy
-      enforcement, the 200-cut campaign, and the real hardware.
+      cover: the kernel trace, the security-policy enforcement by the kernel, the latencies measured as a
+      campaign on the target, and the real hardware. The <code>/dev/edr</code> resource manager and the
+      power-cut campaign are now covered too — the four devctls answer from a real client, and the
+      level-2 campaign judges every cycle.
     </p>
     <table class="data">
       <caption>Blocked items and what would unblock them.</caption>
@@ -339,9 +341,9 @@
         <tr><th scope="col">Blocked</th><th scope="col">Requirement</th><th scope="col">Needs</th></tr>
       </thead>
       <tbody>
-        <tr><td>Resource manager serving <code>/dev/edr</code> at runtime</td><td>QNX-01, QNX-03, EXP-08</td><td rowspan="6"><code>partially demonstrated</code> — the raw journal, the recovery, the capture→trigger→acquired path and one real power cut run on QNX 8.0 under QEMU (<a href="on-target.html">target demo</a>); the <code>/dev/edr</code> resource manager, the kernel trace and secpol enforcement are still to wire</td></tr>
+        <tr><td>Resource manager serving <code>/dev/edr</code> at runtime</td><td>QNX-01, QNX-03, EXP-08</td><td rowspan="6"><code>demonstrated on target</code> — the raw journal, the recovery, the capture→trigger→acquired path, the <code>/dev/edr</code> resource manager (a real <code>devctl()</code> client renders the same values as the IPC transport), and real power cuts judged cycle by cycle, run on QNX 8.0 under QEMU (<a href="on-target.html">target demo</a>). Still open: the kernel trace and the secpol enforcement</td></tr>
         <tr><td>Flush order reaching a real virtual disk (essay E1)</td><td>§10 E1, GEL-02</td></tr>
-        <tr><td>QEMU kill/restart cycle under 10 s (essay E3), 200 → 2 000 real cuts</td><td>§7.4, §13</td></tr>
+        <tr><td>QEMU kill/restart cycle under 10 s (essay E3), 200 → 2 000 real cuts</td><td>§7.4, §13</td><td><span class="ok">E3 measured on target</span> — 8.04 s mean, 8.44 s max, per cycle; the 2 000-cut sweep and the volatile-cache variant remain</td></tr>
         <tr><td>Kernel trace showing the disk driver at the journal's priority</td><td>QNX-02, PERF-07</td></tr>
         <tr><td>Security policy enforced by the kernel: an intruder refused</td><td>SEC-01, §13 complet</td></tr>
         <tr><td>Freeze deadline and boot time on target</td><td>PERF-02, PERF-04 (10 000), PERF-06</td></tr>

@@ -50,7 +50,7 @@ The site opens offline and works with JavaScript disabled.
 3. **No invented number.** Every figure must exist in `docs/CAMPAIGN.md`,
    `docs/CAMPAIGN-LATENCY.md`, `docs/results/` or in a report you just ran.
 4. Keep the honesty sections. Anything that needs the QNX target is labelled
-   `BLOCKED(no QNX SDP)`; the one requirement that fails (PERF-05) is shown as
+   `BLOCKED(not measured on target yet)`; the one requirement that fails (PERF-05) is shown as
    failed, with its measured cause. The project is "aligned with UN Regulation
    No. 160", never "compliant" or "certified".
 5. Keep each file under 500 lines (house rule).

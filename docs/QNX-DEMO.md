@@ -25,6 +25,7 @@ suivent sont mesurées, pas déduites.
 | **l'archive écrit sur un SECOND média** (STO-07) | partition FAT32 (`/dev/hd1t12`) montée sur `/arch` ; `edr-archive --once` y pose `event-000001-000001.mcap` |
 | **ce MCAP est vérifiable hors du guest** | extrait de l'image brute côté hôte, puis `host/verify/edr_verify.py` : 10 des 11 vérifications passent (la onzième ci-dessous) |
 | **la campagne de coupures niveau 2 tourne et se juge** | `host/qnx/campaign.py` → `build/qnx-campaign/campaign.json`, un verdict par cycle, I1..I8 jugés sur ce que le journal rend |
+| **le gel trigger→acquis est mesuré par le guest lui-même** | `last_freeze_us` / `worst_freeze_us` dans le devctl STATUS : la démo live lit **2 617 µs / 2 834 µs** par amorçage, sur le disque IDE émulé (`cache=none`, hôte chargé). Une observation par amorçage, pas une campagne : ni percentile, ni charge, ni matériel de référence |
 
 ## 2. Le banc, en un commande
 

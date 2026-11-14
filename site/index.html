@@ -397,8 +397,12 @@
       2026-11-12, and the five processes compile with the real <code>qcc</code>. They boot in a QNX 8.0
       image under QEMU, record a real crash onto a raw partition, and the event survives a real
       <code>SIGKILL</code> power cut and the reboot — see the <a href="on-target.html">target demo page</a>.
-      What remains <code>BLOCKED</code> on target is the resource manager serving <code>/dev/edr</code>, the
-      kernel trace, the security-policy enforcement, and the 200-cut campaign; real hardware stays a
+      Since then the <code>/dev/edr</code> resource manager answers its four <code>devctl()</code> from a
+      real client — rendering the same values as the IPC transport — the service access control refuses a
+      producer with <code>EACCES</code>, the archive writes an MCAP on a second medium that is checked
+      outside the guest, and the power-cut campaign judges every cycle (24/24 <code>ok</code>).
+      What remains <code>BLOCKED</code> on target is the kernel trace, the security-policy enforcement by
+      the kernel, the latencies measured as a campaign, and the 2 000-cut sweep; real hardware stays a
       separate, still-blocked question.</p>
     </div>
 

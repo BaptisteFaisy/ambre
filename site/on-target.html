@@ -84,8 +84,9 @@
 <section class="section" id="what">
   <div class="shell">
     <h2 class="section-title">What was proven, and what that means</h2>
-    <p class="section-lede">This is the first time the project has run on the target operating system, and it
-    closes the <code>BLOCKED(no QNX SDP)</code> gate that had kept every runtime claim on the PC backend.</p>
+    <p class="section-lede">The project runs on the target operating system: the SDP 8.0 is installed, the image
+    boots, and the chain executes in the guest. What follows is what that run demonstrates — and, below, what
+    it still does not.</p>
 
     <table class="data">
       <caption>What the target run demonstrates, item by item.</caption>
@@ -100,6 +101,10 @@
         <tr><th scope="row">A real power cut</th><td><span class="ok">yes</span> — <code>kill -9</code> on QEMU: the guest's volatile cache is gone</td></tr>
         <tr><th scope="row">The event survives the reboot</th><td><span class="ok">yes</span> — recovery (REP-01) reads the table, the events come back sealed and locked</td></tr>
         <tr><th scope="row">Frame send cost on target (essay E4 / PERF-05)</th><td><span class="fail">measured, not met</span> — mean ~636 µs, p99 over the 50 µs requirement (QEMU timing, see below)</td></tr>
+        <tr><th scope="row">The resource manager <code>/dev/edr</code> answers <code>devctl()</code></th><td><span class="ok">yes</span> — a real client (<code>devctl_probe</code>) drives <code>STATUS</code>, <code>LIST</code>, <code>EXPORT</code> and <code>AUTOTEST</code>, and renders the <em>same values</em> as the IPC transport on the same journal. The codes are QNX-encoded: the bare project numbers encoded a size of 0, and the kernel copied nothing back</td></tr>
+        <tr><th scope="row">The service access control on target (SEC-01)</th><td><span class="ok">yes</span> — the service peer (gid 4) is served, a producer (gid 3) gets <code>EACCES</code>: refused by the kernel credentials, not by a unit test</td></tr>
+        <tr><th scope="row">The archive on a second medium (STO-07)</th><td><span class="ok">yes</span> — a FAT32 partition mounted on <code>/arch</code>, <code>edr-archive</code> writes the MCAP there, and the file is read back <em>outside</em> the guest and checked by the project's own verifier (10 of 11 checks)</td></tr>
+        <tr><th scope="row">Real power cuts, judged one by one</th><td><span class="ok">yes</span> — the level-2 campaign drives the guest, cuts the power, reboots and judges what the journal renders: 24/24 cycles <code>ok</code> at cut offsets 0–120 ms after the acquisition, 8.04 s per cycle</td></tr>
       </tbody>
     </table>
 
@@ -112,10 +117,12 @@
 
     <div class="note note-honesty">
       <p><strong>Still not demonstrated on target</strong>, and still labelled <code>BLOCKED</code> in the
-      repository: the resource manager serving <code>/dev/edr</code> at runtime (the demo journal publishes
-      its service with <code>name_attach()</code>, not the resmgr — that wiring is the stated
-      <code>TODO(target)</code>), the kernel trace, the security-policy enforcement by the kernel, and the
-      200-cut campaign (one cut is demonstrated end to end, not two hundred).</p>
+      repository: the <em>application</em> of the security policy by the kernel (the policy now compiles —
+      <code>make secpol</code>, no warning — but pushing it into this image breaks the boot whatever rules
+      the launcher type is given; the remedy is to boot the base through <code>slm</code> and type every
+      service), the kernel trace and the priorities it would show, the latencies measured as a campaign on the
+      target, the supervision by HAM, the product image assembled by <code>mkqnximage</code>, and the
+      2000-cut sweep and the volatile-cache variant.</p>
     </div>
   </div>
 </section>

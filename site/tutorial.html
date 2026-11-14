@@ -451,10 +451,12 @@ PASSED: 71 checks, 0 failures</code></pre>
         against stub headers: no typo, no wrong prototype, no wrong struct field. It produces objects only, never
         links them, and proves nothing about QNX scheduling, drivers, the kernel or the security policy at
         runtime.</p>
-        <p><strong>No QNX SDP 8.0 was available</strong> on the development machine or the build server, and none
-        could be obtained: no image was built, nothing was booted, no kernel trace was taken, no target latency
-        was measured. Every figure on this page carries <code>backend=posix</code>. The full statement — what each
-        build proves and what it does not — is in
+        <p><strong>Every figure on this page carries <code>backend=posix</code></strong>: it comes from the PC
+        campaigns, on a simulated disk. The QNX 8.0 target does run — the SDP is installed, the image boots and the
+        chain executes in the guest — but its latencies, its kernel trace and the application of the security
+        policy are <em>not</em> measured yet, and nothing on this page may be read as a target number. The full
+        statement — what each build proves and what it does not — is in
+        <a href="https://github.com/Tradoooo/ambre/blob/main/docs/QNX-DEMO.md">docs/QNX-DEMO.md</a> and
         <a href="https://github.com/Tradoooo/ambre/blob/main/docs/QNX-PORT.md">docs/QNX-PORT.md</a>.</p>
         <p><strong>Killing a process is not a power cut.</strong> A <code>SIGKILL</code> does not lose the writes
         already handed to the host kernel, so the POSIX bench exercises the order and the interruption of writes

@@ -104,7 +104,7 @@
         <tr><th scope="row">The resource manager <code>/dev/edr</code> answers <code>devctl()</code></th><td><span class="ok">yes</span> — a real client (<code>devctl_probe</code>) drives <code>STATUS</code>, <code>LIST</code>, <code>EXPORT</code> and <code>AUTOTEST</code>, and renders the <em>same values</em> as the IPC transport on the same journal. The codes are QNX-encoded: the bare project numbers encoded a size of 0, and the kernel copied nothing back</td></tr>
         <tr><th scope="row">The service access control on target (SEC-01)</th><td><span class="ok">yes</span> — the service peer (gid 4) is served, a producer (gid 3) gets <code>EACCES</code>: refused by the kernel credentials, not by a unit test</td></tr>
         <tr><th scope="row">The archive on a second medium (STO-07)</th><td><span class="ok">yes</span> — a FAT32 partition mounted on <code>/arch</code>, <code>edr-archive</code> writes the MCAP there, and the file is read back <em>outside</em> the guest and checked by the project's own verifier (10 of 11 checks)</td></tr>
-        <tr><th scope="row">Real power cuts, judged one by one</th><td><span class="ok">yes</span> — the level-2 campaign drives the guest, cuts the power, reboots and judges what the journal renders: 24/24 cycles <code>ok</code> at cut offsets 0–120 ms after the acquisition, 8.04 s per cycle</td></tr>
+        <tr><th scope="row">Real power cuts, judged one by one</th><td><span class="ok">yes</span> — the level-2 campaign drives the guest, cuts the power, reboots and judges what the journal renders: <strong>200/200 cycles <code>ok</code></strong> at cut offsets 0–120 ms after the acquisition, 7.97 s per cycle — the §7.4 socle threshold, met on the target</td></tr>
       </tbody>
     </table>
 

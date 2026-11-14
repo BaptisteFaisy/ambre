@@ -186,7 +186,14 @@ main() {
         printf 'IMAGE CHECK FAILED (%d error(s))\n' "$FAILS" >&2
         exit 1
     fi
-    echo "IMAGE CHECK PASSED (static PC checks OK; target build/boot UNVERIFIED without QNX SDP 8.0)"
+    # Ce script juge l'image PRODUIT (image/ambre.build) SANS l'assembler : ce
+    # qu'il prouve est donc la cohérence interne (processus, priorités, politique,
+    # partitions), pas un démarrage. Le distingo importe, parce que l'image de
+    # DÉMO, elle, est assemblée et amorcée pour de vrai : `mkifs` sur
+    # image/vitrine.build puis QEMU, avec les cinq processus qui enregistrent un
+    # choc sur un média brut et le récupèrent après une coupure
+    # (docs/QNX-DEMO.md). Rien ici ne doit être lu comme l'un ou l'autre.
+    echo "IMAGE CHECK PASSED (statique sur l'image PRODUIT; l'image de démo, elle, est assemblée par mkifs et amorcée sous QEMU — docs/QNX-DEMO.md)"
     exit 0
 }
 

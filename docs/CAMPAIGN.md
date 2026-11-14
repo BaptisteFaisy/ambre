@@ -20,7 +20,7 @@ per row (see `docs/QNX-DEMO.md` §4).
 | Level 1 | cut states explored, 0 violations (§7.7 socle 10 000 / complet 1 000 000) | exhaustive | **64 591 states = every reachable state**, 46 390 acquisitions observed, **0 violations of I1..I8** | `make explore-full` |
 | Level 1 | socle threshold (10 000 states) | 10 000, 0 violations | **10 000 states, 0 violations, 29.3 s** (342 states/s) | `make explore` |
 | Level 2 | process cuts, POSIX bench (§7.6, 500 complet) | 500 | **500 of 500 run in the week-5 close-out** (`build-close/processcut/report-500.json`, 22:58): 500 cuts, 0 errors, 498 `ok` + **2 `inconsistent_state` (I7)** published **unresolved** with their artefacts and qualified in `docs/VALIDATION.md` §3 (seal written by the live journal before the kill — `seal_cause=NORMAL` — window-classification race of the bench, not data loss). The earlier 200-cut run stands as published (0 violations, 1 `check_failed`, 2 upstream findings) | `make BUILD=build-close processcut E2E_CYCLES=500`; artefacts `build-close/processcut/report-500.json`, `build-e2e/processcut/report-200.json` |
-| Level 2 | QEMU cuts on the **real QNX 8.0 target** (§7.4, 200 socle) | 200 | **24/24 measured on target** (`build/qnx-campaign/campaign.json`, 2026-11-14): 24 cycles at cut offsets 0/5/10/20/50/120 ms after the acquisition, every verdict `ok` — the events acquired before the cut are all present after it, identical (`event_id`, `trig_ts_us`, `seq_emerg`), sealed, locked, complete; 0 phantom, 0 loss; 8.04 s per cycle (max 8.44 s). The 200-cut socle threshold and the 2 000-cut sweep are not run yet | `python3 host/qnx/campaign.py --cycles 200 --cut-ms 0,5,10,20,50,120` |
+| Level 2 | QEMU cuts on the **real QNX 8.0 target** (§7.4, 200 socle) | 200 | **200/200 measured on target — the socle threshold is MET** (`docs/results/qnx-powercut-200.json`, 2026-11-14): 200 cycles at cut offsets 0/5/10/20/50/120 ms after the acquisition, every verdict `ok`; 0 phantom, 0 loss; 5, 6 or 8 events per cycle depending on how many the drive had acquired when the cut landed; 7.97 s per cycle (median 7.90, max 9.32). The 2 000-cut sweep is not run | `python3 host/qnx/campaign.py --cycles 2000 --cut-ms <sweep>` |
 | DEC-12 | C trigger = Python twin, byte-identical | 10 000 scenarios | **10 000 scenarios, 2 744 840 decision lines compared, 0 divergences** | `make crosscheck` |
 | §12.10 | line coverage of `fmt/` | > 95 % | **98.40 %** (1 349 / 1 371 lines) | `BUILD=build-doc-cov2 sh scripts/coverage.sh` |
 | §12.10 | random-data testing | 24 h | smoke only: **52 hostile images, 0 violations, 5.0 s** (seed 20261111); the 24 h soak is `BLOCKED(wall-clock: 24 h of exclusive machine time — the 5 s smoke is what fits a session)` | `make fuzz` (smoke); soak: `./build/ambre-fuzz --hours 24 --jobs 8 --report build/fuzz-24h.json` |
@@ -196,7 +196,7 @@ are the difference between a claim and a measurement:
   and the interruption of writes and the whole recovery path — not the loss of a
   volatile cache (see §10).
 
-**QEMU cuts on the real target (`host/qnx/campaign.py`)** — **24 cycles, all
+**QEMU cuts on the real target (`host/qnx/campaign.py`)** — **200 cycles, all
 `ok`** (2026-11-14): the chain drives, acquires, the power cut is a `SIGKILL`
 on QEMU, the next boot runs REP-01, and the journal renders what survived.
 The verdict is judged on what the journal REND (invariants I1..I8 applied to

@@ -41,6 +41,15 @@ ANCHOR_STACK = "    waitfor /dev/hd0 10"
 
 # Le montage du média d'archive (STO-07) : second disque FAT32, monté après le
 # block stack, sur le répertoire /arch créé dans l'IFS.
+#
+# QNX nomme un nœud de partition d'après l'OCTET DE TYPE MBR, en DÉCIMAL : une
+# partition FAT32 (0x0C) est donc /dev/hd1t12, et NON /dev/hd1t177 — ce dernier
+# est le nœud de la partition QNX6 (0xB1) du média d'archive PRODUIT
+# (image/ambre.build). Mesuré sur le banc 2026-11-14 : monter hd1t177 sur une
+# partition 0x0C ne donne rien, l'archive n'a pas de support et écrit dans le
+# répertoire de l'IFS, non inscriptible (dr-xr-xr-x). Le FAT est un choix de
+# BANC : c'est ce qui permet de relire les MCAP côté hôte sans rien monter ni
+# aucun privilège ; un média QNX6 serait illisible ici.
 ARCHIVE_SETUP = (
     "    waitfor /dev/hd1t12 10\n"
     # Le type du module est `dos`, pas `msdos` : la page SDP de fs-dos.so donne

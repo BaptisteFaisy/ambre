@@ -196,6 +196,15 @@ diagnose.sh
 scenario.txt
 name_probe
 
+# --- les deux sondes du banc, embarquées dans la vitrine ----------------------
+# devctl_probe : un VRAI client devctl() du journal (QNX-01, QNX-03, OBS-02,
+# EXP-01, EXP-08). La démo ne parloit au service que par name_open()/IPC : les
+# quatre devctl étoient compilés sans jamais être exercés sur un noyau QNX.
+# secpol_probe : la sonde d'intrusion de la politique (SEC-01, SEC-02, SEC-03,
+# VIE-03) — elle dit ce que le noyau refuse, et ce qu'il ne refuse pas.
+devctl_probe
+secpol_probe
+
 # --- a few applets, so the keys injected from the page are useful -----------
 # QNX 8.0 has no coreutils: toybox is a multi-applet binary and each applet
 # is a link placed AT THE ROOT of the IFS (/proc/boot), which is the PATH.

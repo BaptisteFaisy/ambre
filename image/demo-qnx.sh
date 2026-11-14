@@ -158,6 +158,20 @@ if [ -z "$LIST_LINE" ]; then
     say "acquired: $LIST_LINE"
     banner "5. edrctl status after the impact"
     $CTL --journal $JOURNAL status
+    banner "6. devctl_probe — the SAME journal, reached by devctl() and not by IPC"
+    # Le service a deux visages sur la cible : l'IPC (name_open/MsgSend, ce que
+    # edrctl utilise) et le resource manager /dev/edr (open/devctl). Les chiffres
+    # ci-dessous sortent du devctl : ils doivent être les MÊMES, et c'est la
+    # preuve que les deux voies décrivent le même journal (docs/QNX-ABI.md §3).
+    # Le gid porte le TYPE DE PAIR que la matrice du service vérifie : 4 =
+    # SERVICE (droit de lire le statut et les événements), 3 = PRODUCTEUR (droit
+    # d'écrire l'entrée de capture, rien d'autre). Les deux appels ci-dessous
+    # sont le MÊME devctl du MÊME service : l'un passe, l'autre rend EACCES —
+    # c'est la démonstration de SEC-01 sur le noyau, pas dans un test unitaire.
+    on -u 0:4 /proc/boot/devctl_probe --journal /dev/edr status
+    on -u 0:4 /proc/boot/devctl_probe --journal /dev/edr list
+    say "-- the same devctl, asked by a producer (gid 3): the service refuses (SEC-01)"
+    on -u 0:3 /proc/boot/devctl_probe --journal /dev/edr status
     pub_events
     banner "READY — the crash is on the media. The host now cuts the power (SIGKILL on QEMU)."
 else

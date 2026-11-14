@@ -37,9 +37,16 @@ BEGIN, END = "AMBRE-BEGIN", "AMBRE-END"
 class Target:
     """Une machine QNX 8.0 : démarrée, commandée, coupée, jamais orpheline."""
 
-    def __init__(self, workdir, archive=True, vga=True, mem_mb=1024, cpus=2):
+    def __init__(self, workdir, archive=True, vga=True, mem_mb=1024, cpus=2,
+                 shell=True):
         self.workdir = workdir
         self.archive = archive
+        # shell=True : la seconde ligne série est un SOCKET et l'hôte y envoie
+        # des commandes. shell=False (la démo narrée) : c'est un FICHIER, comme
+        # dans scripts/qnx-vitrine.sh — un chardev socket sans client fait
+        # PERDRE la sortie, et la démo écrivoit dans le vide.
+        self.shell = shell
+        self.demo_log = os.path.join(workdir, "demo-console.log")
         self.vga = vga
         self.mem_mb, self.cpus = mem_mb, cpus
         self.ifs = os.path.join(workdir, "ifs.bin")
@@ -68,12 +75,18 @@ class Target:
                  # — et on se retrouve avec un banc « muet » sans aucune trace.
                  "-chardev", "file,id=s0,path=%s,append=on" % self.log,
                  "-serial", "chardev:s0",
-                 # Le port du BENCH (0x2f8 = /dev/ser2) est un socket : bidirectionnel,
-                 # l'hôte y envoie les commandes et relit la sortie.
-                 "-chardev", "socket,id=s1,path=%s,server=on,wait=off" % self.shell_sock,
-                 "-serial", "chardev:s1",
                  "-monitor", "unix:%s,server,nowait" % self.mon,
                  "-pidfile", os.path.join(self.workdir, "qemu.pid")]
+        # Le port du BENCH (0x2f8 = /dev/ser2) : un socket quand l'hôte pilote la
+        # cible, un fichier quand la démo narrée y écrit seule — un chardev socket
+        # sans client fait PERDRE la sortie, et la démo écrivoit dans le vide.
+        if self.shell:
+            argv += ["-chardev",
+                     "socket,id=s1,path=%s,server=on,wait=off" % self.shell_sock,
+                     "-serial", "chardev:s1"]
+        else:
+            argv += ["-chardev", "file,id=s1,path=%s,append=on" % self.demo_log,
+                     "-serial", "chardev:s1"]
         return argv
 
     def boot(self, timeout_s=90.0):
@@ -87,6 +100,8 @@ class Target:
         with open(os.path.join(self.workdir, "qemu.log"), "a") as err:
             self.proc = subprocess.Popen(self.qemu_argv(), stdout=err, stderr=err)
         self.boot_s = time.monotonic() - started
+        if not self.shell:
+            return self.boot_s
         if not self.wait_shell(timeout_s):
             raise BenchError("shell de bench muet après %.0fs (rc=%s, vois %s)"
                              % (timeout_s, self.proc.poll(), os.path.join(self.workdir, "qemu.log")))
@@ -247,8 +262,17 @@ def main(argv=None):
     if not os.path.exists(os.path.join(a.workdir, "ifs.bin")):
         prepare(a.workdir, archive=archive, secpol=a.secpol, task=task,
                 verbose=not a.quiet)
-    with Target(a.workdir, archive=archive) as target:
+    with Target(a.workdir, archive=archive, shell=not a.demo) as target:
         boot_s = target.boot(timeout_s=120.0)
+        if a.demo:
+            # La démo narrée écrit sur la seconde ligne série, vers un FICHIER :
+            # l'hôte la laisse tourner et on lit le fichier.
+            print("démo amorcée — console : %s" % target.demo_log)
+            try:
+                while True:
+                    time.sleep(5.0)
+            except KeyboardInterrupt:
+                return 0
         if not a.quiet:
             print("bench prêt en %.1fs" % boot_s)
         return repl(target, timeout_s=a.timeout)

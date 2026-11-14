@@ -204,8 +204,16 @@ B3:D0:F0     D    17
 /usr/lib/libslog2parse.so.1=libslog2parse.so.1
 /usr/lib/libpci.so.3.0=libpci.so.3.0
 # C++ runtime for edr-archive (C++17, MCAP writer).
-# UNVERIFIED (needs QNX SDP 8.0): the exact name of the C++ runtime library in
-# the SDP 8.0 x86_64 target (libstdc++.so.6 or the SDP's libc++).
+# VERIFIED on the real SDP 8.0 (2026-11-14): the x86_64 archive binary links
+# libc++.so.2, NOT libstdc++.so.6 — `readelf -d build/qnx/edr-archive` lists
+# libm.so.3, libslog2.so.1, libc++.so.2, libc.so.6, libgcc_s.so.1. With
+# libstdc++.so.6 only, the guest's loader prints
+#   ldd:FATAL: Could not load library libc++.so.2
+# and edr-archive never starts, even when the archive medium and the mount are
+# fine. libstdc++.so.6 is kept as well: it is what the SDP's own C++ toolchain
+# variant (q++ with libstdc++) produces, and an image that carries both boots
+# either binary.
+/usr/lib/libc++.so.2=libc++.so.2
 /usr/lib/libstdc++.so.6=libstdc++.so.6
 # STO-01: block layer used by the disk driver (QNX 8.0 storage stack).
 /usr/lib/io-blk.so=io-blk.so

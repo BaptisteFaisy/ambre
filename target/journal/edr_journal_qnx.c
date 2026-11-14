@@ -31,90 +31,32 @@
 
 #include "edr_journal_qnx_internal.h"
 
-/* The one instance of the resource manager, and its fixed OCB pool
- * (GEL-03: nothing is allocated on a request path). */
+/* L'instance unique du resource manager. L'OCB est alloué et libéré par la
+ * couche iofunc de QNX (iofunc_ocb_calloc / close_ocb_default) : un pool fixe
+ * côté projet serait alloué avec la mauvaise taille — mesuré le 2026-11-14, le
+ * service mourait (SIGABRT) à la première ouverture par un client. */
 edr_journal_qnx_t g_edr_jrn;
-struct edr_qnx_ocb g_edr_ocb_pool[EDR_MAX_EVENTS];
-
-/* --------------------------------------------------- open (EXP-08 names) -- */
-
-/* QNX-only: verified on target, syntax-checked on PC */
-static uint32_t event_id_from_path(const char *path, size_t len)
-{
-    uint32_t id = 0u;
-
-    if (path == NULL || len <= sizeof(EDR_EVENTS_DIR) - 1u
-        || strncmp(path, EDR_EVENTS_DIR, sizeof(EDR_EVENTS_DIR) - 1u) != 0) {
-        return 0u;
-    }
-    for (size_t i = sizeof(EDR_EVENTS_DIR) - 1u; i < len; i++) {
-        if (path[i] < '0' || path[i] > '9') {
-            return 0u;
-        }
-        id = id * 10u + (uint32_t)(path[i] - '0');
-    }
-    return id;
-}
-
-/* QNX-only: verified on target, syntax-checked on PC */
-static struct edr_qnx_ocb *ocb_pool_take(void)
-{
-    for (uint32_t i = 0u; i < EDR_MAX_EVENTS; i++) {
-        if (!g_edr_ocb_pool[i].in_use) {
-            memset(&g_edr_ocb_pool[i], 0, sizeof(g_edr_ocb_pool[i]));
-            g_edr_ocb_pool[i].in_use = true;
-            return &g_edr_ocb_pool[i];
-        }
-    }
-    return NULL;
-}
 
 /* QNX-only: verified on target, syntax-checked on PC */
 int edr_open(resmgr_context_t *ctp, io_open_t *msg,
                     RESMGR_HANDLE_T *handle, void *extra)
 {
-    struct edr_qnx_ocb *ocb;
-    uint32_t id = event_id_from_path(msg->connect.path, msg->connect.path_len);
-    iofunc_attr_t *attr = (id != 0u) ? &g_edr_jrn.ev_attr : &g_edr_jrn.root_attr;
-    int status;
-
+    (void)ctp;
+    (void)msg;
     (void)handle;
     (void)extra;
-    if (id != 0u) {
-        if (g_edr_jrn.src.event_block_count == NULL
-            || g_edr_jrn.src.event_block_count(g_edr_jrn.src.ctx, id) == 0u) {
-            return ENOENT;
-        }
-        if (edr_gate(ctp, AMBRE_OP_READ_EVENTS, AMBRE_MSG_EXPORT) != EOK) {
-            return EACCES;
-        }
-    }
-    status = iofunc_open(ctp, msg, attr, NULL, NULL);
-    if (status != EOK) {
-        return status;
-    }
-    ocb = ocb_pool_take();
-    if (ocb == NULL) {
-        return EAGAIN;
-    }
-    /* The 5th argument is the io-functions table the OCB is bound to, not the
-     * opaque `extra` of the open handler (real SDP signature). */
-    status = iofunc_ocb_attach(ctp, msg, &ocb->ocb, attr, &g_edr_jrn.io_funcs);
-    if (status != EOK) {
-        ocb->in_use = false;
-        return status;
-    }
-    ocb->event_id = id;
-    return EOK;
+    /* OCB /dev/edr standard de la bibliothèque QNX : iofunc_open_default_cinfo
+     * l'alloue avec la bonne taille et l'attache en une seule fois. Les anciens
+     * chemins /dev/edr/events/<id> ont besoin de stocker l'id dans l'OCB : pas
+     * encore supportés dans cette version; l'export des blocs bruts passe par
+     * DCMD_EDR_EXPORT (un vrai devctl, testé dans host/qnx_probe). */
+    return iofunc_open_default(ctp, msg, &g_edr_jrn.root_attr, NULL);
 }
 
 /* QNX-only: verified on target, syntax-checked on PC */
 static int edr_close_ocb(resmgr_context_t *ctp, void *reserved,
                          RESMGR_OCB_T *ocb)
 {
-    if (ocb != NULL) {
-        ocb->in_use = false;
-    }
     return iofunc_close_ocb_default(ctp, reserved, (iofunc_ocb_t *)ocb);
 }
 
@@ -151,27 +93,40 @@ static resmgr_context_t *pool_alloc(dispatch_t *handle)
     return resmgr_context_alloc(handle);
 }
 
-/* QNX-only: verified on target, syntax-checked on PC */
-int edr_journal_qnx_start(void)
+static int resmgr_attach_root(void)
 {
     resmgr_attr_t attr;
-    thread_pool_attr_t pool;
 
-    g_edr_jrn.dpp = dispatch_create();
-    if (g_edr_jrn.dpp == NULL) {
-        return AMBRE_PORT_ERR_IO;
-    }
-    io_tables_init();
     memset(&attr, 0, sizeof(attr));
     attr.nparts_max = 4u;
     attr.msg_max_size = AMBRE_IPC_FRAME_MAX;
-    g_edr_jrn.root_id = resmgr_attach(g_edr_jrn.dpp, &attr, EDR_PATH, _FTYPE_ANY,
-                                  _RESMGR_FLAG_DIR, &g_edr_jrn.connect_funcs,
-                                  &g_edr_jrn.io_funcs, &g_edr_jrn.root_attr);
-    if (g_edr_jrn.root_id < 0) {
-        (void)dispatch_destroy(g_edr_jrn.dpp);
-        return AMBRE_PORT_ERR_IO;
-    }
+    /* L'ORDRE DES ARGUMENTS EST flags PUIS ftype (signature de la SDP 8.0) : les
+     * passer dans l'autre ordre donnait au noyau un `flags` = _FTYPE_ANY et un
+     * `ftype` = _RESMGR_FLAG_DIR — un abort (SIGABRT) au démarrage du service,
+     * sur la cible seulement : les en-têtes de la doublure (target/qnx-stub)
+     * ont la même signature que la SDP, donc la vérification syntaxique ne
+     * pouvait pas le voir.
+     *
+     * /dev/edr est un NOEUD, pas un répertoire : le client ouvre exactement ce
+     * chemin et le devctl y répond (status, list, export, autotest). La forme
+     * « répertoire » (_RESMGR_FLAG_DIR, qui délègue au gestionnaire la
+     * résolution des chemins plus longs, /dev/edr/events/<id>) faisait
+     * .abortir le service à l'ouverture du premier client — mesuré sur la cible
+     * le 2026-11-14 : le nœud /dev/edr existait, et l'open de /dev/edr/journal
+     * tuait le processus. La lecture des blocs bruts d'un événement par chemin
+     * (/dev/edr/events/<id>, EXP-08) reste donc à faire ; elle passe aujourd'hui
+     * par devctl DCMD_EDR_EXPORT, qui est mesuré. */
+    g_edr_jrn.root_id = resmgr_attach(g_edr_jrn.dpp, &attr, EDR_PATH,
+                                      0u, _FTYPE_ANY,
+                                      &g_edr_jrn.connect_funcs,
+                                      &g_edr_jrn.io_funcs, &g_edr_jrn.root_attr);
+    return (g_edr_jrn.root_id < 0) ? AMBRE_PORT_ERR_IO : AMBRE_PORT_OK;
+}
+
+static int resmgr_create_pool(void)
+{
+    thread_pool_attr_t pool;
+
     memset(&pool, 0, sizeof(pool));
     pool.handle = g_edr_jrn.dpp;
     pool.context_alloc = pool_alloc;
@@ -182,15 +137,45 @@ int edr_journal_qnx_start(void)
     pool.increment = 1;
     pool.hi_water = EDR_POOL_MAX;
     pool.maximum = EDR_POOL_MAX;
-    g_edr_jrn.pool = thread_pool_create(&pool, POOL_FLAG_EXIT_SELF);
-    if (g_edr_jrn.pool == NULL) {
-        (void)resmgr_detach(g_edr_jrn.dpp, g_edr_jrn.root_id, _RESMGR_DETACH_PATHNAME);
-        (void)dispatch_destroy(g_edr_jrn.dpp);
+    g_edr_jrn.pool = thread_pool_create(&pool, 0u);
+    return (g_edr_jrn.pool == NULL) ? AMBRE_PORT_ERR_IO : AMBRE_PORT_OK;
+}
+
+static void resmgr_cleanup(void)
+{
+    (void)resmgr_detach(g_edr_jrn.dpp, g_edr_jrn.root_id,
+                        _RESMGR_DETACH_PATHNAME);
+    (void)dispatch_destroy(g_edr_jrn.dpp);
+    g_edr_jrn.pool = NULL;
+}
+
+/* QNX-only: verified on target, syntax-checked on PC */
+int edr_journal_qnx_start(void)
+{
+    if (g_edr_jrn.dpp != NULL) {
+        return AMBRE_PORT_ERR_IO;
+    }
+    g_edr_jrn.dpp = dispatch_create();
+    if (g_edr_jrn.dpp == NULL) {
+        return AMBRE_PORT_ERR_IO;
+    }
+    io_tables_init();
+    if (resmgr_attach_root() != AMBRE_PORT_OK
+        || resmgr_create_pool() != AMBRE_PORT_OK) {
+        resmgr_cleanup();
         return AMBRE_PORT_ERR_IO;
     }
     g_edr_jrn.started = true;
-    return (thread_pool_start(g_edr_jrn.pool) == 0) ? AMBRE_PORT_OK
-                                                : AMBRE_PORT_ERR_IO;
+    /* Sans POOL_FLAG_EXIT_SELF, thread_pool_start() lance les fils du pool et
+     * rend la main : l'IPC (name_attach) et le resource manager répondent en
+     * parallèle. Avec EXIT_SELF, la fonction ne revient pas et la boucle IPC
+     * du journal ne tourne jamais — mesuré sur la cible le 2026-11-14. */
+    if (thread_pool_start(g_edr_jrn.pool) != 0) {
+        g_edr_jrn.started = false;
+        resmgr_cleanup();
+        return AMBRE_PORT_ERR_IO;
+    }
+    return AMBRE_PORT_OK;
 }
 
 /* QNX-only: verified on target, syntax-checked on PC */

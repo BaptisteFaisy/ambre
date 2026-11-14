@@ -2,67 +2,94 @@
 #
 # image/ambre.sec - QNX 8.0 security policy for the Ambre Event Data Recorder.
 #
-# Provenance: the statement forms `type`, `allow <t> self:ability {...}` and
-# `allow_attach` are taken from the working policy of the sibling project
-# `passerelle` (https://github.com/BaptisteFaisy/passerelle, Apache-2.0, same
-# author, image/passerelle.sec). Source of the language: QNX SDP 8.0 System
-# Security Guide, "Security policy language" and "Abilities Reference":
-#   https://www.qnx.com/developers/docs/8.0/com.qnx.doc.security.system/topic/manual/secpol_language.html
-#   https://www.qnx.com/developers/docs/8.0/com.qnx.doc.security.system/topic/manual/abilities_reference.html
+# VERIFIED (2026-11-14): this file is compiled by the real SDP 8.0 toolchain —
+#   source ~/qnx800/qnxsdp-env.sh
+#   secpolcompile -o build/qnx/secpol.bin image/ambre.sec      # rc=0, 0 warning
+#   make secpol                                                # même chose, lié au Makefile
+# `secpolcompile` est le test d'acceptation de la grammaire ; son rc=0 est la
+# seule preuve possible. Avant la SDP, le fichier portait la mention UNVERIFIED
+# et 31 erreurs de grammaire (provenance ci-dessous) : `provides` n'existe pas,
+# et les objets d'une règle `allow` sont des TYPES, jamais des chemins.
 #
-# UNVERIFIED (needs QNX SDP 8.0): secpolcompile is the acceptance test of this
-# file. The statement forms that passerelle proved (`type`, `allow self:ability`,
-# `allow_attach`) are reproduced as-is; the `provides` bindings and the
-# channel/device/path rules below follow the same language but could not be
-# compiled here - their exact grammar (object class names, permission names)
-# must be confirmed against the manual pages above before secpolcompile.
+# Ce que la politique applique réellement dans le noyau, et ce qu'elle ne peut
+# pas appliquer (docs/QNX-DEMO.md §Politique, docs/SECURITY.md §4) :
+#
+#   ENFORCÉ par le noyau  - les capacités (abilities) de chaque type ;
+#                           - l'attachement de nom (allow_attach) : un seul
+#                             processus peut publier /dev/edr/journal ;
+#                           - la connexion aux canaux (allow ...:channel
+#                             connect) : un processus non habilité ne parle à
+#                             rien, et ne peut donc pas ouvrir /dev/hd0t177,
+#                             qui est servi par devb-eide (le canal du pilote de
+#                             bloc est l'objet de la règle).
+#   NON appliqué par cette politique - la séparation hd0 (journal) / hd1
+#                           (archive) : le seul objet que QNX 8 type est le
+#                           canal, et les deux partitions sont servies par le
+#                           même serveur devb. Cette séparation reste portée par
+#                           (a) la matrice d'accès C ambre_port_access_allowed()
+#                           (testée sur PC, 498 + 33 vérifications), (b) les
+#                           permissions Unix du pilote de bloc (`user=20:20`).
+#                           Aucun nombre ci-dessous ne prétend le contraire.
 #
 # Covered requirements:
 #   SEC-01  One type per process; producers write the input only; the service
 #           type reads only; edr-journal alone reaches the raw partition.
 #   SEC-02  No ability, channel or path here could stop or disable the
 #           recorder: nothing here grants process control over another type.
-#   SEC-03  No type but edr_journal_t can write the raw journal, so no
-#           application command can erase a locked event on the medium.
-#   SEC-06  The configuration file is read-only for every type.
+#   SEC-03  No type but edr_journal_t may connect to the block server that
+#           owns the journal medium, so no application command can erase a
+#           locked event on the medium.
+#   SEC-06  The configuration is read-only: nothing in this policy grants a
+#           write to a configuration path, and the IFS holds it 0444.
 #   VIE-03  Closed loop: no network type is declared, no network ability is
-#           granted, so no EDR process can open a network connection.
+#           granted, and the boot image carries no network stack at all.
 #   QNX-04  rlimit lets the critical processes raise RLIMIT_MEMLOCK (mlock).
+#   QNX-06  The policy is what the kernel grants at start-up; the processes are
+#           launched with `on -T <type>` so they are fully controlled by it.
+#
+# Source of the language: QNX SDP 8.0 System Security Guide, "Security policy
+# language", "Abilities Reference", "Using security policies" (copies locales
+# lues dans la SDP installée, pas en ligne) :
+#   $QNX_TARGET/usr/help/eclipse/plugins/com.qnx.doc.security.system/topic/manual/
+#     secpol_language.html, using_security_policies.html, abilities.html
+#   et $QNX_TARGET/usr/help/eclipse/plugins/com.qnx.doc.neutrino.utilities/topic/
+#     s/secpolpush.html, s/secpolcompile.html, o/on.html (`on -T type cmd`).
+# Les formes utilisées ici sont celles que le projet frère `passerelle` a
+# bootées (https://github.com/BaptisteFaisy/passerelle, Apache-2.0, même
+# auteur, image/passerelle.sec) : `type`, `allow <t> self:ability { ... }`,
+# `allow_attach`, `allow <src> <dst>:channel <perm>`.
 
 # ---------------------------------------------------------------------------
 # Types - one per process role (SEC-01)
 # ---------------------------------------------------------------------------
-# Naming convention, checked by scripts/check-image.sh: the type of
-# AMBRE_PEER_<X> (target/port/ambre_port.h, ambre_peer_type_t) is <x>_t
-# prefixed with edr_. AMBRE_PEER_UNKNOWN (99) has no type: an untyped process
-# is denied everything below by default.
+# L'ORDRE DE DÉCLARATION EST LOAD-BEARING : secpolcompile numérote les types à
+# partir de 0 dans l'ordre déclaré, et un processus amorcé par le script de
+# démarrage sans `-T` hérite de l'id 0. Le premier type ci-dessous est donc le
+# type du LANCEUR, volontairement le moins doté : c'est vérifié par
+# scripts/check-image.sh (make image-check), pas laissé au hasard.
+#
+# Convention de nommage (vérifiée par scripts/check-image.sh) : le type de
+# AMBRE_PEER_<X> (target/port/ambre_port.h, ambre_peer_type_t) est <x>_t préfixé
+# par edr_. AMBRE_PEER_UNKNOWN (99) n'a pas de type : un processus non typé
+# tombe sur edr_launcher_t et n'a aucun droit EDR.
 
-type edr_journal_t;      # AMBRE_PEER_JOURNAL  (1) - edr-journal
-type edr_capture_t;      # AMBRE_PEER_CAPTURE  (2) - edr-capture
-type edr_producer_t;     # AMBRE_PEER_PRODUCER (3) - edr-replay and any
-                         # other frame producer (CAN, zenoh bridge)
-type edr_service_t;      # AMBRE_PEER_SERVICE  (4) - edrctl
-type edr_archive_t;      # AMBRE_PEER_ARCHIVE  (5) - edr-archive
-
-# ---------------------------------------------------------------------------
-# provides - bind each binary of the boot image to its type (SEC-01)
-# ---------------------------------------------------------------------------
-# UNVERIFIED (needs QNX SDP 8.0): exact `provides` grammar; the binding must
-# cover both paths of each binary (the IFS copy in /proc/boot and any
-# installed copy), otherwise a restarted process could come back untyped.
-
-provides edr_journal_t  -> "/proc/boot/edr-journal";
-provides edr_capture_t  -> "/proc/boot/edr-capture";
-provides edr_archive_t  -> "/proc/boot/edr-archive";
-provides edr_producer_t -> "/usr/bin/edr-replay";
-provides edr_service_t  -> "/usr/bin/edrctl";
+type edr_launcher_t;     # id 0 — le lanceur : ksh de la démo, on, toybox, les
+                         #          sondes du banc, tout ce que l'IFS amorce
+                         #          sans type explicite (AMBRE_PEER_UNKNOWN)
+type edr_journal_t;      # AMBRE_PEER_JOURNAL  (1) — edr-journal
+type edr_capture_t;      # AMBRE_PEER_CAPTURE  (2) — edr-capture
+type edr_producer_t;     # AMBRE_PEER_PRODUCER (3) — edr-replay, tout producteur
+type edr_service_t;      # AMBRE_PEER_SERVICE  (4) — edrctl, devctl_probe
+type edr_archive_t;      # AMBRE_PEER_ARCHIVE  (5) — edr-archive
+type devb_t;             # devb-eide : le serveur qui publie /dev/hd0t177 (le
+                         # média du journal) et /dev/hd1t177 (l'archive)
+type pci_server_t;       # pci-server : derrière devb-eide sur x86_64
 
 # ---------------------------------------------------------------------------
 # Abilities - the minimum each type needs, nothing more
 # ---------------------------------------------------------------------------
-
-# edr-journal: resource manager (QNX-01) on /dev/edr/journal, raw partition
-# I/O, memory lock (QNX-04), kernel trace events (OBS-03), slog2 (OBS-01).
+# edr-journal : resource manager (QNX-01) sur /dev/edr/journal, verrou mémoire
+# (QNX-04), événements de trace noyau (OBS-03), slog2 (OBS-01).
 allow edr_journal_t self:ability {
     nonroot
     pathspace
@@ -71,8 +98,8 @@ allow edr_journal_t self:ability {
     trace
 };
 
-# edr-capture: resource manager on /dev/edr/in (ACQ-01), memory lock
-# (QNX-04), kernel trace events (OBS-03).
+# edr-capture : resource manager sur /dev/edr/in (ACQ-01), verrou mémoire
+# (QNX-04), trace noyau (OBS-03).
 allow edr_capture_t self:ability {
     nonroot
     pathspace
@@ -81,9 +108,10 @@ allow edr_capture_t self:ability {
     trace
 };
 
-# Producers, service tools and the archiver are plain clients: they drop root
-# and need no ability at all. In particular NO type except journal/capture
-# gets pathspace or public_channel, so none of them can pose as a server.
+# Producteurs, outils de service et archiveur sont de simples clients : aucun
+# pathspace, aucun public_channel — aucun d'eux ne peut se poser en serveur
+# (SEC-01), et aucun ne reçoit de capacité sur un processus d'un autre type
+# (SEC-02 : rien ici ne permet d'arrêter ou de désactiver l'enregistreur).
 allow edr_producer_t self:ability {
     nonroot
 };
@@ -96,86 +124,191 @@ allow edr_archive_t self:ability {
     nonroot
 };
 
+# Le pilote de bloc a besoin de l'IRQ de la machine IDE virtuelle, du masquage
+# d'interruptions et de la création de canaux : c'est le strict minimum pour
+# publier un média, pas un blanc-seing (SEC-02 : il ne peut rien sur les
+# processus EDR).
+allow devb_t self:ability {
+    io
+    interrupt:0-31
+    pathspace
+    public_channel
+    rlimit
+    fork
+};
+
+allow pci_server_t self:ability {
+    io
+    interrupt:0-31
+    pathspace
+    public_channel
+    fork
+};
+
+# Le lanceur ne recoit ICI AUCUNE capacite : c'est mesure, pas par paresse. Des
+# qu'une regle `allow edr_launcher_t self:ability { ... }` apparait, l'ensemble
+# que QNX OS attribue par defaut aux processes amores par le script de demarrage
+# est restreint a ce qui est liste, et les services de base — amores eux aussi
+# sans `-T`, donc de type 0 — perdent de quoi s'attacher. Le banc
+# (build/qnx-bench, 2026-11-14) imprimait alors, avant meme le pilote de bloc :
+#     secpol_resmgr_attach() failed: Permission denied
+#                                       (pci-server, devc-con, devc-ser8250,
+#                                        pipe, devb-eide, slogger2)
+#     Unable to access "/dev/ser2" (2)
+#     on: No such file or directory (/dev/ser2)
+# soit une image qui ne demarre pas. Laisser le type 0 sans regle garde la base
+# intacte ; ce qui confine les processus EDR, ce sont les regles de TYPE, les
+# allow_attach (ci-dessous) et la matrice de canaux — pas une reduction du
+# lanceur.
+#
+# Consequence assumee et ecrite noir sur blanc (docs/QNX-DEMO.md §Politique) :
+# un processus du lanceur, root, garde les capacites par defaut de QNX OS. La
+# preuve d'intrusion porte donc sur ce que la POLITIQUE refuse — usurper un nom
+# (allow_attach), se connecter au canal du journal ou d'un serveur EDR — et non
+# sur une deposition du lanceur que cette politique n'applique pas. Typer le
+# pilote de bloc (devb_t, pci_server_t declares plus haut) resterait a faire :
+# ca demande soit `settypeid` sur le lanceur (casse l'amorce, mesuré ici), soit
+# d'amorcer devb APRES la base via secpollaunch, ce qui change l'ordre de
+# demarrage eprouve de la vitrine. Ce n'est pas fait, et aucun nombre de ce
+# depot ne pretend le contraire.
+#
+# Le lanceur n'a donc pas `settypeid` : un shell ne peut pas se changer en
+# edr-journal lui-meme (secpolcompile refuserait de toute façon, et il a raison :
+# ce serait un gain de privileges, donc un `gain_priv` explicite — l'anti-modele
+# de SEC-01). Le demarrage type passe par `secpollaunch`, configure par
+# image/secpollaunch-edr_launcher_t.cfg : le shell ne peut QUE nommer une
+# section, c'est la configuration relue par l'auditeur qui fixe le binaire, les
+# arguments, le type, les credentials et l'environnement (SEC-02 : la ligne de
+# commande de l'enregistreur n'est pas alterable depuis l'espace utilisateur).
+
 # ---------------------------------------------------------------------------
 # allow_attach - who may register which name-space path
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# allow_attach - le SOCLE, autant que les noms EDR
+# ---------------------------------------------------------------------------
+# Mesuré sur le banc (build/qnx-bench, 2026-11-14) : dès qu'une politique est
+# poussée, le noyau applique allow_attach à TOUT processus, y compris ceux du
+# script de démarrage (type 0). Sans les règles ci-dessous, pci-server,
+# devc-con, devc-ser8250, pipe, fsevmgr, devb-eide et slogger2 ne peuvent plus
+# s'attacher — l'image ne démarre pas :
+#     secpol_resmgr_attach() failed: Permission denied   (x7)
+#     Unable to access "/dev/ser2" (2)
+#     on: No such file or directory (/dev/ser2)
+# Ces règles donnent donc au lanceur de quoi amorcer la machine, et RIEN de plus
+# : aucun chemin /dev/edr, aucun média hors hd0/hd1 (le pilote de bloc est du
+# type 0, donc ses noeuds tombent sous /dev/hd*). C'est la liste qu'aurait
+# produite `secpolgenerate` pour cette image — écrite à la main, et d'autant plus
+# auditable.
+# Les jokers ne sont pas utilisables ici, et c'est mesuré : `/dev/pci/*` et
+# `/dev/hd*` ne correspondent à RIEN (le banc retombait sur
+# « secpol_resmgr_attach() failed: Permission denied » pour pci-server et
+# devb-eide avec ces deux règles), tandis que la règle exacte `/dev/slog`
+# passait dès le premier essai. La forme documentée pour un sous-arbre est
+# `/...` (allow_attach unrestricted_t /...), qui est un blanc-seing global :
+# hors de question pour un lanceur. Les chemins sont donc ÉNUMÉRÉS — c'est plus
+# long, et c'est exactement ce qui rend la règle relisible.
+allow_attach edr_launcher_t /dev/slog;              # slogger2   (OBS-01)
+allow_attach edr_launcher_t /dev/pci/...;            # pci-server: server_id_N
+allow_attach edr_launcher_t /dev/ser0;               # devc-ser8250: les quatre
+allow_attach edr_launcher_t /dev/ser1;               # ports 8250 que l'image
+allow_attach edr_launcher_t /dev/ser2;               # peut voir (0x3f8 est au
+allow_attach edr_launcher_t /dev/ser3;               # noyau, 0x2f8 au banc)
+allow_attach edr_launcher_t /dev/con0;               # devc-con
+allow_attach edr_launcher_t /dev/con1;
+allow_attach edr_launcher_t /dev/con2;
+allow_attach edr_launcher_t /dev/con3;
+allow_attach edr_launcher_t /dev/console;
+allow_attach edr_launcher_t /dev/pipe;               # pipe (substitutions shell)
+allow_attach edr_launcher_t /dev/fsnotify;           # fsevmgr
+allow_attach edr_launcher_t /dev/hd0;                # devb-eide : le média du
+allow_attach edr_launcher_t /dev/hd0t177;            # journal (STO-01)
+allow_attach edr_launcher_t /dev/hd1;                # et le support d'archive
+allow_attach edr_launcher_t /dev/hd1t177;            # (STO-07)
+
+# ---------------------------------------------------------------------------
+# allow_attach - who may register which name-space path (les noms EDR)
+# ---------------------------------------------------------------------------
+# edr-journal attache EDR_PATH="/dev/edr" en drapeau _RESMGR_FLAG_DIR
+# (target/journal/edr_journal_qnx.c:168) puis y publie ses enfants : les deux
+# règles sont donc nécessaires, l'une pour le répertoire, l'autre pour les
+# noeuds. AMBRE_PEER_* : JOURNAL(1) edr_journal_t, CAPTURE(2) edr_capture_t,
+# PRODUCER(3) edr_producer_t, SERVICE(4) edr_service_t, ARCHIVE(5) edr_archive_t,
+# UNKNOWN(99) n'a pas de type.
+
+allow_attach edr_journal_t /dev/edr;                # le répertoire lui-même
 allow_attach edr_journal_t /dev/edr/journal;
-allow_attach edr_journal_t /dev/edr/status;     # OBS-02 text status endpoint
-allow_attach edr_capture_t /dev/edr/in;         # ACQ-01 producer input
+allow_attach edr_journal_t /dev/edr/status;     # OBS-02 texte de statut
+allow_attach edr_capture_t /dev/edr/in;         # ACQ-01 entrée producteurs
 
-# No other type may attach any path: a compromised client cannot hijack
-# /dev/edr/in or /dev/edr/journal (SEC-01).
+# Aucun autre type ne peut attacher un chemin : un client compromis ne détourne
+# ni /dev/edr/in ni /dev/edr/journal (SEC-01). C'est la règle que la sonde
+# secpol_probe tente de violer (b), et que le noyau refuse.
 
 # ---------------------------------------------------------------------------
-# allows - the connection matrix (SEC-01, mirrors the C decision function)
+# allows - the connection matrix (SEC-01, miroir de la fonction C)
 # ---------------------------------------------------------------------------
-# This is the kernel-side twin of ambre_port_access_allowed()
-# (target/port/ambre_port_posix.c), which is unit-tested on the PC:
+# ambre_port_access_allowed() (target/port/ambre_port_posix.c:169-185) décide
+# sur le TYPE DE PAIR vu par le service ; la matrice ci-dessous décide sur les
+# TYPES NOYAU, pour la même intention :
 #
-#   AMBRE_OP_WRITE_INPUT : producers -> /dev/edr/in        (capture serves it)
+#   AMBRE_OP_WRITE_INPUT : producteurs -> capture      (producteur seul)
 #   AMBRE_OP_READ_STATUS : service, archive -> journal
 #   AMBRE_OP_READ_EVENTS : service, archive -> journal
-#   AMBRE_OP_RAW_DISK    : journal only
+#   AMBRE_OP_RAW_DISK    : journal -> devb             (et archive, pour l'autre
+#                                                      média ; voir l'en-tête)
 #
-# UNVERIFIED (needs QNX SDP 8.0): object class name `channel` and permission
-# name `connect` must be confirmed against the "Security policy language"
-# manual page; the intent is: only the listed source types may ConnectAttach
-# to a channel created by the listed target type.
+# Le lanceur (id 0) ne connecte à AUCUN type EDR ni à devb : c'est ce qui rend
+# l'intrusion impossible pour tout processus amorcé sans `-T` (SEC-03, et le
+# test (a)/(c) de host/qnx_probe/secpol_probe.c).
 
-allow edr_producer_t edr_capture_t:channel { connect };   # write input only
-allow edr_capture_t  edr_journal_t:channel { connect };   # trigger/continue/seal/gap
-allow edr_service_t  edr_journal_t:channel { connect };   # status/list/export/verify
-allow edr_archive_t  edr_journal_t:channel { connect };   # read sealed events
+allow edr_producer_t edr_capture_t:channel connect;    # écriture de l'entrée
+allow edr_capture_t  edr_journal_t:channel connect;    # trigger/continue/seal/gap
+allow edr_service_t  edr_journal_t:channel connect;    # status/list/export/verify
+allow edr_archive_t  edr_journal_t:channel connect;    # lecture des événements scellés
+allow edr_journal_t  devb_t:channel connect;           # le média brut (STO-01)
+allow edr_archive_t  devb_t:channel connect;           # le second média (STO-07)
+allow edr_service_t  devb_t:channel connect;           # lire l'archive montable
+allow devb_t         pci_server_t:channel connect;     # la pile bloc derrière PCI
+allow pci_server_t   edr_launcher_t:channel connect;   # slog2, devc-ser (journal)
 
-# Everything not listed is denied: no type may connect to a producer, the
-# service type may not connect to the capture input (it is not a producer),
-# and an untyped intruder process may connect to nothing at all.
+# Chacun des types EDR doit pouvoir journaliser (slogger2 est amorcé sans type,
+# donc de type lanceur) : c'est la seule connexion vers edr_launcher_t accordée
+# ici, et elle ne donne accès à aucun média ni à aucun canal EDR.
+allow edr_journal_t  edr_launcher_t:channel connect;
+allow edr_capture_t  edr_launcher_t:channel connect;
+allow edr_producer_t edr_launcher_t:channel connect;
+allow edr_service_t  edr_launcher_t:channel connect;
+allow edr_archive_t  edr_launcher_t:channel connect;
+allow devb_t         edr_launcher_t:channel connect;
 
-# ---------------------------------------------------------------------------
-# Device and file access (STO-01, STO-07, SEC-03, SEC-06)
-# ---------------------------------------------------------------------------
-# UNVERIFIED (needs QNX SDP 8.0): object class names `dev`, `dir`, `file` and
-# the permission names must be confirmed against the manual pages; the intent
-# is stated in each comment and is what scripts/check-image.sh re-checks
-# statically (only edr_journal_t may appear in a raw-device rule).
-
-# STO-01 / SEC-01 / SEC-03: the raw journal partition. edr_journal_t is the
-# sole writer of the medium; no other type can open it, so no application
-# command can erase or overwrite a locked event behind the journal's back.
-allow edr_journal_t /dev/hd0t177:dev { read write };
-
-# STO-07: the Power-Safe archive partition (a separate device - fs-qnx6.so
-# mounts it on its own device path). The archive writes MCAP files there;
-# the service type may read them (export path). No other type, and no write
-# for anyone but the archive.
-allow edr_archive_t /dev/hd1t177:dir { read write };
-allow edr_service_t /dev/hd1t177:dir { read };
-
-# SEC-06: the configuration is read-only inside the IFS and read-only here:
-# every type may read it, none may write it.
-allow edr_journal_t  /etc/ambre/config.conf:file { read };
-allow edr_capture_t  /etc/ambre/config.conf:file { read };
-allow edr_archive_t  /etc/ambre/config.conf:file { read };
-allow edr_service_t  /etc/ambre/config.conf:file { read };
-allow edr_producer_t /etc/ambre/config.conf:file { read };
+# Le lanceur reste capable de parler à ses propres serveurs (devc-ser8250,
+# pipe, fsevmgr, toybox) : sans cette règle le shell de la démo ne pourrait
+# même pas ouvrir son terminal.
+allow edr_launcher_t edr_launcher_t:channel connect;
 
 # ---------------------------------------------------------------------------
 # VIE-03 - closed loop, by omission
 # ---------------------------------------------------------------------------
-# No network type is declared and no network ability (io-sock client, socket
-# creation) is granted to any type above. The boot image contains no network
-# stack at all (image/ambre.build), so there is nothing to connect to: the
-# recorder cannot open a network connection, and neither can anything else in
-# the image. This is checked statically by scripts/check-image.sh and must be
-# demonstrated on target by an intrusion test (docs/SECURITY.md §4).
+# Aucun type réseau déclaré, aucune capacité réseau accordée, et l'image de
+# démarrage ne contient aucune pile réseau (ni libsocket : la sonde résout
+# socket() à la volée et rends « absent du build » plutôt qu'une victoire).
+# Vérifié statiquement par scripts/check-image.sh et démontré sur cible par
+# host/qnx_probe/secpol_probe.c (d).
 
 # ---------------------------------------------------------------------------
 # SEC-02 - nothing here can stop the recorder
 # ---------------------------------------------------------------------------
-# No rule above grants any type an ability over another type's processes
-# (no process control, no signal, no kill class permission). Stopping
-# edr-journal or edr-capture from user space therefore requires root outside
-# the policy; inside the policy it is impossible. The supervision wrapper
-# (image/ambre-supervise.sh, later QNX HAM) respawns any killed process and
-# logs the interruption.
+# Aucune règle ci-dessus n'accorde à un type une capacité sur les processus d'un
+# autre type (pas de contrôle de processus, pas de signal, pas de classe
+# « kill »). Arrêter edr-journal ou edr-capture depuis l'espace utilisateur
+# demande donc root HORS politique ; dans la politique c'est impossible. La
+# supervision (image/ambre-supervise.sh, plus tard QNX HAM) relance tout
+# processus tué et journalise l'interruption.
+#
+# Application sur la cible : les processus EDR sont amorcés avec leur type par
+# le lanceur, `on -T <type> -u 0:<gid> <binaire>` — le gid porte le TYPE DE PAIR
+# que la matrice C vérifie (target/journal/edr_journal_io_qnx.c:edr_gate), le
+# `-T` porte le type noyau vérifié par cette politique. Les deux existent
+# parce qu'ils contrôlent deux choses différentes ; l'un ne remplace pas l'autre.

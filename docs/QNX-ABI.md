@@ -56,21 +56,77 @@ values automatically.
 
 ## 3. Application-defined devctls on `/dev/edr`
 
-Owned by Ambre: the numbers are **invented by the project**, defined in
-`target/journal/edr_journal_qnx.c` (deliberately NOT in the stub headers, which
-only mirror real QNX declarations) and documented here. They are project
-constants, not kernel ABI, so `target/tests/qnx_abi_assert.c` does not assert
-them; both ends of the wire are compiled from the same source. On target they
-should eventually be re-encoded with QNX's `__DIOTF()` class macros from
-`<devctl.h>`; until an SDP is available the raw numbers below are the contract
-between `edr-journal` and its clients (`edrctl`, `edr-archive`).
+Owned by Ambre, and now **encoded the QNX way**: the numbers live in
+`target/edr_dcmd.h`, the single source used by the service
+(`target/journal/edr_journal_io_qnx.c`) and by its clients
+(`host/qnx_probe/devctl_probe.c`). On target the codes are built with QNX's
+`__DIOF()` / `__DIOTF()` / `__DION()` macros from `<devctl.h>`, class
+`_DCMD_MISC` (the class QNX recommends for a devctl that is not a QNX driver).
 
-| Command | Value | Payload direction | Body | Requirement |
+**Why the raw project numbers could not work.** A devctl code carries a
+*direction* in its two top bits and a *size* in bits 16-31
+(`get_device_size()` = `((cmd & ~DEVDIR_TOFROM) >> 16)`, devctl.h). The former
+project constants (`0x45000001`…) encoded a size of **0** and a class outside
+QNX's table (`0x000`–`0x12ff`), so the kernel copied **nothing** back to the
+client: `devctl()` returned EOK with the client's buffer untouched. Measured
+on target, 2026-11-14:
+
+```
+devctl DCMD_EDR_STATUS: rc=25 errno=0 (No error) code=1281 size=68
+```
+
+The repository header had anticipated this without being able to do it
+("re-encode with QNX's `__DIOTF()` macros on target") — that is what
+`target/edr_dcmd.h` does now.
+
+**How a devctl answer is carried.** The reply of an `_IO_DEVCTL` is a
+`_io_devctl_reply` (sys/iomsg.h:590-596): a 16-byte header followed by the
+payload. Two forms were measured on target and both are wrong:
+
+| Form | What the client got |
+|---|---|
+| `_RESMGR_PTR(ctp, &body, sizeof body)` | the body **shifted by 16 bytes** — the kernel read the first 16 bytes of the body as the header (512 landing in `open_events`, 1 in `sealed_events`) |
+| `return EOK` with no `_RESMGR_PTR()` | **nothing** — the reply carried the header alone, the client buffer stayed as it was |
+
+The form that works: write the body in the message payload
+(`_IO_OUTPUT_PAYLOAD(msg)`), set `msg->o.nbytes`, and reply with the message
+itself — `_RESMGR_PTR(ctp, msg, sizeof(io_devctl_t) + msg->o.nbytes)`. The
+service does exactly that, and the client now receives what the service sent:
+`devctl_probe status` renders `mode=1 health=0 backend=2`, `bytes_written=512`,
+`flushes=1` — the very values `edrctl status` renders over the IPC transport
+on the same journal.
+
+**Bodies.** The replies are the frozen IPC bodies
+(`target/edr_ipc.h`, `target/journal/edr_journal_svc.h`), not new structures:
+a status is `ambre_ipc_status_body_t`, a list is `ambre_edr_list_body_t`
+(count + lines), an export is `ambre_edr_export_body_t` followed by the raw
+blocks. Each one is **self-describing** — `devctl()`'s `dev_info_ptr` is
+defined *by the driver*, not by the kernel (devctl.html: "the associated
+dev_info_ptr values … depend on the device driver"), so a client cannot read
+a length there and cannot infer one.
+
+| Command | Encoding | Payload direction | Body | Requirement |
 |---|---|---|---|---|
-| `DCMD_EDR_STATUS` | `0x45000001` | server -> client | `ambre_ipc_status_body_t` | OBS-02 |
-| `DCMD_EDR_LIST` | `0x45000002` | server -> client | `ambre_ipc_event_line_t[]` | EXP-01 |
-| `DCMD_EDR_EXPORT` | `0x45000003` | `uint32_t[2]` (event_id, first_block) -> raw blocks | up to 7 x 512 B | EXPORT |
-| `DCMD_EDR_AUTOTEST` | `0x45000004` | none -> `EOK` / `EIO` | — | OBS-04 |
+| `DCMD_EDR_STATUS` | `__DIOF(_DCMD_MISC, 1, …)` | server -> client | `ambre_ipc_status_body_t` | OBS-02 |
+| `DCMD_EDR_LIST` | `__DIOF(_DCMD_MISC, 2, …)` | server -> client | `ambre_edr_list_body_t` | EXP-01 |
+| `DCMD_EDR_EXPORT` | `__DIOTF(_DCMD_MISC, 3, uint32_t[2])` | `uint32_t[2]` (event_id, first_block) -> raw blocks | `ambre_edr_export_body_t` + up to 7 × 512 B | EXPORT |
+| `DCMD_EDR_AUTOTEST` | `__DION(_DCMD_MISC, 4)` | none -> `EOK` / `EIO` | — | OBS-04 |
+
+**Access control.** The kernel does not police these devctls; the service
+does, through the same peer-type matrix as the IPC transport
+(`edr_gate()`, `target/journal/edr_journal_io_qnx.c`): the *service* peer
+(gid 4) is served, a *producer* (gid 3) is refused with `EACCES`. Measured on
+target, 2026-11-14:
+
+```
+on -u 0:4 /proc/boot/devctl_probe status   -> STATUS mode=1 health=0 backend=2 …
+on -u 0:3 /proc/boot/devctl_probe status   -> devctl DCMD_EDR_STATUS: rc=13 (EACCES)
+```
+
+**Still open.** The per-event nodes by path (`/dev/edr/events/<id>`, EXP-08's
+`read()` form) are not served: the OCB is now the one the QNX library
+allocates, and it carries no event id. The raw blocks of an event are
+therefore read through `DCMD_EDR_EXPORT`, which is measured.
 
 ---
 

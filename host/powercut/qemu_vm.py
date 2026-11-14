@@ -54,12 +54,10 @@ class PowercutError(RuntimeError):
     """Unrecoverable error while controlling a virtual machine."""
 
 
-class GuestResult:
-    """Outcome of a command executed inside the guest."""
-
-    def __init__(self, returncode, stdout="", stderr=""):
-        self.returncode, self.stdout, self.stderr = int(returncode), stdout or "", stderr or ""
-        self.ok = self.returncode == 0  # exit status only
+# GuestResult vit dans vm_util (il y est construit par run_capture() et
+# SerialConsole) : importé ici, plus redéfini, pour qu'une seule implémentation
+# existe des deux côtés.
+from vm_util import GuestResult  # noqa: E402,F811
 
 
 

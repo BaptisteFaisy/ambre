@@ -4,13 +4,16 @@ Ambre is an Event Data Recorder (EDR) for QNX 8.0: an automotive "black box"
 that must write to the medium **at the worst possible moment** — the instant a
 crash is detected.
 
-> **Implementation status (2026-11-11).** This document describes the *target*
-> runtime architecture. The QNX side is **not implemented**: `target/` and
-> `image/` are empty, no QNX SDP is installed, and no process below exists yet.
-> What runs today is the portable core (`fmt/`), the PC proof tools (`host/`)
-> and the test suites — everything that does not need the target. Sections 1 to
-> 3 are design; sections 4 to 7 describe code that exists and is measured in
-> `docs/VALIDATION.md`.
+> **Implementation status (2026-11-14).** This document describes the *target*
+> runtime architecture. The QNX side **exists and runs**: the SDP 8.0 is
+> installed (`~/qnx800`, qcc 12.2.0), `make qnx` links the five processes for
+> `nto x86_64`, the image boots under QEMU and the chain described below —
+> capture, trigger, acquisition on a raw medium, power cut, recovery — runs in
+> the guest (`docs/QNX-DEMO.md`). What is still design here: the product image
+> `image/ambre.build` (two partitions, policy, HAM) has never been assembled
+> nor booted, the latencies are not measured on target, and the security
+> policy is not applied by the kernel. Sections 1 to 3 are design; sections 4 to
+> 7 describe code that exists and is measured in `docs/VALIDATION.md`.
 
 This document describes the runtime architecture, the critical path that turns a
 detected crash into an *acquired* event, the two-stage storage model, and the
@@ -129,8 +132,9 @@ Properties of the path:
 - No archive write happens while an event is open (GEL-06).
 
 The timing target of 20 ms is a **target** on the reference hardware; the
-on-target measurement is `BLOCKED(no QNX SDP)` (`make latency-all` on the
-booted image). On the POSIX backend the campaign **has** run and is published
+on-target measurement is `BLOCKED(not measured on target yet)` — the guest
+answers `devctl` STATUS with `last_freeze_us`/`worst_freeze_us`, but no latency
+campaign has been run on it (`make latency-all` on the booted image). On the POSIX backend the campaign **has** run and is published
 (`docs/CAMPAIGN-LATENCY.md`): trigger → acquired median 2.7–4.0 ms, p99
 9.3–35.0 ms, max 108 ms — 99.7 % of it NVMe media time — and the software
 share alone is a median of 10 µs against the 500 µs budget.
@@ -161,7 +165,7 @@ On the raw partition the flush order reaches the medium as a flush order
 cost of step 3 is a property of the medium, not of the file system. This is
 still an assumption: essay E1 (`host/powercut/e1_flush_probe.py`) exists to
 confirm that a write plus a flush on a raw partition reaches the virtual disk
-as a flush order. Its result is `BLOCKED(no QNX SDP)`: the essay needs a real
+as a flush order. Its result is `BLOCKED(not measured on target yet)`: the essay needs a real
 `io-blk` behind the device — on target, build and boot
 `mkqnximage -f image/ambre.build`, then run
 `python3 host/powercut/e1_flush_probe.py --mode guest --image qnx80.img`
@@ -308,7 +312,7 @@ The risk window is not a bug: it is the physical meaning of a 20 ms freeze
 budget. It is quantified by the latency campaign on the POSIX backend
 (`docs/CAMPAIGN-LATENCY.md`: trigger → acquired median 2.7–4.0 ms, 99.7 %
 media time); the quantification on the reference hardware is
-`BLOCKED(no QNX SDP)`.
+`BLOCKED(not measured on target yet)`.
 
 ---
 

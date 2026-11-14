@@ -26,6 +26,20 @@ DEFAULT_QEMU = "qemu-system-x86_64"
 
 # -- shared helpers (used by every tool of the power-cut level) -------------
 
+class GuestResult:
+    """Outcome of a command executed inside the guest.
+
+    Vit le ici et pas dans ``qemu_vm`` : ``run_capture()`` et ``SerialConsole``
+    le construisent déjà, et le chemin d'erreur (pas de prompt, timeout, socket
+    absent) levait un ``NameError`` au lieu de rendre le résultat — donc un banc
+    muet se transformait en plantage, sans rapport. ``qemu_vm`` l'importe.
+    """
+
+    def __init__(self, returncode, stdout="", stderr=""):
+        self.returncode, self.stdout, self.stderr = int(returncode), stdout or "", stderr or ""
+        self.ok = self.returncode == 0  # exit status only
+
+
 def wait_for(predicate, timeout_s, poll_s=0.02, description="condition"):
     """Poll ``predicate`` until true; bounded by ``timeout_s`` (raises)."""
     deadline = time.monotonic() + max(0.0, timeout_s)
@@ -133,8 +147,15 @@ def histogram_text(values, title, buckets=8):
 class SerialConsole:
     """Send a command on the guest serial line, read back to the prompt."""
 
-    def __init__(self, sock_path, prompt=DEFAULT_PROMPT):
+    def __init__(self, sock_path, prompt=DEFAULT_PROMPT, strict_prompt=False):
+        """``strict_prompt`` : la fin de lecture est décidée sur la DERNIÈRE ligne
+        non vide, pas sur la fin du flux. À activer quand la commande envoyée se
+        termine elle-même par le marqueur (le cas d'un shell de banc sans prompt,
+        PS1 vidé) — sinon l'écho de la commande clôt la lecture avant la sortie.
+        Défaut désactivé : les campagnes existantes ont un vrai prompt
+        (`root@vm:/tmp#`), dont la ligne ne serait plus jamais égale à `#`."""
         self.sock_path, self.prompt, self.sock = sock_path, prompt, None
+        self.strict_prompt = strict_prompt
 
     def connect(self, timeout_s=10.0):
         """Connect to the console socket, retrying within ``timeout_s``."""
@@ -166,7 +187,15 @@ class SerialConsole:
         return GuestResult(0, text, "")
 
     def _read_until_prompt(self, timeout_s):
-        """Read until the prompt marker appears; returns (text, seen_prompt)."""
+        """Read until the prompt marker appears; returns (text, seen_prompt).
+
+        La comparaison se fait sur la DERNIÈRE ligne non vide, pas sur la fin du
+        flux : `endswith(prompt)` rendait la lecture dès l'ECHO de la commande
+        tapée, quand cette commande se termine par le marqueur. Sur un shell sans
+        prompt (PS1 vidé, le cas d'un banc QNX amorcé par `on -d -t`), le
+        marqueur est alors lu avant toute sortie réelle — le banc rend un rc
+        plausible et une sortie vide, ce qui est le pire genre d'échec.
+        """
         deadline, chunks = time.monotonic() + timeout_s, []
         self.sock.settimeout(0.2)
         while time.monotonic() < deadline:
@@ -179,9 +208,20 @@ class SerialConsole:
             if not data:
                 break
             chunks.append(data.decode("utf-8", "replace"))
-            if "".join(chunks).rstrip().endswith(self.prompt):
-                return "".join(chunks), True
+            text = "".join(chunks)
+            done = (self._at_prompt(text) if self.strict_prompt
+                    else text.rstrip().endswith(self.prompt))
+            if done:
+                return text, True
         return "".join(chunks), False
+
+    def _at_prompt(self, text):
+        """True quand la dernière ligne non vide EST le prompt (pas l'écho)."""
+        lines = [ln.strip() for ln in text.replace("\r\n", "\n").split("\n")]
+        for line in reversed(lines):
+            if line:
+                return line == self.prompt
+        return False
 
     def close(self):
         """Close the console socket (idempotent)."""

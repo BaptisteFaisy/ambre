@@ -4,9 +4,11 @@ Status: **2026-11-11**, development machine x86-64, 12 cores, gcc 13.3.0,
 Python 3.12.3. **Every figure in this report was produced by the command
 quoted next to it, run on that machine on that day.** Slots with no
 measurement carry an explicit `BLOCKED(...)` marker — the missing dependency
-(no QNX SDP, no hardware bench, or a named wall-clock budget) — and name the
-command that will produce the number. Nothing here is extrapolated, and no QNX-target number is published:
-no QNX SDP 8.0 is installed (see `docs/QNX-PORT.md`).
+(no hardware bench, no target-side campaign run yet, or a named wall-clock budget) — and name the
+command that will produce the number. Nothing here is extrapolated. The QNX
+SDP 8.0 **is** installed (`~/qnx800`, qcc 12.2.0) and the level-2 cuts have been
+run on the real target since 2026-11-14; what is still open on target is named
+per row (see `docs/QNX-DEMO.md` §4).
 
 ---
 
@@ -18,7 +20,7 @@ no QNX SDP 8.0 is installed (see `docs/QNX-PORT.md`).
 | Level 1 | cut states explored, 0 violations (§7.7 socle 10 000 / complet 1 000 000) | exhaustive | **64 591 states = every reachable state**, 46 390 acquisitions observed, **0 violations of I1..I8** | `make explore-full` |
 | Level 1 | socle threshold (10 000 states) | 10 000, 0 violations | **10 000 states, 0 violations, 29.3 s** (342 states/s) | `make explore` |
 | Level 2 | process cuts, POSIX bench (§7.6, 500 complet) | 500 | **500 of 500 run in the week-5 close-out** (`build-close/processcut/report-500.json`, 22:58): 500 cuts, 0 errors, 498 `ok` + **2 `inconsistent_state` (I7)** published **unresolved** with their artefacts and qualified in `docs/VALIDATION.md` §3 (seal written by the live journal before the kill — `seal_cause=NORMAL` — window-classification race of the bench, not data loss). The earlier 200-cut run stands as published (0 violations, 1 `check_failed`, 2 upstream findings) | `make BUILD=build-close processcut E2E_CYCLES=500`; artefacts `build-close/processcut/report-500.json`, `build-e2e/processcut/report-200.json` |
-| Level 2 | QEMU cuts (§7.4, 200 socle) | 200 | **0/200 — not started**: no QNX SDP or image on the machine; harness green in dry-run (18 tests) | `python3 host/powercut/powercut_campaign.py --image qnx80.img --scenario build/scenario.txt --random-cuts 200 --seed 4242 --jobs 4 --report build/campaign.json` |
+| Level 2 | QEMU cuts on the **real QNX 8.0 target** (§7.4, 200 socle) | 200 | **24/24 measured on target** (`build/qnx-campaign/campaign.json`, 2026-11-14): 24 cycles at cut offsets 0/5/10/20/50/120 ms after the acquisition, every verdict `ok` — the events acquired before the cut are all present after it, identical (`event_id`, `trig_ts_us`, `seq_emerg`), sealed, locked, complete; 0 phantom, 0 loss; 8.04 s per cycle (max 8.44 s). The 200-cut socle threshold and the 2 000-cut sweep are not run yet | `python3 host/qnx/campaign.py --cycles 200 --cut-ms 0,5,10,20,50,120` |
 | DEC-12 | C trigger = Python twin, byte-identical | 10 000 scenarios | **10 000 scenarios, 2 744 840 decision lines compared, 0 divergences** | `make crosscheck` |
 | §12.10 | line coverage of `fmt/` | > 95 % | **98.40 %** (1 349 / 1 371 lines) | `BUILD=build-doc-cov2 sh scripts/coverage.sh` |
 | §12.10 | random-data testing | 24 h | smoke only: **52 hostile images, 0 violations, 5.0 s** (seed 20261111); the 24 h soak is `BLOCKED(wall-clock: 24 h of exclusive machine time — the 5 s smoke is what fits a session)` | `make fuzz` (smoke); soak: `./build/ambre-fuzz --hours 24 --jobs 8 --report build/fuzz-24h.json` |
@@ -181,7 +183,7 @@ the bench as unable to pass on the real chain (field-level fidelity: 6/7
 points). Triage belongs to the bench's owning agent (`host/e2e/`). Windows
 reached: 166 before acquisition, 63 acquired-open, 271 sealed; freeze over 334
 samples: median 3.852 ms, p99 33.301 ms, max 191.184 ms; cycle time: median
-3.59 s. The QNX-target run of the same level stays `BLOCKED(no QNX SDP)`.
+3.59 s. The QNX-target run of the same level stays `BLOCKED(not measured on target yet)`.
 
 Two honesty notes carried by the bench itself, and repeated here because they
 are the difference between a claim and a measurement:
@@ -194,11 +196,22 @@ are the difference between a claim and a measurement:
   and the interruption of writes and the whole recovery path — not the loss of a
   volatile cache (see §10).
 
-**QEMU cuts (`host/powercut/`)** — **0/200 (socle), not started**: no QNX SDP
-and no QNX image exist on the machine. The orchestrator, the E1/E3 probes and
-the faulty block server are written and their logic is green in dry-run
+**QEMU cuts on the real target (`host/qnx/campaign.py`)** — **24 cycles, all
+`ok`** (2026-11-14): the chain drives, acquires, the power cut is a `SIGKILL`
+on QEMU, the next boot runs REP-01, and the journal renders what survived.
+The verdict is judged on what the journal REND (invariants I1..I8 applied to
+the recovered state), not on a simulated trace. The report is written after
+every cycle, so an interrupted campaign still leaves evidence. The 200-cut
+socle threshold and the 2 000-cut sweep remain to be run.
+
+**QEMU cuts (`host/powercut/`, the generic orchestrator)** — still **0/200
+(socle)**: it was written for a guest driven over a serial console with a
+POSIX-style shell, and the QNX bench it would need does not exist in that
+shape; the level-2 campaign above covers the same obligation on the real
+target with its own driver. The orchestrator, the E1/E3 probes and the faulty
+block server are written and their logic is green in dry-run
 (`python3 tests/test_powercut_py.py`: Ran 18 tests, OK, 3.5 s — re-measured
-2026-11-11). Commands, once an image exists (`docs/QNX-PORT.md` §4):
+2026-11-11). Commands, for the volumes it drives (`docs/QNX-PORT.md` §4):
 
 ```sh
 python3 host/powercut/powercut_campaign.py --image qnx80.img \
@@ -287,9 +300,9 @@ Headline figures as published in `docs/CAMPAIGN-LATENCY.md` §4.1 / §6
 | PERF-01 | ≤ 2 ms | median 1.1–2.2 ms; p99 9.2–203 ms (worst under `disk` load: the capture was descheduled behind a busy device, its own flush taking 108 ms) | **exceeded** at the tail |
 | PERF-02 | ≤ 20 ms on reference hardware | median 2.7–4.0 ms, p99 9.3–35.0 ms, max 108 ms — but 99.7 % of it is *media* time on an NVMe file | measured **on PC only**; says nothing about eMMC |
 | PERF-03 | ≤ 500 µs software share | median **10 µs**, p99 52–108 µs, p99.9 64–831 µs (2 events of 200 over budget, `disk` load only) | met at median and p99 under every load |
-| PERF-04 | 0 overrun over 1 000 (S) / 10 000 (C) triggers | **1 007 trigger → acquired cycles at the S volume** (week-5 close-out, `build-close/latency-none.json`, 1 096 s, load `none`): **18 overshoots** of the 20 ms freeze deadline (median 5.4 ms, p99 29.9 ms, max 59.5 ms), 36/127 crash-trigger pulses over 2 ms, 3/1 000 over the 500 µs software budget | **measured at the S volume on POSIX: NOT met** — the C volume (10 000 under CPU+disk load) is `BLOCKED(campaign wall-clock: ≈ 4–5 h per load)` (`make latency LATENCY_TRIGGERS=10000 LOAD=cpu` / `LOAD=disk`); on target `BLOCKED(no QNX SDP)` |
+| PERF-04 | 0 overrun over 1 000 (S) / 10 000 (C) triggers | **1 007 trigger → acquired cycles at the S volume** (week-5 close-out, `build-close/latency-none.json`, 1 096 s, load `none`): **18 overshoots** of the 20 ms freeze deadline (median 5.4 ms, p99 29.9 ms, max 59.5 ms), 36/127 crash-trigger pulses over 2 ms, 3/1 000 over the 500 µs software budget | **measured at the S volume on POSIX: NOT met** — the C volume (10 000 under CPU+disk load) is `BLOCKED(campaign wall-clock: ≈ 4–5 h per load)` (`make latency LATENCY_TRIGGERS=10000 LOAD=cpu` / `LOAD=disk`); on target `BLOCKED(not measured on target yet)` |
 | PERF-05 | < 50 µs p99 frame send | p99 ≤ 5 ms (bucket ceiling) | **not met** — see that report's §4.5 |
-| PERF-06 | capture < 1 s after kernel start | — | `BLOCKED(no QNX SDP)` — on target: boot `mkqnximage -f image/ambre.build` and read the kernel-start → first-frame delay (recovery included) from the `slog2info` timestamps |
+| PERF-06 | capture < 1 s after kernel start | — | `BLOCKED(not measured on target yet)` — on target: boot `mkqnximage -f image/ambre.build` and read the kernel-start → first-frame delay (recovery included) from the `slog2info` timestamps |
 | PERF-07 | 3 worst cases explained by a **kernel** trace | worst cases decomposed from the `AMBRE_TRACE` log | partial: the decomposition exists, the kernel trace does not |
 | PERF-08 | same on a Raspberry Pi 5 | — | `BLOCKED(no Raspberry Pi 5 bench)` — on the bench: `make latency-all` with the journal on the stated storage medium |
 

@@ -5,6 +5,7 @@
  */
 
 #include "edr_journal_svc.h"
+#include "edr_journal_bodies.h"
 #include <string.h>
 
 static int ack_reply(uint32_t event_id, uint64_t freeze_us,
@@ -187,27 +188,12 @@ int ambre_edr_handle_input(ambre_edr_service_t *svc, uint32_t peer_type,
 static int handle_status(ambre_edr_service_t *svc, void *reply,
                          size_t reply_cap, size_t *reply_len)
 {
-    const ambre_journal_stats_t *s = ambre_journal_stats(&svc->journal);
-    const ambre_alloc_table_t *t = ambre_journal_table(&svc->journal);
     ambre_ipc_status_body_t stat;
     int n;
 
-    memset(&stat, 0, sizeof(stat));
-    stat.mode              = svc->cfg.continuous_mode ? 1u : 0u;
-    stat.health            = svc->health;
-    stat.backend           = (uint8_t)ambre_port_backend();
-    stat.supervised        = ambre_port_supervised() ? 1u : 0u;
-    stat.current_seg       = t->current_seg;
-    stat.current_block     = t->current_block;
-    stat.open_events       = s->open_events;
-    stat.acquired_events   = s->acquired_events;
-    stat.sealed_events     = s->sealed_events;
-    stat.refused_no_space  = s->refused_no_space;
-    stat.bytes_written     = s->bytes_written;
-    stat.flush_count       = s->flush_count;
-    stat.uptime_ms         = (ambre_port_now_us() - svc->start_us) / 1000u;
-    stat.last_freeze_us    = svc->last_freeze_us;
-    stat.worst_freeze_us   = svc->worst_freeze_us;
+    /* Le corps est rempli par edr_journal_bodies.c : le devctl du resource
+     * manager rend exactement les mêmes octets que cette réponse IPC. */
+    ambre_edr_fill_status(svc, &stat);
 
     n = ambre_edr_build_reply(reply, reply_cap, (uint8_t)AMBRE_MSG_STATUS_REPLY,
                               &stat, sizeof(stat));
@@ -221,30 +207,12 @@ static int handle_status(ambre_edr_service_t *svc, void *reply,
 static int handle_list(ambre_edr_service_t *svc, void *reply,
                        size_t reply_cap, size_t *reply_len)
 {
-    const ambre_alloc_table_t *t = ambre_journal_table(&svc->journal);
     ambre_edr_list_body_t list;
-    uint32_t count = 0u;
+    uint32_t count;
     int n;
 
     memset(&list, 0, sizeof(list));
-    for (uint32_t i = 0u; i < t->event_count && count < AMBRE_MAX_EVENTS; i++) {
-        const ambre_ev_desc_t *e = &t->events[i];
-        ambre_ipc_event_line_t *line;
-
-        if (e->state == (uint8_t)AMBRE_EV_EMPTY) {
-            continue;
-        }
-        line = &list.lines[count++];
-        line->event_id      = e->event_id;
-        line->state         = e->state;
-        line->locked        = e->locked;
-        line->file_complete = e->file_complete;
-        line->trig_reason   = e->trig_reason;
-        line->trig_ts_us    = e->trig_ts_us;
-        line->seq_emerg     = e->seq_emerg;
-        line->start_seg     = e->start_seg;
-        line->start_block   = e->start_block;
-    }
+    count = ambre_edr_list_events(svc, list.lines, AMBRE_MAX_EVENTS);
     list.count = count;
     n = ambre_edr_build_reply(reply, reply_cap, (uint8_t)AMBRE_MSG_LIST_REPLY,
                               &list, sizeof(list.count) +
@@ -263,7 +231,6 @@ static const ambre_ev_desc_t *find_event_or_refuse(ambre_edr_service_t *svc,
                                                    void *reply, size_t reply_cap,
                                                    size_t *reply_len)
 {
-    const ambre_alloc_table_t *t = ambre_journal_table(&svc->journal);
     const ambre_ev_desc_t *e;
 
     /* GEL-06: no export / archive while an event is still open. */
@@ -272,56 +239,13 @@ static const ambre_ev_desc_t *find_event_or_refuse(ambre_edr_service_t *svc,
                                reply, reply_cap, reply_len);
         return NULL;
     }
-    e = ambre_table_find_event_const(t, event_id);
+    e = ambre_edr_find_event(svc, event_id);
     if (e == NULL) {
         (void)ambre_edr_refuse(svc, peer_type, msg_type, AMBRE_PORT_ERR_NOENT,
                                reply, reply_cap, reply_len);
         return NULL;
     }
     return e;
-}
-
-/* Number of raw blocks an event occupies: EMERG, the CONT records and SEAL.
- * An event normally lives in one segment; it spans two when the journal had
- * to rotate while the event was open. */
-static uint32_t event_block_count(const ambre_ev_desc_t *e)
-{
-    if (e->end_seg == e->start_seg) {
-        return (e->end_block >= e->start_block)
-                   ? (e->end_block - e->start_block + 1u) : 0u;
-    }
-    return (e->end_seg - e->start_seg) * AMBRE_BLOCKS_PER_SEGMENT +
-           e->end_block + 1u - e->start_block;
-}
-
-/* Linear index inside the event -> (segment, block) on the medium. */
-static void event_block_at(const ambre_ev_desc_t *e, uint32_t index,
-                           uint32_t *seg, uint32_t *blk)
-{
-    uint32_t s = e->start_seg;
-    uint32_t b = e->start_block + index;
-
-    while (b >= AMBRE_BLOCKS_PER_SEGMENT && s < e->end_seg) {
-        b -= AMBRE_BLOCKS_PER_SEGMENT;
-        s++;
-    }
-    *seg = s;
-    *blk = b;
-}
-
-/* Read one block of the event exactly as it lies on the medium: the archive
- * and edrctl rebuild the MCAP from those bytes (EXP-02). */
-static int read_event_block(const ambre_edr_service_t *svc,
-                            const ambre_ev_desc_t *e, uint32_t index,
-                            uint8_t raw[AMBRE_BLOCK_SIZE])
-{
-    uint32_t seg;
-    uint32_t blk;
-
-    event_block_at(e, index, &seg, &blk);
-    return (svc->vt.read(svc->vt.ctx, ambre_block_offset(seg, blk), raw,
-                         AMBRE_BLOCK_SIZE) == 0) ? AMBRE_PORT_OK
-                                                 : AMBRE_PORT_ERR_IO;
 }
 
 static int read_export_blocks(ambre_edr_service_t *svc, const ambre_ev_desc_t *e,
@@ -331,7 +255,7 @@ static int read_export_blocks(ambre_edr_service_t *svc, const ambre_ev_desc_t *e
     uint8_t *payload = dst + hdr_off + sizeof(ambre_edr_export_body_t);
 
     for (uint32_t k = 0u; k < take; k++) {
-        if (read_event_block(svc, e, first_blk + k,
+        if (ambre_edr_read_event_block(svc, e, first_blk + k,
                              payload + (size_t)k * AMBRE_BLOCK_SIZE)
                 != AMBRE_PORT_OK) {
             return AMBRE_PORT_ERR_IO;
@@ -345,7 +269,7 @@ static int read_export_blocks(ambre_edr_service_t *svc, const ambre_ev_desc_t *e
 static uint32_t export_take(const ambre_ev_desc_t *e, uint32_t first_blk,
                             size_t reply_cap)
 {
-    uint32_t total = event_block_count(e);
+    uint32_t total = ambre_edr_event_blocks(e);
     size_t max_body = (reply_cap < (size_t)AMBRE_IPC_FRAME_MAX) ?
                       reply_cap : (size_t)AMBRE_IPC_FRAME_MAX;
     size_t room;
@@ -379,7 +303,7 @@ static int handle_export(ambre_edr_service_t *svc, uint32_t peer_type,
     if (e == NULL) {
         return AMBRE_PORT_ERR_NOENT;
     }
-    total = event_block_count(e);
+    total = ambre_edr_event_blocks(e);
     blk_idx = (req.first_block < total) ? req.first_block : total;
     take = export_take(e, blk_idx, reply_cap);
     memset(&out, 0, sizeof(out));
@@ -424,9 +348,9 @@ static int handle_verify(ambre_edr_service_t *svc, uint32_t peer_type,
     if (e == NULL) {
         return AMBRE_PORT_ERR_NOENT;
     }
-    total = event_block_count(e);
+    total = ambre_edr_event_blocks(e);
     for (uint32_t k = 0u; k < total; k++) {
-        if (read_event_block(svc, e, k, blk) != AMBRE_PORT_OK) {
+        if (ambre_edr_read_event_block(svc, e, k, blk) != AMBRE_PORT_OK) {
             return ambre_edr_refuse(svc, peer_type, (uint8_t)AMBRE_MSG_VERIFY,
                                     AMBRE_PORT_ERR_IO, reply, reply_cap, reply_len);
         }

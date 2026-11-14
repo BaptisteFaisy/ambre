@@ -342,11 +342,45 @@ QNX_PORT_SRC   := target/port/ambre_port_qnx.c target/port/ambre_port_disk_qnx.c
                   target/port/ambre_port_ipc_qnx.c
 QNX_COMMON_SRC := $(FMT_SRC) $(IPC_SRC) $(QNX_PORT_SRC)
 QNX_COMMON_OBJ := $(patsubst %.c,$(QBUILD)/%.o,$(QNX_COMMON_SRC))
-QNX_DIR_OBJ     = $(patsubst %.c,$(QBUILD)/%.o,$(wildcard target/$(1)/*.c))
+# Les moitiés POSIX sont remplacées par leur équivalent `_qnx.c` : le filtre les
+# exclut du lien de la cible, comme PORT_SRC le fait pour la couche portabilité.
+# Sans ce filtre, `make qnx` lie les DEUX moitiés d'une même API (le lien
+# redéfinit alors ambre_journal_serve_resmgr, mesuré le 2026-11-14).
+QNX_DIR_OBJ     = $(patsubst %.c,$(QBUILD)/%.o,$(filter-out %_posix.c,$(wildcard target/$(1)/*.c)))
 QNX_CPP_OBJ     = $(patsubst %.cpp,$(QBUILD)/%.o,$(wildcard target/$(1)/*.cpp))
 
 QNX_BINS := $(QBUILD)/edr-journal $(QBUILD)/edr-capture $(QBUILD)/edr-replay \
             $(QBUILD)/edrctl $(QBUILD)/edr-archive
+
+# Les deux sondes du banc : un VRAI client devctl() du journal (QNX-01, QNX-03,
+# OBS-02, EXP-01, EXP-08) et la sonde d'intrusion de la politique noyau (SEC-01,
+# SEC-02, SEC-03, VIE-03). Elles ne lient RIEN du port QNX (précédent
+# name_probe.c) : elles se compilent seules, contre les vrais en-têtes de la SDP.
+QNX_PROBES := $(QBUILD)/devctl_probe $(QBUILD)/secpol_probe
+
+$(QBUILD)/devctl_probe: host/qnx_probe/devctl_probe.c
+	@mkdir -p $(QBUILD)
+	$(QNX_CC) $(QNX_CFLAGS) $< -o $@ $(QNX_LIBS)
+
+$(QBUILD)/secpol_probe: host/qnx_probe/secpol_probe.c
+	@mkdir -p $(QBUILD)
+	$(QNX_CC) $(QNX_CFLAGS) $< -o $@ $(QNX_LIBS)
+
+qnx-probes: $(QNX_PROBES)
+	@for b in $(QNX_PROBES); do \
+	  printf '  qnx %-13s %s\n' "$$(basename $$b)" \
+	    "$$(file -b $$b | cut -d, -f1-2)"; done
+
+# La politique de sécurité : `secpolcompile` est le test d'acceptation de
+# image/ambre.sec (sa grammaire ne peut pas être vérifiée autrement). rc=0 veut
+# dire « compilable », pas « appliquée » — l'application est démontrée sur cible
+# par secpol_probe (docs/QNX-DEMO.md §Politique).
+secpol: $(QBUILD)/secpol.bin
+	@printf '  secpol %s (%s octets)\n' "$<" "$$(stat -c %s $<)"
+
+$(QBUILD)/secpol.bin: image/ambre.sec
+	@mkdir -p $(QBUILD)
+	secpolcompile -o $@ $<
 
 $(QBUILD)/%.o: %.c
 	@mkdir -p $(dir $@)

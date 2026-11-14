@@ -15,6 +15,7 @@
 #define _DEFAULT_SOURCE 1
 
 #include "edr_journal_qnx_internal.h"
+#include "edr_journal_svc.h"
 
 /* ------------------------------------------------------- access control --- */
 
@@ -84,69 +85,129 @@ static int build_status_text(char *out, size_t cap)
 /* ------------------------------------------------------------- devctls ---- */
 
 /* QNX-only: verified on target, syntax-checked on PC */
+/* OBS-02, EXP-01 : le statut binaire du journal.
+ *
+ * LA RÉPONSE D'UN DEVCTL S'ÉCRIT DANS LE PAYLOAD DU MESSAGE. `_RESMGR_PTR()`
+ * enregistre un pointeur vers un tampon séparé, et le noyau interprète ce
+ * tampon comme LE message de réponse complet : il prend les 16 premiers octets
+ * pour l'en-tête `_io_devctl_reply` (zero, ret_val, nbytes, zero2 — sys/iomsg.h
+ * 590-596) et recopie la suite. Résultat mesuré sur la cible le 2026-11-14 : le
+ * serveur avait les bonnes valeurs (mode=1 backend=2 bytes_written=512, imprimé
+ * par le diagnostic ci-dessous) et le client recevait exactement ces mêmes
+ * octets DÉCALÉS DE 16 — 512 atterrissant dans open_events, 1 dans sealed_events,
+ * et la fin du tampon laissée intacte. La doc SDP est explicite : pour un
+ * io_devctl, `_IO_INPUT_PAYLOAD(msg)` et `_IO_OUTPUT_PAYLOAD(msg)` retournent la
+ * même adresse, et `_DEVCTL_DATA()` est déprécié (com.qnx.doc.security.system/
+ * topic/manual/fortified.html). Le corps est donc écrit dans le payload, la
+ * longueur dans `o.nbytes`, et le handler rend EOK sans `_RESMGR_PTR()`.
+ *
+ * QNX-only: verified on target, syntax-checked on PC */
 static int devctl_status(resmgr_context_t *ctp, io_devctl_t *msg)
 {
-    ambre_ipc_status_body_t st;
+    ambre_ipc_status_body_t *out = (ambre_ipc_status_body_t *)_IO_OUTPUT_PAYLOAD(msg);
 
-    memset(&st, 0, sizeof(st));
-    if (g_edr_jrn.src.status != NULL && g_edr_jrn.src.status(g_edr_jrn.src.ctx, &st) != 0) {
+    if (g_edr_jrn.src.status == NULL) {
+        return ENOSYS;
+    }
+    if (sizeof(*out) > (size_t)ctp->msg_max_size) {
+        return EMSGSIZE;
+    }
+    if (g_edr_jrn.src.status(g_edr_jrn.src.ctx, out) != 0) {
         return EIO;
     }
-    st.backend = (uint8_t)ambre_port_backend();
-    st.supervised = ambre_port_supervised() ? 1u : 0u;
-    msg->o.nbytes = (int32_t)sizeof(st);
-    return _RESMGR_PTR(ctp, &st, sizeof(st));
+    out->backend = (uint8_t)ambre_port_backend();
+    out->supervised = ambre_port_supervised() ? 1u : 0u;
+    msg->o.nbytes = (int32_t)sizeof(*out);
+    /* `_RESMGR_PTR(ctp, msg, ...)` : le tampon de réponse EST le message,
+     * en-tête `_io_devctl_reply` compris. Les deux autres formes se sont mesurées
+     * fausses sur la cible (2026-11-14) : `_RESMGR_PTR(ctp, &st, sizeof st)` fait
+     * lire les 16 premiers octets du corps comme l'en-tête — le client reçoit le
+     * corps DÉCALÉ DE 16 (512 dans open_events, 1 dans sealed_events) — et
+     * rendre EOK sans `_RESMGR_PTR` ne répond QUE l'en-tête, le tampon du client
+     * restant intact (0xAA partout). Les deux symptoms, une seule cause : la
+     * longueur de réponse vient du tampon pointé, pas de `o.nbytes` seul. */
+    return _RESMGR_PTR(ctp, msg, sizeof(io_devctl_t) + (size_t)msg->o.nbytes);
 }
 
 /* QNX-only: verified on target, syntax-checked on PC */
+/* EXP-01 : la liste des événements, par le corps gelé de l'IPC (compteur puis
+ * lignes) — auto-descriptif, écrit dans le payload pour la même raison que
+ * devctl_status.
+ * QNX-only: verified on target, syntax-checked on PC */
 static int devctl_list(resmgr_context_t *ctp, io_devctl_t *msg)
 {
-    static ambre_ipc_event_line_t lines[EDR_MAX_EVENTS];
+    ambre_edr_list_body_t *out = (ambre_edr_list_body_t *)_IO_OUTPUT_PAYLOAD(msg);
     int got;
-    size_t bytes;
 
     if (g_edr_jrn.src.list == NULL) {
         return ENOSYS;
     }
-    got = g_edr_jrn.src.list(g_edr_jrn.src.ctx, lines, EDR_MAX_EVENTS);
+    if (sizeof(*out) > (size_t)ctp->msg_max_size) {
+        return EMSGSIZE;
+    }
+    got = g_edr_jrn.src.list(g_edr_jrn.src.ctx, out->lines, EDR_MAX_EVENTS);
     if (got < 0) {
         return EIO;
     }
-    bytes = (size_t)got * sizeof(lines[0]);
-    msg->o.nbytes = (int32_t)bytes;
-    return _RESMGR_PTR(ctp, lines, bytes);
+    out->count = (uint32_t)got;
+    msg->o.nbytes = (int32_t)(sizeof(out->count)
+                              + (size_t)got * sizeof(out->lines[0]));
+    return _RESMGR_PTR(ctp, msg, sizeof(io_devctl_t) + (size_t)msg->o.nbytes);
 }
 
 /* QNX-only: verified on target, syntax-checked on PC */
+/* EXP-01, EXP-08 : les blocs bruts d'un événement, tels qu'ils sont sur le
+ * média. La requête (event_id, premier bloc) arrive dans le payload ENTRANT —
+ * le même tampon que la sortie, d'où la copie préalable de la requête : écrire
+ * la réponse avant de lire l'entrée écraserait l'entrée.
+ * QNX-only: verified on target, syntax-checked on PC */
 static int devctl_export(resmgr_context_t *ctp, io_devctl_t *msg)
 {
-    static uint8_t blocks[7u * AMBRE_BLOCK_SIZE];
+    uint8_t *pay = (uint8_t *)_IO_OUTPUT_PAYLOAD(msg);
+    ambre_edr_export_body_t *head = (ambre_edr_export_body_t *)pay;
     uint32_t req[2];
-    uint32_t count = (uint32_t)(sizeof(blocks) / AMBRE_BLOCK_SIZE);
+    uint32_t room;
+    uint32_t count;
+    int got;
 
-    if (msg->i.nbytes < sizeof(req)) {
+    if (msg->i.nbytes < (int)sizeof(req)) {
         return EINVAL;
     }
     if (resmgr_msgread(ctp, req, sizeof(req), sizeof(io_devctl_t))
         != (ssize_t)sizeof(req)) {
         return EFAULT;
     }
-    if (g_edr_jrn.src.event_blocks == NULL
-        || g_edr_jrn.src.event_blocks(g_edr_jrn.src.ctx, req[0], req[1], count,
-                                  blocks) != 0) {
+    if (g_edr_jrn.src.event_blocks == NULL) {
+        return ENOSYS;
+    }
+    room = (uint32_t)((ctp->msg_max_size < sizeof(ambre_edr_export_body_t))
+                      ? 0u : (size_t)ctp->msg_max_size - sizeof(ambre_edr_export_body_t));
+    count = room / AMBRE_BLOCK_SIZE;
+    if (count > DCMD_EDR_EXPORT_BLOCKS) {
+        count = DCMD_EDR_EXPORT_BLOCKS;
+    }
+    if (count == 0u) {
+        return EMSGSIZE;
+    }
+    got = g_edr_jrn.src.event_blocks(g_edr_jrn.src.ctx, req[0], req[1], count,
+                                     pay + sizeof(*head));
+    if (got < 0) {
         return EIO;
     }
-    msg->o.nbytes = (int32_t)sizeof(blocks);
-    return _RESMGR_PTR(ctp, blocks, sizeof(blocks));
+    head->event_id = req[0];
+    head->first_block = req[1];
+    head->block_count = (uint32_t)got;
+    head->total_blocks = (uint32_t)got;
+    msg->o.nbytes = (int32_t)(sizeof(*head) + (size_t)got * AMBRE_BLOCK_SIZE);
+    return _RESMGR_PTR(ctp, msg, sizeof(io_devctl_t) + (size_t)msg->o.nbytes);
 }
 
 /* QNX-only: verified on target, syntax-checked on PC */
 int edr_io_devctl(resmgr_context_t *ctp, io_devctl_t *msg,
                          RESMGR_OCB_T *ocb)
 {
-    /* struct edr_qnx_ocb keeps iofunc_ocb_t as its first member, so the cast
-     * is the one the iofunc layer itself performs. */
-    int status = iofunc_devctl_default(ctp, msg, (iofunc_ocb_t *)ocb);
+
+    int status = iofunc_devctl_default(ctp, msg, ocb);
 
     if (status != _RESMGR_DEFAULT) {
         return status;
@@ -167,51 +228,42 @@ int edr_io_devctl(resmgr_context_t *ctp, io_devctl_t *msg,
         }
         return (g_edr_jrn.src.autotest(g_edr_jrn.src.ctx) == 0) ? EOK : EIO;
     default:
+        /* Diagnostic : le dcmd reçu ne correspond à aucune commande. Sans cette
+         * ligne, un client et un serveur qui n'encodent pas pareil se répondent
+         * ENOTTY et personne ne voit lequel des deux a tort. */
+        ambre_port_log(AMBRE_LOG_WARN, "edr-journal",
+                       "devctl inconnu: recu=0x%x attendu status=0x%x list=0x%x "
+                       "export=0x%x autotest=0x%x",
+                       (unsigned)msg->i.dcmd, (unsigned)DCMD_EDR_STATUS,
+                       (unsigned)DCMD_EDR_LIST, (unsigned)DCMD_EDR_EXPORT,
+                       (unsigned)DCMD_EDR_AUTOTEST);
         return ENOTTY;
     }
 }
 
 /* ------------------------------------------------------- read / write ----- */
 
-/* EXP-08: raw blocks of one event, resumable by byte offset.
- * QNX-only: verified on target, syntax-checked on PC */
-static int event_read(resmgr_context_t *ctp, io_read_t *msg, RESMGR_OCB_T *ocb)
-{
-    uint32_t first;
-    size_t off_in_block;
-    size_t want = msg->i.nbytes;
-
-    if (g_edr_jrn.src.event_blocks == NULL) {
-        return ENOSYS;
-    }
-    first = (uint32_t)((uint64_t)ocb->ocb.offset / AMBRE_BLOCK_SIZE);
-    off_in_block = (size_t)((uint64_t)ocb->ocb.offset % AMBRE_BLOCK_SIZE);
-    if (g_edr_jrn.src.event_blocks(g_edr_jrn.src.ctx, ocb->event_id, first, 1u,
-                               ocb->blocks) != 0) {
-        return EIO;
-    }
-    if (want > sizeof(ocb->blocks) - off_in_block) {
-        want = sizeof(ocb->blocks) - off_in_block;
-    }
-    ocb->ocb.offset += (off_t)want;
-    _IO_SET_READ_NBYTES(ctp, want);
-    return _RESMGR_PTR(ctp, ocb->blocks + off_in_block, want);
-}
-
-/* OBS-02: read() on /dev/edr returns the text status.
+/* OBS-02 : read() sur /dev/edr rend le statut du journal en texte.
+ *
+ * La reprise d'un événement par chemin (/dev/edr/events/<id>, EXP-08) exigeait
+ * de stocker l'identifiant dans l'OCB ; l'OCB est maintenant celui de la
+ * bibliothèque QNX (voir edr_journal_qnx.c), donc ce chemin n'est pas servi ici.
+ * L'export des blocs bruts passe par DCMD_EDR_EXPORT, qui porte l'identifiant et
+ * le premier bloc DANS la requête — et c'est cette voie qui est mesurée sur la
+ * cible par host/qnx_probe/devctl_probe.c.
  * QNX-only: verified on target, syntax-checked on PC */
 int edr_io_read(resmgr_context_t *ctp, io_read_t *msg, RESMGR_OCB_T *ocb)
 {
-    char text[EDR_TEXT_MAX];
+    /* STATIQUE pour la même raison que devctl_status : la réponse part par
+     * `_RESMGR_PTR()`, qui ne copie pas. Un tampon local ici rendrait le texte
+     * de statut OBS-02 illisible sur la cible, silencieusement. */
+    static char text[EDR_TEXT_MAX];
     int len;
     size_t want;
-    int status = iofunc_read_verify(ctp, msg, (iofunc_ocb_t *)ocb, NULL);
+    int status = iofunc_read_verify(ctp, msg, ocb, NULL);
 
     if (status != EOK) {
         return status;
-    }
-    if (ocb->event_id != 0u) {
-        return event_read(ctp, msg, ocb);
     }
     if (edr_gate(ctp, AMBRE_OP_READ_STATUS, AMBRE_MSG_STATUS) != EOK) {
         return EACCES;
@@ -220,18 +272,18 @@ int edr_io_read(resmgr_context_t *ctp, io_read_t *msg, RESMGR_OCB_T *ocb)
     if (len <= 0) {
         return EIO;
     }
-    if ((uint64_t)ocb->ocb.offset >= (uint64_t)len) {
+    if ((uint64_t)ocb->offset >= (uint64_t)len) {
         _IO_SET_READ_NBYTES(ctp, 0);
         return _RESMGR_PTR(ctp, text, 0);
     }
-    want = (size_t)len - (size_t)ocb->ocb.offset;
+    want = (size_t)len - (size_t)ocb->offset;
     if (want > msg->i.nbytes) {
         want = msg->i.nbytes;
     }
     {
-        char *from = text + (size_t)ocb->ocb.offset;
+        char *from = text + (size_t)ocb->offset;
 
-        ocb->ocb.offset += (off_t)want;
+        ocb->offset += (off_t)want;
         _IO_SET_READ_NBYTES(ctp, want);
         return _RESMGR_PTR(ctp, from, want);
     }
@@ -242,7 +294,7 @@ int edr_io_read(resmgr_context_t *ctp, io_read_t *msg, RESMGR_OCB_T *ocb)
 int edr_io_write(resmgr_context_t *ctp, io_write_t *msg,
                         RESMGR_OCB_T *ocb)
 {
-    int status = iofunc_write_verify(ctp, msg, (iofunc_ocb_t *)ocb, NULL);
+    int status = iofunc_write_verify(ctp, msg, ocb, NULL);
 
     if (status != EOK) {
         return status;

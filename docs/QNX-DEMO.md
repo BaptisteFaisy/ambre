@@ -1,67 +1,143 @@
-# QNX 8.0 live demo — bench and status
+# Ambre — banc QNX 8.0 live, et ce qu'il prouve
 
-The SDP 8.0 is installed on the dev machine (`~/qnx800`, qcc 12.2.0), so the
-five processes build for the real target (`make qnx`, see `docs/QNX-PORT.md`).
-This file is the state of the **live on-target demo**: it boots QNX 8.0 under
-QEMU and runs the recorder on a raw disk, with the power cut being a SIGKILL
-on QEMU (spec §7.4).
+Le SDP 8.0 est installé (`~/qnx800`, qcc 12.2.0) et l'image **démarre** sous
+QEMU : la chaîne complète — conduite, déclenchement UN R160, acquisition sur
+média brut, coupure d'alimentation, récupération — tourne dans le guest, et la
+vitrine en ligne le montre en continu (https://tradoooo.github.io/ambre/emulator.html).
 
-## What provably works today
+Cette page remplace celle du 12/11, qui affirmait que « `edr-journal` ne peut
+pas ouvrir `/dev/hd0` ». C'est faux depuis le 12/11 au soir, et les lignes qui
+suivent sont mesurées, pas déduites.
 
-1. `make qnx` links the five binaries for `nto x86_64`.
-2. `image/qemu.build` is a minimal boot image (IFS): the kernel, ksh, the PCI
-   server, the five Ambre processes, a demo script. It builds with
-   `mkifs` (see below) and **boots QNX 8.0 under QEMU**.
-3. On target, the demo script (`image/demo-qnx.sh`, run from the IFS startup)
-   executes and the `edrctl` binary runs (the guest prints the demo banners
-   and the journal's diagnostics on the serial console).
+---
 
-## What blocks the full chain (the one remaining lever)
+## 1. Ce qui est démontré sur la cible réelle
 
-`edr-journal` starts but cannot open `/dev/hd0`: the guest's block driver does
-not expose the QEMU disk. The minimal IFS carries `devb-eide` / `devb-ahci`,
-`io-blk.so`, `libcam.so.2`, `cam-disk.so` and the PCI capabilities
-`pci_cap-0x01/0x05/0x10/0x11`, but the device node never appears, so the
-journal has nothing to open. On the SDP's own quickstart image (which has a
-much larger module set), the same QEMU disk IS exposed and mounts — so the
-minimal image is missing a module or a PCI capability, most likely for the
-storage controller. Finding that one module is the next step; nothing else is
-missing, the recorder itself runs.
+| Ce que la cible prouve | Preuve (reproductible) |
+|---|---|
+| les cinq processus se compilent pour `nto x86_64` | `make qnx` (qcc 12.2.0, aucun avertissement, `-Werror`) |
+| l'IFS démarre, le block stack publie le média | `ls /dev/hd0t177` dans le guest ; `devb-eide` + `io-blk.so` + `cam-disk.so` |
+| le journal ouvre la partition et court la récupération au démarrage (REP-01) | `slog2info` : `edr-journal: recovery done: 8 event(s)`, `self-test: OK (OBS-04)`, `serving /dev/edr/journal (backend qnx, prio 62)` |
+| la conduite déclenche et le journal ACQUIERT l'événement sur le média | `edrctl list` : `event 1 sealed locked=yes complete_file=yes reason=restraint` |
+| la coupure d'alimentation (SIGKILL sur QEMU) ne perd pas l'événement | le même `event_id`, le même `trig_ts_us`, le même `seq_emerg` après re-amorce |
+| **le devctl du journal répond** (QNX-01, QNX-03, OBS-02, EXP-01, EXP-08) | `host/qnx_probe/devctl_probe.c` : STATUS, LIST, EXPORT, AUTOTEST — et les mêmes valeurs que le transport IPC sur le même journal |
+| **la matrice d'accès du service est appliquée sur la cible** (SEC-01) | `on -u 0:4 devctl_probe status` rend le statut ; `on -u 0:3` (producteur) reçoit `EACCES` (rc=13) |
+| **l'archive écrit sur un SECOND média** (STO-07) | partition FAT32 (`/dev/hd1t12`) montée sur `/arch` ; `edr-archive --once` y pose `event-000001-000001.mcap` |
+| **ce MCAP est vérifiable hors du guest** | extrait de l'image brute côté hôte, puis `host/verify/edr_verify.py` : 10 des 11 vérifications passent (la onzième ci-dessous) |
+| **la campagne de coupures niveau 2 tourne et se juge** | `host/qnx/campaign.py` → `build/qnx-campaign/campaign.json`, un verdict par cycle, I1..I8 jugés sur ce que le journal rend |
 
-## Bench commands (scripts/qnx-vm.sh)
+## 2. Le banc, en un commande
+
+Tout ce qui touche la cible vit dans `host/qnx/` — une seule implémentation,
+trois consommateurs (la vitrine, la campagne, le banc interactif) :
 
 ```sh
 source ~/qnx800/qnxsdp-env.sh
-make qnx -B                                   # the five binaries
-python3 host/scenarios/generate.py --preset urban-frontal --seed 2026 \
-    --duration-ms 4000 --crash-at-ms 2500 --out build/qnx-vm/scenario.txt
-# build the IFS:
-SEARCH="$QNX_TARGET/x86_64:$QNX_TARGET/x86_64/boot/sys:$QNX_TARGET/x86_64/bin:$QNX_TARGET/x86_64/usr/bin:$QNX_TARGET/x86_64/sbin:$QNX_TARGET/x86_64/lib:$QNX_TARGET/x86_64/lib/dll:$QNX_TARGET/x86_64/usr/lib:$PWD/build/qnx:$PWD/build/qnx-vm"
-sed "s|@SEARCH@|$SEARCH|" image/qemu.build > build/qnx-vm/qemu.build
-mkifs -v build/qnx-vm/qemu.build build/qnx-vm/ifs.bin
-# boot:
-qemu-system-x86_64 -enable-kvm -cpu host -smp 2 -m 1024 \
-    -kernel build/qnx-vm/ifs.bin \
-    -drive file=build/qnx-vm/journal.raw,format=raw,if=ide,cache=none \
-    -display none -vga none -serial unix:build/qnx-vm/console.sock,server=on,wait=off \
-    -serial unix:build/qnx-vm/shell.sock,server=on,wait=off
-# the demo runs on the second serial (socat UNIX-CONNECT:shell.sock TCP-LISTEN:4556):
-socat UNIX-CONNECT:build/qnx-vm/console.sock TCP-LISTEN:4555,reuseaddr,fork &
-socat UNIX-CONNECT:build/qnx-vm/shell.sock  TCP-LISTEN:4556,reuseaddr,fork &
-# watch:     scripts/qnx_console.py 4556
-# read:      scripts/qnx_bridge.py build/qnx-vm/shell.sock 4556 build/qnx-vm/shell.log
+python3 host/qnx/bench.py prepare --workdir build/qnx-bench   # binaires, médias, IFS
+python3 host/qnx/bench.py repl    --workdir build/qnx-bench    # shell de bench sur la 2e série
+python3 host/qnx/campaign.py --cycles 24 --cut-ms 0,5,10,20,50,120
 ```
 
-`scripts/qnx_console.py` logs in over the serial console (the demo image has no
-login) and runs commands; `scripts/qnx_bridge.py` is the one-shot-stream bridge
-between a QEMU unix socket and a TCP port.
+`image/vitrine.build` n'est **pas** modifié : le banc lit ce buildfile tel quel
+et y **insère** ses blocs (console de bench, montage d'archive, fichiers de
+sondes) au niveau d'ancres. La vitrine live se construit donc bit-pour-bit comme
+avant — c'est le point : aucun changement de l'image en ligne n'est nécessaire
+pour faire avancer le banc.
 
-## Honesty
+Console : le noyau occupe le premier port 8250 (0x3f8), le bench le second
+(0x2f8 = `/dev/ser2`), où `PS1` est vidé et chaque commande encadrée par
+`AMBRE-BEGIN`/`AMBRE-END` — un shell amorcé sans `/etc/passwd` n'a pas de prompt
+fiable, et le lecteur ne doit pas en deviner un.
 
-The journal disk is `build/qnx-vm/journal.raw` (64 MiB, `cache=none`, no file
-system). The power cut is `kill -9` on the QEMU pid. Nothing here emulates the
-12 V rail: whatever the guest had not flushed through the block driver is gone,
-exactly as the spec's level-2 essay states. Until the block-driver module is
-found, the chain on target stops at "journal cannot open the device": the
-recovery-after-power-cut part is not yet demonstrated on target, and it stays
-`BLOCKED` in the validation pages until it is.
+## 3. Ce que le banc a révélé (huit défauts réels, tous corrigés)
+
+Un banc qui sert la cible sert d'abord à ça : les huit points ci-dessous
+n'étoient visibles nulle part ailleurs, et six d'entre eux étoient dans le
+chemin de la démo live.
+
+1. **`resmgr_attach()` : `flags` et `ftype` inversés.** La signature de la SDP
+   est `(dpp, attr, path, flags, ftype, …)` ; le dépôt passait
+   `(_FTYPE_ANY, _RESMGR_FLAG_DIR)`, donc des flags invalides au noyau — un
+   `SIGABRT` au démarrage du service, **sur la cible seulement** : la doublure
+   (`target/qnx-stub`) a la même signature que la SDP, et la vérification
+   syntaxique ne pouvait rien voir.
+2. **`thread_pool_start()` avec `POOL_FLAG_EXIT_SELF` ne revient pas** (documenté :
+   « the function may or may not return, depending on the flags »). Le processus
+   devenait le pool et la boucle IPC — celle à qui `edrctl` et `edr-capture`
+   parlent — ne tournait jamais : le service s'attachait mais ne répondait plus.
+3. **Les codes devctl n'étoient pas encodés** (taille 0, classe hors table QNX) :
+   le noyau ne remontait rien au client. Voir `docs/QNX-ABI.md` §3.
+4. **La réponse d'un devctl s'écrit dans le payload du message**, pas dans un
+   tampon séparé : `_RESMGR_PTR(ctp, &corps, …)` fait lire les 16 premiers
+   octets du corps comme l'en-tête `_io_devctl_reply`, et le client reçoit le
+   corps **décalé de 16 octets** — 512 dans `open_events`, 1 dans
+   `sealed_events`. Des valeurs plausibles, fausses, et donc le genre de défaut
+   qu'aucun regard ne trouve : ce sont les octets bruts qui l'ont montré.
+5. **`_RESMGR_PTR()` ne copie pas** : il enregistre un pointeur, et le noyau
+   répond après le retour du handler. Un tampon local (le corps de STATUS, le
+   texte de statut de `read()`) est déjà mort à ce moment-là. Les deux sont
+   devenus statiques.
+6. **`image/ambre.build` embarquait le mauvais runtime C++.** `edr-archive` lie
+   `libc++.so.2` (`readelf -d`), pas `libstdc++.so.6` : le chargeur du guest
+   imprimait `ldd:FATAL: Could not load library libc++.so.2` et l'archive ne
+   démarroit jamais, même avec un média et un montage corrects.
+7. **Le type du module FAT est `dos`, pas `msdos`** (la page SDP de `fs-dos.so`
+   donne la syntaxe `driver … dos dos_options …`). `mount -t msdos` cherchoit
+   `fs-msdos.so` → « Can't access shared library », avec le module présent.
+8. **Un nœud de partition se nomme d'après l'octet de type MBR, en décimal** :
+   une partition FAT32 (0x0C) est `/dev/hd1t12`, pas `/dev/hd1t177` (réservé à
+   0xB1, le QNX6 du média d'archive produit). Monter `hd1t177` sur une
+   partition 0x0C ne donne rien.
+
+Deux défauts d'outillage côté hôte, au passage :
+
+9. **`vm_util.GuestResult` n'étoit pas défini là où `run_capture()` et
+   `SerialConsole` le construisent** : tout chemin d'erreur (pas de prompt,
+   timeout, socket absent) levait un `NameError` au lieu de rendre un résultat —
+   un banc muet se transformoit en plantage, sans rapport. La classe vit
+   désormais dans `vm_util`, et `qemu_vm` l'importe.
+10. **`SerialConsole` clôtoit sa lecture sur `endswith(prompt)`** : quand la
+    commande envoyée se termine elle-même par le marqueur (le cas d'un shell
+    sans prompt), l'**écho** de la ligne tapée déclenchoit la fin de lecture —
+    le banc rendoit un rc plausible et une sortie vide. Le mode strict
+    (`strict_prompt=True`, utilisé par le banc) juge sur la dernière ligne non
+    vide ; le défaut reste l'ancien comportement pour les campagnes qui ont un
+    vrai prompt.
+
+## 4. Ce que la cible ne prouve PAS encore
+
+Écrit ici pour qu'aucune phrase du dépôt ne puisse le lire comme une réussite.
+
+| Ouvert | Pourquoi, mesuré |
+|---|---|
+| **la politique de sécurité appliquée dans le noyau** (SEC-01/02/03/06, VIE-03, QNX-06) | `image/ambre.sec` **compile** (`make secpol`, rc=0, aucun avertissement) — la grammaire est vraie. Son **application** ne l'est pas : pousser cette politique dans cette image casse l'amorce, QUELLES QUE SOIENT les règles données au lanceur. Trois essais, mêmes refus (`secpol_resmgr_attach() failed: Permission denied` pour pci-server, devc-con, devc-ser8250, pipe, devb-eide, slogger2) : aucune règle, règles énumérées, puis la forme documentée du blanc-seing (`allow_attach … /...;`) avec un `self:ability` large. La raison est dans la documentation SDP elle-même : « Processes started from the ifs start-up script are not automatically fully controlled by a security policy » — un processus amorcé sans `-T` ne tombe sur le type d'aucune politique poussée. Le remède est connu (amorcer la base avec `slm`, ou `mkqnximage` en mode sécurité qui génère la politique avec `secpolgenerate`, puis typer chaque service) ; il n'est pas fait. Ce qui EST démontré sur la cible, c'est la matrice d'accès du SERVICE (`edr_gate`), par gid : un client du mauvais type reçoit `EACCES`. |
+| **les latences sur la cible** (PERF-01..PERF-06) | rien de mesuré sur QNX ; le `backend=posix` reste publié avec ses défauts (PERF-04, PERF-05 non atteints). Le guest rend `worst_freeze_us` par devctl, mais aucune campagne n'a été courue dessus. |
+| **le trace noyau** (PERF-07, QNX-02, QNX-04) | `tracelogger` jamais lancé ; l'héritage de priorité à travers le pilote de bloc et `mlockall()` ne sont pas démontrés. |
+| **la supervision** (QNX-06) | `supervised=0` sur la cible : `image/ambre-supervise.sh` est un substitut, HAM n'est pas configuré. |
+| **la lecture d'un événement par chemin** (`/dev/edr/events/<id>`, EXP-08) | l'OCB est désormais celui de la bibliothèque QNX et ne porte pas d'identifiant ; les blocs bruts se lisent par `DCMD_EDR_EXPORT`, qui est mesuré. |
+| **`class_a.fidelity` sur le MCAP de la cible** | 10 des 11 vérifications passent ; celle-ci échoue sur la base de temps : le MCAP ancre T0 sur l'horloge monotonique du guest (mesuré `T0=10555926` µs, soit ~10,5 s après l'amorce) alors que le vérificateur indexe le scénario depuis 0 (`no scenario sample at t_us=8023000`). Ce n'est pas une perte de données : les points sont là, complets, verrouillés, et les dix autres vérifications passent. Une normalisation par décalage d'horloge reste à écrire dans `host/verify/edr_verify.py`. |
+| **le niveau 3, Raspberry Pi 5** (§7.7 extrême, 500 coupures électriques) | `BLOCKED(no bench)` : rien ici ne vaut un relais et une vraie ligne 12 V. |
+| **le balayage de 2 000 coupures et les 10 000 avec cache volatil** (§7.4) | la campagne niveau 2 tourne (`host/qnx/campaign.py`) avec un rapport cumulatif ; les 2 000 et le cache volatil (serveur de blocs NBD, `host/powercut/faulty_block_server.py`) n'ont pas été courus. |
+
+## 5. Ce que la vitrine en ligne montre
+
+`scripts/qnx-vitrine.sh` (service user `ambre-vitrine-qemu.service`) boucle :
+amorce → conduite → acquisition → **SIGKILL sur QEMU** → re-amorce →
+récupération, et `image/demo-qnx.sh` publie les chiffres réels du guest toutes
+les 2 s (`AMBRE-STATUS`, `AMBRE-EVENT`) ; `ambre-vitrine-web.service` les sert
+sur la page. Ces chiffres sont ceux de la machine qui tourne, pas une copie
+d'ailleurs — c'est le guest qui les produit en interrogeant son propre journal.
+
+La boucle de la vitrine n'étoit pas auditable : elle ne gardoit rien d'un cycle
+à l'autre (`: > "$LOG"` à chaque tour). `host/qnx/campaign.py` fait la même
+chose et **écrit un rapport à chaque cycle** — une campagne interrompue laisse
+un rapport exploitable, ce qui distingue « la campagne a échoué » de « la
+campagne n'a pas tourné ».
+
+## 6. Honnêteté
+
+Le média du journal est brut, sans fichier système (STO-01) ; la coupure est un
+`SIGKILL` sur QEMU, `cache=none` sur un disque IDE virtuel. Ce que le guest
+n'avoit pas remis au pilote de bloc est perdu, exactement comme le dit l'essai
+de niveau 2 — rien ici n'imite la ligne 12 V, et aucun chiffre de cette page
+ne doit être lu comme un résultat de matériel réel.

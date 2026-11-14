@@ -194,10 +194,14 @@ tools (`host/`) and the test suites are all in the tree and green today
 (measured results in §8, full campaign report in
 [`docs/CAMPAIGN.md`](docs/CAMPAIGN.md)). The QNX-specific glue
 (`target/*/*_qnx.c`) compiles against the QNX stub headers
-(`make qnx-syntax`: 5/5) but has **never executed**: no QNX SDP is installed on
-the development machine, so `image/` is validated statically only
-(`make image-check`) and never built or booted. See
-[`docs/QNX-PORT.md`](docs/QNX-PORT.md).
+(`make qnx-syntax`: 5/5) **and has executed on the real QNX 8.0 target** since
+2026-11-12: the SDP is installed (`~/qnx800`, qcc 12.2.0), `make qnx` links the
+five processes for `nto x86_64`, the image boots under QEMU and the chain —
+drive, trigger, acquisition on a raw medium, power cut, recovery — runs in the
+guest (`docs/QNX-DEMO.md`). What the target still does not prove is listed in
+§9; `image/ambre.build` (the product image, with its two partitions and its
+policy) is still only statically checked (`make image-check`), never assembled
+or booted. See [`docs/QNX-PORT.md`](docs/QNX-PORT.md).
 
 ---
 
@@ -288,13 +292,20 @@ fixed since by their owning agents).
 
 ## 8. What is measured today
 
-Every figure below comes out of the command quoted next to it, run on
-2026-11-11 on the development machine (x86-64, 12 cores, gcc 13.3.0, Python
-3.12.3). Nothing is extrapolated. Measurements that need the QNX target say
-**not measured**, because no QNX SDP 8.0 is installed on this machine
-(`target/*/*_qnx.c` only compiles against the stubs — `docs/QNX-PORT.md`):
-no number is published before it comes out of a campaign on the real target. Each row names the requirement it answers
+Every figure below comes out of the command quoted next to it. The PC figures
+were run on 2026-11-11 on the development machine (x86-64, 12 cores, gcc
+13.3.0, Python 3.12.3); the QNX 8.0 figures were measured on 2026-11-14 on
+the target itself, under QEMU, and each names its own command. Nothing is
+extrapolated. Each row names the requirement it answers
 (`docs/cahier-des-charges.md` §5.7, §7) so the gap stays auditable.
+
+**The QNX SDP 8.0 is installed** (`~/qnx800`, qcc 12.2.0): the five processes
+build for the real target (`make qnx`), the image boots, and the whole chain
+runs in the guest — drive, UN R160 trigger, acquisition on a raw medium, power
+cut, recovery. What the target does **not** yet prove is listed explicitly in
+[`docs/QNX-DEMO.md`](docs/QNX-DEMO.md) §4 and in §9 below: the latencies, the
+kernel trace, the security policy actually applied by the kernel, and the
+hardware level.
 
 ### Validation status
 
@@ -314,22 +325,30 @@ no number is published before it comes out of a campaign on the real target. Eac
 | Static image + security-policy coherence | **green** | `make image-check` — 11/11 checks pass |
 | Forced process cuts (POSIX bench, real `SIGKILL`) | **500 run, 2 open I7 verdicts** | `build-close/processcut/report-500.json` (close-out): 500 cuts, 0 errors, 498 `ok` + **2 `inconsistent_state` (I7)** published unresolved — qualified in `docs/VALIDATION.md` §3 (`seal_cause=NORMAL` → the seal reached the disk before the kill; a bench-window race, not data loss). The earlier 200-cut run stands as published (0 violations, 1 `check_failed`, 2 upstream findings) |
 | Latency PERF-01..PERF-08 | **measured on PC only** | `docs/CAMPAIGN-LATENCY.md` — 4 loads × 200 trigger→acquired cycles + a 1 000-trigger level-S run (`build-close/latency-none.json`), `backend=posix`: PERF-03 software share median **10 µs** (target ≤ 500 µs) met; PERF-01 **exceeded** at the tail (p99 up to 203 ms under disk load); PERF-02 **not proven** (99.7 % media time on an NVMe file); PERF-04 **measured at the S volume: not met** (18 overshoots of the 20 ms freeze deadline over 1 007 cycles); PERF-05 not met. Reproduce with `make latency-all` / `make BUILD=build-close latency LATENCY_LOAD=none LATENCY_TRIGGERS=1000`. **Nothing measured on QNX** |
-| Executing the five processes on QNX: resource manager `/dev/edr`, `edrctl`, security policy, kernel trace | **missing** | no QNX SDP: `target/*/*_qnx.c` and `image/` are syntax-/statically checked only, never built or booted |
+| Executing the five processes on QNX: `edr-journal`, `edr-capture`, `edr-replay`, `edrctl`, `edr-archive` | **green on target** | `make qnx` (qcc 12.2.0, `-Werror`, no warning) → `image/vitrine.build` → `mkifs` → QEMU; the guest prints `edr-journal: serving /dev/edr/journal (backend qnx, prio 62)`, acquires the event and recovers it after a power cut (`docs/QNX-DEMO.md`) |
+| The resource manager `/dev/edr`: `devctl()` STATUS / LIST / EXPORT / AUTOTEST from a real client | **green on target** | `host/qnx_probe/devctl_probe.c` (`make qnx-probes`): STATUS and LIST render the *same values* as the IPC transport on the same journal (`mode=1 health=0 backend=2`, `bytes_written=512`, 8 events with identical `trig_ts_us`/`seq_emerg`); EXPORT returns 7 raw blocks whose first bytes are the record magic `41 4d 42 52`. Encoding per `docs/QNX-ABI.md` §3 |
+| The service access matrix on target (SEC-01, by peer type) | **green on target** | `on -u 0:4 devctl_probe status` answers; `on -u 0:3` (a producer) gets `EACCES` (rc=13) — `edr_gate()`, `target/journal/edr_journal_io_qnx.c` |
+| The archive on a SECOND medium, on target (STO-07) | **green on target** | FAT32 partition `/dev/hd1t12` mounted on `/arch`; `edr-archive --once` writes `event-000001-000001.mcap`; extracted host-side from the raw image and checked by `host/verify/edr_verify.py`: **10 of 11 checks pass** (the 11th, `class_a.fidelity`, is a clock-base issue on target — `docs/QNX-DEMO.md` §4) |
+| Real power cuts on QEMU, level 2 (§7.4) | **24/24 ok on target** | `python3 host/qnx/campaign.py --cycles 24 --cut-ms 0,5,10,20,50,120` → `build/qnx-campaign/campaign.json`: 24 cycles, verdict `ok` on each (8 events acquired, 8 survived, identical and sealed), 8.04 s per cycle (max 8.44 s) |
+| Security policy **applied by the kernel** (SEC-01/02/03/06, VIE-03, QNX-06) | **missing (measured blocker)** | `image/ambre.sec` **compiles** (`make secpol`, rc=0, no warning) but pushing it into this image breaks the boot whatever rules the launcher type is given — three attempts, identical refusals. The remedy (`slm` / `mkqnximage` security mode, then type every base service) is not done: `docs/QNX-DEMO.md` §4 |
+| Kernel trace, priority inheritance, `mlockall()` on target (PERF-07, QNX-02, QNX-04) | **missing** | `tracelogger` never run on the target |
+| Supervision by HAM (QNX-06) | **missing** | the guest reports `supervised=0`; `image/ambre-supervise.sh` is a substitute |
 | Feasibility essays E1–E4, real QEMU power cuts | **missing** | 0/200 socle cuts run: harnesses exist and pass their dry-run tests, but there is no image to cut |
 
 ### Measurement table
 
 | Measurement | Requirement | Target | Measured |
 |---|---|---|---|
-| Trigger latency, last threshold sample → pulse | PERF-01 | ≤ 2 ms | **median 1.1–2.2 ms, p99 9.2–203 ms** (`backend=posix`, 4 loads × 200 cycles — 1 000-trigger level-S run: median 1.1 ms over 127 crash triggers, 36 overshoots) — at the limit in the median, **exceeded** in the tail; on target: `BLOCKED(no QNX SDP)` |
-| Trigger → durable ("acquired"), reference hardware | PERF-02 | ≤ 20 ms | **median 2.7–4.0 ms, p99 9.3–35.0 ms, max 108 ms on PC** — but 99.7 % of it is NVMe media time, so this is *not* a statement about the reference hardware; on target: `BLOCKED(no QNX SDP)` |
+| Trigger latency, last threshold sample → pulse | PERF-01 | ≤ 2 ms | **median 1.1–2.2 ms, p99 9.2–203 ms** (`backend=posix`, 4 loads × 200 cycles — 1 000-trigger level-S run: median 1.1 ms over 127 crash triggers, 36 overshoots) — at the limit in the median, **exceeded** in the tail; on target: `BLOCKED(not measured on target yet — the guest answers devctl STATUS with last_freeze_us/worst_freeze_us, no latency campaign has been run on it)` |
+| Trigger → durable ("acquired"), reference hardware | PERF-02 | ≤ 20 ms | **median 2.7–4.0 ms, p99 9.3–35.0 ms, max 108 ms on PC** — but 99.7 % of it is NVMe media time, so this is *not* a statement about the reference hardware; on target: `BLOCKED(not measured on target yet)` |
 | Software share of that deadline, excluding media time | PERF-03 | ≤ 500 µs | **median 10 µs, p99 52–108 µs, p99.9 64–831 µs** (`backend=posix`, journal on tmpfs) — met at median and p99 under every load except `disk` at p99.9 (2 events of 200) |
-| Deadline misses over 10 000 triggers under load | PERF-04 | 0 | **level-S volume measured on POSIX, NOT met** — 1 007 trigger → acquired cycles (`build-close/latency-none.json`, load `none`): 18 overshoots of the 20 ms freeze deadline (median 5.4 ms, p99 29.9 ms); the C volume (10 000 under CPU+disk load) is `BLOCKED(campaign wall-clock ≈ 4–5 h per load)`; on target `BLOCKED(no QNX SDP)` |
+| Deadline misses over 10 000 triggers under load | PERF-04 | 0 | **level-S volume measured on POSIX, NOT met** — 1 007 trigger → acquired cycles (`build-close/latency-none.json`, load `none`): 18 overshoots of the 20 ms freeze deadline (median 5.4 ms, p99 29.9 ms); the C volume (10 000 under CPU+disk load) is `BLOCKED(campaign wall-clock ≈ 4–5 h per load)`; on target `BLOCKED(not measured on target yet)` |
 | Frame send cost at the producer, p99 | PERF-05 | < 50 µs | **not met on POSIX**: p99 falls in the ≤ 5 ms bucket ceiling of the replay histogram — see `docs/CAMPAIGN-LATENCY.md` §4.5 |
-| Capture running after kernel start, recovery included | PERF-06 | < 1 s | `BLOCKED(no QNX SDP)` — on target: boot `mkqnximage -f image/ambre.build` and read the kernel-start → first-frame delay (recovery included) from the `slog2info` timestamps |
+| Capture running after kernel start, recovery included | PERF-06 | < 1 s | `BLOCKED(not measured on target yet)` — the QNX 8.0 image DOES boot and the bench knows both ends (QEMU start → first `devctl` answer, ~8 s per full cycle with two boots); what is missing is reading the kernel-start → first-frame delay from the `slog2info` timestamps. On the product image: `mkqnximage -f image/ambre.build` |
 | Power-cut states explored, zero invariant violations | §7.3 | 1 000 000 | **64 591 states, 0 violations** — the whole reachable space of the reference scenario (the 1 000 000 cap is never reached); `make explore-full` |
-| QEMU power cuts survived, zero data loss | §7.4 | 2 000 | **0 — `BLOCKED(no QNX SDP)`**: no SDP or image on this machine; on target: `python3 host/powercut/powercut_campaign.py --image qnx80.img --scenario build/scenario.txt --random-cuts 200 --seed 4242 --jobs 4 --report build/campaign.json` |
-| Forced process stops, real `SIGKILL` + recovery | §7.6 | 500 | **500 done** (`build-close/processcut/report-500.json`, close-out): 500 cuts, 0 errors, 498 ok + **2 `inconsistent_state` (I7)** published unresolved — qualified in `docs/VALIDATION.md` §3 (`seal_cause=NORMAL` → the seal reached the disk before the kill; bench-window race, not data loss). The earlier 200-cut run stands as published (0 violations, 1 `check_failed`, 2 upstream findings). On target: `BLOCKED(no QNX SDP)` |
+| QEMU power cuts survived, zero data loss | §7.4 | 2 000 | **24/24 measured on the QNX 8.0 target** (`build/qnx-campaign/campaign.json`, 2026-11-14): 24 cycles at cut offsets 0/5/10/20/50/120 ms after the acquisition, each verdict `ok` — the events acquired before the cut are all present after it, identical (`event_id`, `trig_ts_us`, `seq_emerg`), sealed, locked, complete; zero phantom, zero loss. The 2 000-cut sweep and the 10 000 with a volatile cache (NBD faulty block server) are **not run**: `python3 host/qnx/campaign.py --cycles 2000 --cut-ms <sweep>` |
+| Cut + restart + service ready, per cycle (essay E3, < 10 s) | §7.4 | < 10 s | **measured on target: mean 8.04 s, median 7.99 s, max 8.44 s over 24 cycles** (`build/qnx-campaign/campaign.json`, `cycle_seconds`) — met, on a loaded host (load ~20), with KVM and a 64 MiB raw IDE disk |
+| Forced process stops, real `SIGKILL` + recovery | §7.6 | 500 | **500 done** (`build-close/processcut/report-500.json`, close-out): 500 cuts, 0 errors, 498 ok + **2 `inconsistent_state` (I7)** published unresolved — qualified in `docs/VALIDATION.md` §3 (`seal_cause=NORMAL` → the seal reached the disk before the kill; bench-window race, not data loss). The earlier 200-cut run stands as published (0 violations, 1 `check_failed`, 2 upstream findings). On target: 24/24 real QEMU power cuts measured (`build/qnx-campaign/campaign.json`), the `SIGKILL`-the-process variant not yet run |
 | Worst cases explained by a kernel trace | PERF-07 | 3 | **partial**: the three worst cases are decomposed from the `AMBRE_TRACE` log on POSIX (`docs/CAMPAIGN-LATENCY.md` §4.6); a *kernel* trace needs the QNX target |
 | Line coverage of `fmt/` | §12.10 | > 95 % | **98.40 %** (1 349 / 1 371 lines); `BUILD=build-doc-cov2 sh scripts/coverage.sh` |
 
@@ -386,7 +405,7 @@ STATUS_REPLY body arrives (the old 32-byte truncation gap is gone), usage
 errors exit 2, a refused export exits 1 with an explicit NAK, and a `edrctl`
 killed mid-exchange leaves the journal serving. EXP-01 is therefore *covered*
 on the PC backend; the same exchange over the QNX `MsgSend`/`MsgReceive`
-transport is `BLOCKED(no QNX SDP)` — on target: boot the image and run
+transport is `BLOCKED(not measured on target yet)` — on target: the bench already boots the image and drives `edrctl` over the IPC transport; what has not been done is the same exchange while asserting the QNX `MsgSend`/`MsgReceive` path is the one carrying it (it is: `ambre_port_ipc_qnx.c` is what links into the target binaries) and measuring it under load
 `edrctl --journal /dev/edr status` / `list`.
 
 **Deliberately out of scope:** ISO 26262 functional-safety certification,
@@ -394,39 +413,43 @@ mechanical and thermal qualification, crash detection of production quality,
 GPS position, video, audio and driver identity — the last four are excluded by
 design in the format itself (signal whitelist, no absolute time, no VIN).
 
-### What could NOT be measured, because there is no QNX SDP
+### What the QNX target does NOT prove yet
 
-No QNX Software Development Platform 8.0 is installed on the development
-machine or on the build server, and none was obtained during the project. The
-project therefore does exactly one thing about it: **it states the boundary
-instead of papering over it**. `target/*/*_qnx.c` (5 files) compiles against
-stub headers — `make qnx-syntax`, 5/5 OK — which proves there is no typo, no
-wrong prototype, no wrong struct field and no wrong argument type in the QNX
-glue. It proves **nothing** about runtime.
+The QNX SDP 8.0 **is** installed (`~/qnx800`, qcc 12.2.0), the image boots and
+the chain runs in the guest — so the boundary is no longer "no target": it is
+**which obligations the target discharges**. `make qnx` builds the five
+processes for `nto x86_64` with `-Werror` and no warning; `make qnx-syntax`
+(5/5 against the stubs) is now the *weaker* of the two checks, and the numbers
+below say what the stronger one still does not buy. Each row is measured, with
+the reason it is open — not a placeholder.
 
-| Not measured, and why | Requirement | What it would take |
+| Not proven on target | Requirement | Why it is open, and what it would take |
 |---|---|---|
-| Trigger → acquired latency (≤ 20 ms), software share (≤ 500 µs), ≤ 2 ms sample → pulse, 0 misses over 10 000 triggers **on the reference hardware** — the POSIX pass is published, the target pass does not exist | PERF-01..PERF-04 | a booted QNX image + `tracelogger`; on target the 20 ms deadline is still a **target**, not a result |
-| Frame send cost at the producer, p99 < 50 µs (essay E4) — measured on POSIX and **not met**; on QNX message passing it has never been measured | PERF-05 | the QNX `MsgSend` path under load |
-| Capture running < 1 s after kernel start, recovery included | PERF-06 | a real boot sequence |
-| The three worst cases explained by a kernel trace | PERF-07 | `tracelogger` on the target, priorities 8/10/50/60/61/62 visible |
-| That a flush on a raw partition reaches the virtual disk as a flush order | essay E1 | QEMU + `e1_flush_probe.py --backend qemu` |
-| That QEMU can be killed and restarted in under 10 s per cycle | essay E3 | a built image to cycle |
-| Kernel enforcement of the security policy (an intruder refused) | SEC-01, SEC-06 | `secpolcompile` + `secpolpush` on a real image; today only the **decision function** is tested on PC (`test_port_posix.c`) and the policy is statically coherent (`make image-check`) |
-| The resource manager `/dev/edr` accepting `open`/`read`/`write`/`devctl` from real clients | QNX-01, QNX-03 | `procnto` + a client process |
-| Priority inheritance through the disk driver on the freeze path | QNX-02 | the same kernel trace as PERF-07; expected from QNX message passing, **not** demonstrated |
-| `mlockall()` actually preventing page faults on the critical path | QNX-04 | the target; on PC the equivalent property is the fixed-size journal state |
-| `slog2` output, resource consumption, supervision by HAM | OBS-01, QNX-06 | the target; `image/ambre-supervise.sh` is a **substitute** to be replaced by HAM |
-| 200 real QEMU power cuts (socle) / 2 000 swept / 10 000 with a volatile cache | §7.4 | an image, then `host/powercut/powercut_campaign.py` |
-| 500 real electrical cuts on a Raspberry Pi 5 | §7.7 extrême | a relay bench and hardware |
+| Trigger → acquired ≤ 20 ms, software share ≤ 500 µs, sample → pulse ≤ 2 ms, 0 misses over 10 000 triggers **on the reference hardware** | PERF-01..04 | the guest answers `devctl` STATUS with `last_freeze_us`/`worst_freeze_us`, but no latency campaign has been run on it. On target: `host/qnx/campaign.py` already drives the chain — add a trigger→acquired sampling pass, then `tracelogger` to separate software from media time |
+| Frame send cost at the producer, p99 < 50 µs | PERF-05 | measured on POSIX and **not met**; on QNX the replay prints its own round-trip histogram in the guest (p99 ≤ 250 µs on the bench, worst 24–40 ms) — that is the *emulated* path, not a statement about the target's `MsgSend` under load |
+| Capture running < 1 s after kernel start, recovery included | PERF-06 | not measured. The bench knows both ends (QEMU start → first `devctl` answer, ~8 s per full cycle including two boots), so the number is reachable: read kernel-start → first-frame delay from `slog2info` timestamps |
+| The three worst cases explained by a **kernel** trace | PERF-07 | `tracelogger` never run: on target, trace with priorities 8/10/50/60/61/62 visible |
+| Priority inheritance through the disk driver on the freeze path | QNX-02 | the same kernel trace; expected from QNX message passing, **not** demonstrated |
+| `mlockall()` preventing page faults on the critical path | QNX-04 | the target; on PC the equivalent property is the fixed-size journal state |
+| The security policy **applied by the kernel** | SEC-01, SEC-02, SEC-03, SEC-06, VIE-03, QNX-06 | `image/ambre.sec` compiles (`make secpol`, rc=0, no warning) — its grammar is verified. It is **not applied**: pushing it into this image breaks the boot whatever rules the launcher type is given (three measured attempts: no rule, enumerated rules, then the documented unrestricted form with a wide `self:ability` — same refusals, `secpol_resmgr_attach() failed: Permission denied` for pci-server, devc-con, devc-ser8250, pipe, devb-eide). Cause, per the SDP's own words: "Processes started from the ifs start-up script are not automatically fully controlled by a security policy". Remedy: boot the base through `slm` (or `mkqnximage` in security mode, which generates the policy with `secpolgenerate`) and type every service, then push before the first EDR process. What **is** demonstrated on target is the service's own matrix (`edr_gate`): a producer gid asking for STATUS gets `EACCES` |
+| `/dev/edr` accepting `open`/`read`/`write`/`devctl` **per event path** | QNX-01, EXP-08 | the node is served and the four devctls answer; the per-event sub-path (`/dev/edr/events/<id>`) is not, because the OCB is now the one QNX allocates and carries no event id. Raw blocks are read through `DCMD_EDR_EXPORT`, which is measured |
+| `slog2` output, resource consumption, supervision by HAM | OBS-01, QNX-06 | the guest logs to `slog2` (visible in `slog2info`: recovery, self-test, serving) but no campaign reads it; `supervised=0` — `image/ambre-supervise.sh` is a substitute, HAM is not configured |
+| 2 000 swept QEMU cuts / 10 000 with a volatile cache | §7.4 | 24/24 measured (see §8). The sweep and the volatile-cache variant need the NBD faulty block server (`host/powercut/faulty_block_server.py`) wired to the QNX bench |
+| 500 real electrical cuts | §7.7 extrême | `BLOCKED(no Raspberry Pi 5 bench)`: a relay and a real 12 V line. Nothing under QEMU imitates the rail |
+| `mkqnximage -f image/ambre.build` (the **product** image) | QNX-05 | the bench builds its IFS with `mkifs` from `image/vitrine.build`; `image/ambre.build` (five processes, two partitions, policy, HAM) has still never been assembled nor booted — `make image-check` is static only |
 
 What *is* measured on PC and is honestly labelled `backend=posix` is listed in
 §8 and in [`docs/CAMPAIGN.md`](docs/CAMPAIGN.md): 23 suites / 48 936 checks,
 64 591 explored cut states with zero invariant violations, 2 744 840
 byte-identical trigger decisions, 98.40 % line coverage of `fmt/`, and a demo
-that runs end to end. Those are claims about **logic**, not about QNX
-scheduling, drivers or the kernel — and no sentence in this repository should
-be read as conflating the two.
+that runs end to end. What is measured **on the QNX 8.0 target** is listed in
+[`docs/QNX-DEMO.md`](docs/QNX-DEMO.md) §1: the five processes executing, the
+raw medium, the acquisition, the power cut and the recovery, the four devctls
+from a real client agreeing with the IPC transport, the archive on a second
+medium verified host-side, and 24/24 power-cut cycles judged by invariant.
+Those are claims about **execution on a real kernel**, not about scheduling
+under load, a security policy the kernel applies, or hardware — and no sentence
+in this repository should be read as conflating the two.
 
 ---
 

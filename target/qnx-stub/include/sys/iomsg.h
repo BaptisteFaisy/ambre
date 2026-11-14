@@ -360,4 +360,22 @@ struct __msg_statvfs {
 #define ST_RDONLY 0x0001u
 #define ST_NOSUID 0x0002u
 
+/* ---------------------------------------------------------------------------
+ * Payload accessors, mirrored from the SDP 8.0 ($QNX_TARGET/usr/include/
+ * sys/iomsg.h:1010,1030, backed by __PAYLOAD_OF of sys/platform.h:79). For an
+ * io_devctl_t the two macros return the SAME address, because `i` and `o` are
+ * the two views of one 16-byte header — that is the property the devctl
+ * handlers of this project rely on (a request read from the payload and an
+ * answer written into it, docs/QNX-ABI.md §3).
+ *
+ * The stub spells the pointer arithmetic out instead of the SDP's bounded-
+ * member builtin: the builtin exists to keep __builtin_object_size honest
+ * under _FORTIFY_SOURCE, and the PC build of the glue does not use it. The
+ * VALUE is the same expression the SDP documents ("(void *)(&(obj)->hdr_member
+ * + 1)"), which is what matters for a syntax check.
+ * --------------------------------------------------------------------------- */
+#define __PAYLOAD_OF(obj, hdr_member)     ((void *)((char *)(obj) + sizeof((obj)->hdr_member)))
+#define _IO_INPUT_PAYLOAD(msg)    __PAYLOAD_OF((msg), i)
+#define _IO_OUTPUT_PAYLOAD(msg)   __PAYLOAD_OF((msg), o)
+
 #endif /* PGW_STUB_SYS_IOMSG_H */

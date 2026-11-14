@@ -16,6 +16,7 @@
 #define _POSIX_C_SOURCE 200809L
 
 #include "edr_journal_svc.h"
+#include "edr_journal_serve.h"
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -292,6 +293,16 @@ int main(int argc, char **argv)
         return 1;
     }
     ambre_edr_service_set_notify(&svc, notify_archive, &peers);
+
+    /* QNX-01, QNX-03 : publier /dev/edr en plus de l'IPC. Sur le backend POSIX
+     * cette fonction rend AMBRE_PORT_ERR_UNSUPPORTED, et elle est journalisée
+     * comme telle — le banc ne prétend pas servir un nœud qu'il n'a pas. */
+    rc = ambre_journal_serve_resmgr(&svc);
+    if (rc != AMBRE_PORT_OK) {
+        ambre_port_log(AMBRE_LOG_INFO, SVC_TAG,
+                       "resmgr node not served (code %d, %s backend)",
+                       rc, ambre_port_backend_name());
+    }
 
     ambre_port_log(AMBRE_LOG_INFO, SVC_TAG, "serving %s (backend %s, prio %d)",
                    args.listen_sock, ambre_port_backend_name(), PRIORITY_JOURNAL);
